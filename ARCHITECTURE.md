@@ -6,8 +6,8 @@ for structural decisions. Any deviation must be discussed and approved in a
 PR before it happens.
 
 **See also:**
-[SPEC.md](SPEC.md) - product scope and support philosophy |
-[GUIDELINES.md](GUIDELINES.md) - code standards, testing, build rules
+[SPEC.md](docs/SPEC.md) - product scope and support philosophy |
+[GUIDELINES.md](docs/GUIDELINES.md) - code standards, testing, build rules
 
 ---
 
@@ -35,7 +35,7 @@ plugin for DaVinci Resolve and Foundry Nuke, and Tauri desktop GUI).
    newer. Windows DirectML and Linux RTX (CUDA EP via ONNX Runtime) are
    explicit experimental product tracks. Other provider hooks present in the
    core runtime do not become support claims unless they are packaged and
-   validated. See [Support Matrix](../help/SUPPORT_MATRIX.md).
+   validated. See [Support Matrix](help/SUPPORT_MATRIX.md).
 5. **Shared Runtime, Curated Artifacts.** The runtime contract is stable
    across product tracks. Model artifacts and backend adapters may differ by
    platform when required for predictable performance.
@@ -209,19 +209,22 @@ Standalone auxiliary tools. Must not leak dependencies into the main build.
 
 ```text
 tools/
+|-- browser_poc/        Vite + TypeScript browser-side keying proof of concept
+|-- coreml_student/     Apple Neural Engine distillation toolkit
+|-- hint_generator/     Python OpenCV utility for rough chroma alpha hints
 |-- model_exporter/     Python scripts to export PyTorch models to ONNX
 |-- torchtrt_compiler/  Python scripts to export dynamic blue TorchScript artifacts
-|-- torchtrt_runner/    C++ smoke test that loads a .ts engine standalone
-`-- coreml_student/     Apple Neural Engine distillation toolkit
+`-- torchtrt_runner/    C++ smoke test that loads a .ts engine standalone
 ```
 
 ### `scripts/installer/`
 
-Modern Windows installer authoring (Inno Setup 6). The legacy NSIS
-inline script in `scripts/package_ofx_installer_windows.ps1` is kept
-as fallback during migration; once the Inno path passes UAT it
-retires. See `docs/RELEASE_GUIDELINES.md` "Modern installer (Inno
-Setup)" for the operator workflow.
+Modern Windows installer authoring (Inno Setup 6). The canonical Windows
+release pipeline produces both the legacy NSIS installer
+(`scripts/package_ofx_installer_windows.ps1`) and the Inno Setup installer
+when `-Flavor online|offline` is passed. See `docs/RELEASE_GUIDELINES.md`
+"Modern installer (Inno Setup)" for the operator workflow and the
+authoritative flavor matrix.
 
 ```text
 scripts/installer/
@@ -259,8 +262,20 @@ accessible through the host's log viewer.
 
 ## 5. Engineering Standards
 
+**Public API Surface.** Public headers live exclusively in
+`include/corridorkey/`. External library types (`OrtSession`, `Imf::*`,
+`AVFrame`, CUDA / NPP / LibTorch types, host-specific OFX types) never appear
+in public headers - they are wrapped in `src/`.
+
+**PIMPL for ABI Stability.** Main classes such as `Engine` use the PIMPL
+pattern so implementation details can change without breaking the public ABI.
+
+**Symbol Visibility Hidden by Default.** Symbols are hidden by default; only
+the API surface is exported through the `CORRIDORKEY_API` macro.
+
 **Zero-Copy Data Flow.** `std::span` (via the `Image` struct) passes data
-between modules without copying. `ImageBuffer` owns allocations.
+between modules without copying. `ImageBuffer` owns allocations. Do not use
+`std::vector<float>` for large pixel data.
 
 **SIMD Alignment.** All image buffers are 64-byte aligned for AVX-512 and
 NEON compatibility.
@@ -275,6 +290,10 @@ instance lifecycle and reused across frames.
 
 **Result-Based Error Handling.** The library uses `std::expected<T, Error>`
 throughout. `std::exit` and `abort` are never called from library code.
+
+**No New Top-Level or `src/` Directories Without an Architecture Update.**
+Any new top-level directory or `src/` subdirectory must be reflected in this
+document in the same change, including its purpose and dependency rules.
 
 ---
 
@@ -325,3 +344,19 @@ Is it a test?
 
 -> STOP. Discuss in an issue.
 ```
+
+---
+
+## 7. Active ADRs
+
+Accepted architecture decision records that bind code in this repository.
+Superseded or proposed ADRs are not listed here.
+
+| ADR | Decision |
+|-----|----------|
+| [ADR-0001](doc/adr/0001-agentic-repository-layout.md) | Agentic repository layout: `doc/adr/`, `doc/tasks/`, `.claude/skills/`, `.agents/skills/`, fresh-context reviewer. |
+| [ADR-0002](doc/adr/0002-measure-torchtrt-stream-boundaries.md) | TorchTRT stream-boundary telemetry separates model replay from input/output stream work. |
+| [ADR-0003](doc/adr/0003-run-torchtrt-input-prep-on-torch-current-stream.md) | TorchTRT input prep runs on Torch's current stream to avoid cross-stream readiness waits. |
+| [ADR-0004](doc/adr/0004-own-torchtrt-work-stream.md) | TorchTRT owns a dedicated work stream guarded against host-side serialization. |
+| [ADR-0005](doc/adr/0005-default-ofx-torchtrt-cuda-graph-off.md) | OFX TorchTRT defaults to CUDA Graph capture off; graph capture is opt-in. |
+

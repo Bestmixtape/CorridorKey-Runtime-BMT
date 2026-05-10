@@ -10,7 +10,7 @@ each session. It contains the non-negotiable rules for this repository.
 - **Build:** CMake 3.28+ with vcpkg manifest mode and CMake Presets
 - **License:** CC BY-NC-SA 4.0
 
-## Structural Rules (enforced — see docs/ARCHITECTURE.md for details)
+## Structural Rules (enforced — see ARCHITECTURE.md for details)
 
 - Public headers go in `include/corridorkey/` — this is the external API
 - Use **PIMPL Pattern** for main classes such as `Engine` to ensure ABI stability
@@ -31,7 +31,7 @@ each session. It contains the non-negotiable rules for this repository.
 - External library types (`OrtSession`, `Imf::*`, `AVFrame`, etc.) never appear in
   public headers — they are wrapped in `src/`
 - Do not create new top-level directories or new `src/` subdirectories without
-  updating docs/ARCHITECTURE.md
+  updating ARCHITECTURE.md
 
 ## Code Standards (see docs/GUIDELINES.md for details)
 

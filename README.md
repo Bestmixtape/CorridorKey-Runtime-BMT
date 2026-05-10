@@ -61,7 +61,7 @@ A Tauri-based desktop application is available as a separate installer for users
 
 ### Development Docs
 
-- [Architecture](./docs/ARCHITECTURE.md)
+- [Architecture](./ARCHITECTURE.md)
 - [Frontend](./docs/FRONTEND.md)
 - [Guidelines](./docs/GUIDELINES.md)
 - [Release Guidelines](./docs/RELEASE_GUIDELINES.md)
