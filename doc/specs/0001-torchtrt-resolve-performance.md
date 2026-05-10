@@ -1,6 +1,6 @@
 # Spec `0001`: Stabilize TorchTRT Resolve Performance
 
-**Status:** archived
+**Status:** superseded by SPEC-0002
 **Created:** 2026-05-09
 **Owner:** Runtime maintainers
 **Superseded by:** doc/specs/0002-dedicated-screen-nodes.md
@@ -168,6 +168,5 @@ diagnostic comparison unless a later ADR accepts it as the product path.
   `doc/tasks/0003-instrument-torchtrt-queue-wait.md`,
   `doc/tasks/0004-fix-resolve-torchtrt-input-stream-boundary.md`,
   `doc/tasks/0005-diagnose-resolve-torchtrt-graph-copy-queue-wait.md`
-- Supersedes / Depends on: depends on `AGENTS.md`,
-  `.planning/TORCHTRT_PIPELINE_READINESS_PLAN.md`, and
+- Supersedes / Depends on: depends on `AGENTS.md` and
   `docs/OPTIMIZATION_MEASUREMENTS.md`

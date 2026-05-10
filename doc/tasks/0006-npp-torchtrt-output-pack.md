@@ -3,6 +3,7 @@
 **Status:** archived
 **Created:** 2026-05-10
 **Owner:** Runtime maintainers
+**Spec ref:** doc/specs/0002-dedicated-screen-nodes.md
 **Outcome:** falsified
 **Board ref:**
 

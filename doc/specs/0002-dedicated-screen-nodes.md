@@ -1,8 +1,8 @@
 # Dedicated Screen Nodes
 
-Status: accepted
-Owner: Runtime maintainers
-Created: 2026-05-10
+**Status:** accepted
+**Owner:** Runtime maintainers
+**Created:** 2026-05-10
 
 ## Context
 

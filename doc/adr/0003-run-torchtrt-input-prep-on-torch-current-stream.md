@@ -1,8 +1,6 @@
 # ADR-0003: Run TorchTRT Input Prep On The Torch Current Stream
 
-## Status
-
-accepted
+**Status:** accepted
 
 ## Context
 

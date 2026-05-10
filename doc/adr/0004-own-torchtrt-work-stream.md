@@ -1,8 +1,6 @@
 # ADR-0004: Own The TorchTRT Work Stream
 
-## Status
-
-accepted
+**Status:** accepted
 
 ## Context
 

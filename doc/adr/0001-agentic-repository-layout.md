@@ -1,8 +1,6 @@
 # ADR-0001: Agentic Repository Layout
 
-## Status
-
-accepted
+**Status:** accepted
 
 ## Context
 

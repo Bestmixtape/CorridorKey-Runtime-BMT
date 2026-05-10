@@ -1,8 +1,6 @@
 # ADR-0005: Default OFX TorchTRT CUDA Graph Off
 
-## Status
-
-accepted
+**Status:** accepted
 
 ## Context
 
