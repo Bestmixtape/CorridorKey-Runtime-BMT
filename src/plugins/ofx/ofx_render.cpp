@@ -781,6 +781,16 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->screen_color_param) {
         g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
     }
+    // Spec 0002 FR-8 / task 0009: dedicated Blue nodes must not be coerced
+    // into the Green model path even if the persisted screen_color value
+    // disagrees (corrupted project, programmer error, or a Green project
+    // legacy-loaded into a Blue descriptor by a saved-graph migration).
+    // The descriptor identity is the authoritative signal — override the
+    // param read here so all downstream model-selection sites observe a
+    // Blue request.
+    if (is_blue_node_identifier(data->plugin_identifier)) {
+        screen_color = kScreenColorBlue;
+    }
     if (data->temporal_smoothing_param) {
         g_suites.parameter->paramGetValueAtTime(data->temporal_smoothing_param, time,
                                                 &temporal_smoothing);

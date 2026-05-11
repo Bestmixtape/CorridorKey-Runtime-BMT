@@ -496,7 +496,8 @@ nlohmann::json to_json(const OfxRuntimePrepareSessionRequest& request) {
                 {"requested_quality_mode", request.requested_quality_mode},
                 {"requested_resolution", request.requested_resolution},
                 {"effective_resolution", request.effective_resolution},
-                {"prepare_timeout_ms", request.prepare_timeout_ms}};
+                {"prepare_timeout_ms", request.prepare_timeout_ms},
+                {"node_identity", request.node_identity}};
 }
 
 Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
@@ -527,6 +528,13 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     if (json.contains("prepare_timeout_ms") && json.at("prepare_timeout_ms").is_number_integer()) {
         prepare_timeout_ms = json.at("prepare_timeout_ms").get<int>();
     }
+    // node_identity is optional for backwards compatibility with v0
+    // clients (single-node plugin). Missing or non-string is treated as
+    // the empty string, which session_key folds into the legacy code path.
+    std::string node_identity;
+    if (json.contains("node_identity") && json.at("node_identity").is_string()) {
+        node_identity = json.at("node_identity").get<std::string>();
+    }
 
     OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = *client_instance_id;
@@ -538,6 +546,7 @@ Result<OfxRuntimePrepareSessionRequest> prepare_session_request_from_json(
     request.requested_resolution = *requested_resolution;
     request.effective_resolution = *effective_resolution;
     request.prepare_timeout_ms = prepare_timeout_ms;
+    request.node_identity = node_identity;
     return request;
 }
 

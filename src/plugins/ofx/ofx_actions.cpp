@@ -131,7 +131,8 @@ void define_bool_param(OfxParamSetHandle param_set, const char* name, const char
 
 void define_choice_param(OfxParamSetHandle param_set, const char* name, const char* label,
                          int default_value, const std::vector<const char*>& options,
-                         const char* hint, const char* parent = nullptr, bool enabled = true) {
+                         const char* hint, const char* parent = nullptr, bool enabled = true,
+                         bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeChoice, name, &param_props);
@@ -146,6 +147,13 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
         g_suites.property->propSetString(param_props, kOfxParamPropChoiceOption, i, options[i]);
     }
     g_suites.property->propSetInt(param_props, kOfxParamPropEnabled, 0, enabled ? 1 : 0);
+    if (secret) {
+        // Per openfx-misc README-hosts.txt: a param described as secret stays
+        // secret for the descriptor's lifetime on the host. That is the
+        // desired behavior for dedicated-node params whose value is locked
+        // to the node's identity (e.g. screen_color on the Blue descriptor).
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
@@ -318,7 +326,8 @@ OfxStatus describe(OfxImageEffectHandle descriptor, const char* plugin_identifie
     return kOfxStatOK;
 }
 
-OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context) {
+OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context,
+                              const char* plugin_identifier) {
     if (g_suites.property == nullptr || g_suites.image_effect == nullptr ||
         g_suites.parameter == nullptr) {
         log_message("describe_in_context", "Missing required suites.");
@@ -328,6 +337,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         log_message("describe_in_context", "Unsupported context.");
         return kOfxStatErrUnsupported;
     }
+    const bool is_blue_descriptor = is_blue_node_identifier(plugin_identifier);
 
     OfxPropertySetHandle clip_props = nullptr;
     if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectSimpleSourceClipName,
@@ -532,13 +542,20 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
 
-    define_choice_param(param_set, kParamScreenColor, "Screen Color", kDefaultScreenColor,
+    // Per-descriptor screen-color contract (spec 0002 FR-8): the Blue node
+    // locks screen_color to Blue and hides the chooser, so users cannot
+    // accidentally flip a dedicated Blue node into the Green model path.
+    // Green keeps the mutable chooser so saved projects that relied on the
+    // historical Blue-Green channel-swap fallback continue to load and
+    // render with their persisted choice.
+    const int screen_color_default = is_blue_descriptor ? kScreenColorBlue : kDefaultScreenColor;
+    define_choice_param(param_set, kParamScreenColor, "Screen Color", screen_color_default,
                         {"Green", "Blue", "Blue-Green Channel Swap"},
                         "Select the deterministic screen path. Green uses the optimized green "
                         "model. Blue uses the dedicated CorridorKeyBlue model. Blue-Green "
                         "Channel Swap maps a blue screen into the green model domain for the "
                         "explicit channel-swap fallback path.",
-                        "setup_group");
+                        "setup_group", /*enabled=*/true, /*secret=*/is_blue_descriptor);
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),

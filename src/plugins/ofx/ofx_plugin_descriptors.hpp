@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 #include "ofxCore.h"
 #include "ofxImageEffect.h"
 
@@ -23,6 +25,18 @@ constexpr const char* kPluginGroup = "Keying";
 int descriptor_count();
 OfxPlugin* descriptor_at(int nth);
 const char* label_for_identifier(const char* identifier);
+
+// Identity predicate used by per-node behavior (model selection, screen-color
+// surface, runtime-family routing). A null identifier is treated as Green so
+// legacy code paths that have not yet been threaded with identity behave as
+// the legacy single-node plugin did.
+inline bool is_blue_node_identifier(const char* identifier) {
+    if (identifier == nullptr) {
+        return false;
+    }
+    return identifier == kPluginIdentifierBlue ||
+           std::string_view(identifier) == kPluginIdentifierBlue;
+}
 
 // Action dispatcher shared by every descriptor's per-trampoline entry point.
 // Defined in ofx_plugin.cpp for production builds and stubbed in

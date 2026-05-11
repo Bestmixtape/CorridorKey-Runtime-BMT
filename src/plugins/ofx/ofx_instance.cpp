@@ -1017,7 +1017,7 @@ std::filesystem::path resolve_models_root() {
 
 app::OfxRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
-    int requested_quality_mode) {
+    int requested_quality_mode, const char* node_identity) {
     app::OfxRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
@@ -1027,6 +1027,9 @@ app::OfxRuntimePrepareSessionRequest build_prepare_request(
     request.requested_quality_mode = requested_quality_mode;
     request.requested_resolution = selection.requested_resolution;
     request.effective_resolution = selection.effective_resolution;
+    if (node_identity != nullptr) {
+        request.node_identity = node_identity;
+    }
     return request;
 }
 
@@ -1183,7 +1186,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
 // that resolve every parameter the plugin exposes. That list is best read
 // as a single contract against describe_in_context, not split across
 // helpers that would obscure which params belong to the plugin.
-OfxStatus create_instance(OfxImageEffectHandle instance) {
+OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_identifier) {
     const auto create_start = std::chrono::steady_clock::now();
     const auto log_create_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=instance_create_total total_ms=" +
@@ -1208,6 +1211,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance) {
         return kOfxStatErrMemory;
     }
     data->effect = instance;
+    data->plugin_identifier = plugin_identifier;
     data->cpu_quality_guardrail_active = false;
     data->render_count = 0;
 
@@ -1654,7 +1658,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                      "corridorkey_prepare_session");
         (void)progress_scope.update(kProgressInitialTick);
         auto prepare_result = data->runtime_client->prepare_session(
-            build_prepare_request(candidate_requested_device, selection, requested_quality_mode),
+            build_prepare_request(candidate_requested_device, selection, requested_quality_mode,
+                                  data->plugin_identifier),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
                                  candidate_requested_device, selection.executable_model_path,

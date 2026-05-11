@@ -291,11 +291,13 @@ OfxStatus plugin_main_entry_dispatch(const char* plugin_identifier, const char* 
                 }
             }
             return describe_in_context(
-                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), context_value);
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)), context_value,
+                plugin_identifier);
         }
         if (std::strcmp(action, kOfxActionCreateInstance) == 0) {
             return create_instance(
-                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
+                reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
+                plugin_identifier);
         }
         if (std::strcmp(action, kOfxActionDestroyInstance) == 0) {
             return destroy_instance(

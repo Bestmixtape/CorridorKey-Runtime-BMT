@@ -47,6 +47,13 @@ struct OfxRuntimePrepareSessionRequest {
     // the server aborts a runaway MLX JIT before the client RPC times out.
     // 0 means "no explicit cap; fall back to the client RPC timeout."
     int prepare_timeout_ms = 0;
+    // Plugin descriptor identifier (spec 0002 FR-9 / task 0010). Carries
+    // `com.corridorkey.resolve` for Green nodes and
+    // `com.corridorkey.resolve.blue` for Blue nodes so the session broker
+    // can include node identity in the cache key. Empty string accepted
+    // for backward-compat with v0 clients; a missing identity matches the
+    // legacy single-node behavior.
+    std::string node_identity;
 };
 
 struct OfxRuntimeSessionSnapshot {

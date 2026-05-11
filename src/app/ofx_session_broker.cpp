@@ -383,11 +383,16 @@ std::string OfxSessionBroker::session_key(const OfxRuntimePrepareSessionRequest&
     if (error) {
         canonical_model_path = request.model_path;
     }
+    // Per spec 0002 FR-9 / task 0010: include node identity in the cache
+    // key so Green and Blue descriptors cannot share session state even
+    // when they happen to request the same artifact path (defense in
+    // depth against a saved-project migration that crosses identities).
     return std::to_string(common::detail::fnv1a_64(
         canonical_model_path.string() + "|" +
         std::to_string(static_cast<int>(request.requested_device.backend)) + "|" +
         std::to_string(static_cast<int>(request.engine_options.allow_cpu_fallback)) + "|" +
-        std::to_string(static_cast<int>(request.engine_options.disable_cpu_ep_fallback))));
+        std::to_string(static_cast<int>(request.engine_options.disable_cpu_ep_fallback)) + "|" +
+        request.node_identity));
 }
 
 std::vector<StageTiming> OfxSessionBroker::collect_stage_timings(StageTimingCallback& callback) {

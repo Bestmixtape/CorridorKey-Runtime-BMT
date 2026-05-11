@@ -150,6 +150,13 @@ enum class LastRenderWorkOrigin : std::uint8_t {
 
 struct InstanceData {
     OfxImageEffectHandle effect = nullptr;
+    // Pointer to the descriptor identifier this instance was created against.
+    // Points at one of the static const char* constants in
+    // ofx_plugin_descriptors.hpp (kPluginIdentifierGreen / kPluginIdentifierBlue).
+    // Storage lifetime is static for the loaded binary; the pointer is valid
+    // for the lifetime of the instance. Null means "not yet set" — render-path
+    // code must fall back to the legacy Green path in that case.
+    const char* plugin_identifier = nullptr;
     OfxImageClipHandle source_clip = nullptr;
     OfxImageClipHandle alpha_hint_clip = nullptr;
     OfxImageClipHandle output_clip = nullptr;
@@ -432,8 +439,9 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
 
 OfxStatus on_load();
 OfxStatus describe(OfxImageEffectHandle descriptor, const char* plugin_identifier);
-OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context);
-OfxStatus create_instance(OfxImageEffectHandle instance);
+OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context,
+                              const char* plugin_identifier);
+OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_identifier);
 OfxStatus destroy_instance(OfxImageEffectHandle instance);
 // Main-thread action per OFX 1.4 spec. Used by hosts to request that the
 // plugin flush its private state to host-visible storage. We use this hook

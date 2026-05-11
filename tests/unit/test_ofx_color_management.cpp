@@ -490,7 +490,8 @@ TEST_CASE("describe_in_context places recover original details in interior detai
     FakeEffect descriptor;
 
     REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
-                                kOfxImageEffectContextFilter) == kOfxStatOK);
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierGreen) == kOfxStatOK);
 
     const auto& recover_props = descriptor.param_set.params.at(kParamSourcePassthrough)->props;
     const auto& edge_erode_props = descriptor.param_set.params.at(kParamEdgeErode)->props;
@@ -522,7 +523,8 @@ TEST_CASE("describe_in_context exposes the current public quality ladder",
     FakeEffect descriptor;
 
     REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
-                                kOfxImageEffectContextFilter) == kOfxStatOK);
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierGreen) == kOfxStatOK);
 
     const auto& quality_props = descriptor.param_set.params.at(kParamQualityMode)->props;
     const auto& coarse_resolution_props =
@@ -544,7 +546,8 @@ TEST_CASE("describe_in_context makes deterministic screen paths explicit in OFX 
     REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
                      kPluginIdentifierGreen) == kOfxStatOK);
     REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
-                                kOfxImageEffectContextFilter) == kOfxStatOK);
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierGreen) == kOfxStatOK);
 
     const auto& screen_color_props = descriptor.param_set.params.at(kParamScreenColor)->props;
     const auto& despill_props = descriptor.param_set.params.at(kParamDespillStrength)->props;
@@ -574,7 +577,8 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
     FakeEffect descriptor;
 
     REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
-                                kOfxImageEffectContextFilter) == kOfxStatOK);
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierGreen) == kOfxStatOK);
 
     REQUIRE(descriptor.param_set.define_order.size() >= 2);
     std::vector<std::string> group_order;
@@ -653,6 +657,45 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
 // Nuke 17 follows the spec and may invalidate the descriptor on the first
 // duplicate, leaving the param panel empty. The plugin's helpers swallow
 // the paramDefine return status, so a duplicate would otherwise be invisible
+// Spec 0002 FR-8 + task 0009: dedicated Blue nodes lock screen_color and
+// hide the chooser. Verifies describe_in_context emits the right defaults
+// and secret state per descriptor identity.
+TEST_CASE("Blue descriptor describe_in_context locks screen_color to Blue and hides the chooser",
+          "[unit][ofx][descriptor]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierBlue) == kOfxStatOK);
+
+    const auto& screen_color_props = descriptor.param_set.params.at(kParamScreenColor)->props;
+    REQUIRE(screen_color_props.ints.count(kOfxParamPropDefault) == 1);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == kScreenColorBlue);
+    REQUIRE(screen_color_props.ints.count(kOfxParamPropSecret) == 1);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropSecret).front() == 1);
+}
+
+TEST_CASE("Green descriptor describe_in_context keeps screen_color visible at default Green",
+          "[unit][ofx][descriptor]") {
+    SuiteScope suites;
+    FakeEffect descriptor;
+
+    REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierGreen) == kOfxStatOK);
+
+    const auto& screen_color_props = descriptor.param_set.params.at(kParamScreenColor)->props;
+    REQUIRE(screen_color_props.ints.count(kOfxParamPropDefault) == 1);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == kDefaultScreenColor);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == kScreenColorGreen);
+    // kOfxParamPropSecret is either absent (default 0) or explicitly 0.
+    const auto secret_it = screen_color_props.ints.find(kOfxParamPropSecret);
+    if (secret_it != screen_color_props.ints.end()) {
+        REQUIRE(secret_it->second.front() == 0);
+    }
+}
+
 // in production logs. This regression test catches that class of bug at
 // build time so the panel never reaches a strict host with duplicates.
 TEST_CASE("describe_in_context defines every param exactly once", "[unit][ofx][regression]") {
@@ -660,7 +703,8 @@ TEST_CASE("describe_in_context defines every param exactly once", "[unit][ofx][r
     FakeEffect descriptor;
 
     REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
-                                kOfxImageEffectContextFilter) == kOfxStatOK);
+                                kOfxImageEffectContextFilter,
+                                kPluginIdentifierGreen) == kOfxStatOK);
 
     std::unordered_map<std::string, int> define_counts;
     for (const auto& name : descriptor.param_set.define_order) {

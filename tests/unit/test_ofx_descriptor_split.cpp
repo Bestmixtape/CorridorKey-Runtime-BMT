@@ -108,6 +108,20 @@ TEST_CASE("Per-descriptor trampolines are distinct function pointers",
     REQUIRE(green->mainEntry != blue->mainEntry);
 }
 
+TEST_CASE("is_blue_node_identifier classifies descriptor identities correctly",
+          "[unit][ofx][descriptor]") {
+    REQUIRE(is_blue_node_identifier(kPluginIdentifierBlue));
+    REQUIRE_FALSE(is_blue_node_identifier(kPluginIdentifierGreen));
+    REQUIRE_FALSE(is_blue_node_identifier(nullptr));
+    REQUIRE_FALSE(is_blue_node_identifier(""));
+    REQUIRE_FALSE(is_blue_node_identifier("com.unknown.plugin"));
+    REQUIRE_FALSE(is_blue_node_identifier("com.corridorkey.resolve.blueish"));
+    // Pointer equality fast path also accepts a copy of the canonical
+    // string — the helper falls back to string_view comparison.
+    const std::string blue_copy = kPluginIdentifierBlue;
+    REQUIRE(is_blue_node_identifier(blue_copy.c_str()));
+}
+
 TEST_CASE("Identifier strings have stable storage across descriptor lookups",
           "[unit][ofx][descriptor]") {
     // OFX hosts cache the OfxPlugin* and the pluginIdentifier string across

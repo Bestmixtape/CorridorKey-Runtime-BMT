@@ -154,4 +154,63 @@ TEST_CASE("OFX session broker records broker writeback timing on render",
     REQUIRE(release_res.has_value());
 }
 
+TEST_CASE("OFX session broker keys sessions by node identity",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    OfxSessionBroker broker;
+
+    OfxRuntimePrepareSessionRequest green_request;
+    green_request.client_instance_id = "green_instance";
+    green_request.model_path = model_path;
+    green_request.artifact_name = model_path.filename().string();
+    green_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    green_request.requested_quality_mode = 1;
+    green_request.requested_resolution = 512;
+    green_request.effective_resolution = 512;
+    green_request.engine_options.allow_cpu_fallback = false;
+    green_request.engine_options.disable_cpu_ep_fallback = true;
+    green_request.node_identity = "com.corridorkey.resolve";
+
+    auto green_prepare = broker.prepare_session(green_request);
+    REQUIRE(green_prepare.has_value());
+    CHECK_FALSE(green_prepare->session.reused_existing_session);
+
+    // Same artifact path + same backend, different node identity ⇒ different
+    // cache key, so the broker MUST allocate a separate session even though
+    // the request is otherwise identical. Spec 0002 FR-9 / task 0010.
+    auto blue_request = green_request;
+    blue_request.client_instance_id = "blue_instance";
+    blue_request.node_identity = "com.corridorkey.resolve.blue";
+
+    auto blue_prepare = broker.prepare_session(blue_request);
+    REQUIRE(blue_prepare.has_value());
+    CHECK_FALSE(blue_prepare->session.reused_existing_session);
+    CHECK(blue_prepare->session.session_id != green_prepare->session.session_id);
+    CHECK(broker.session_count() == 2);
+
+    // Re-issuing the Green request reuses the Green session, not the Blue
+    // one — confirms the cache lookup is identity-aware in both directions.
+    auto green_again = broker.prepare_session(green_request);
+    REQUIRE(green_again.has_value());
+    CHECK(green_again->session.reused_existing_session);
+    CHECK(green_again->session.session_id == green_prepare->session.session_id);
+    CHECK(green_again->session.session_id != blue_prepare->session.session_id);
+
+    auto release_green =
+        broker.release_session(OfxRuntimeReleaseSessionRequest{green_prepare->session.session_id});
+    REQUIRE(release_green.has_value());
+    auto release_green_again = broker.release_session(
+        OfxRuntimeReleaseSessionRequest{green_again->session.session_id});
+    REQUIRE(release_green_again.has_value());
+    auto release_blue =
+        broker.release_session(OfxRuntimeReleaseSessionRequest{blue_prepare->session.session_id});
+    REQUIRE(release_blue.has_value());
+}
+
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
