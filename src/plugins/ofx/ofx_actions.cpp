@@ -270,11 +270,15 @@ OfxStatus describe(OfxImageEffectHandle descriptor, const char* plugin_identifie
         return kOfxStatFailed;
     }
 
+    // The user-visible name in Resolve's effects panel and Nuke's node menu
+    // is the dedicated-node label only — no version suffix. The version
+    // stays available through kOfxPropPluginDescription, the
+    // CORRIDORKEY_DISPLAY_VERSION_STRING param in the panel's Status group,
+    // and the `corridorkey --version` CLI surface.
     const char* plugin_label = label_for_identifier(plugin_identifier);
-    std::string long_label = std::string(plugin_label) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropLabel, 0, plugin_label);
     g_suites.property->propSetString(props, kOfxPropShortLabel, 0, plugin_label);
-    g_suites.property->propSetString(props, kOfxPropLongLabel, 0, long_label.c_str());
+    g_suites.property->propSetString(props, kOfxPropLongLabel, 0, plugin_label);
     std::string description =
         std::string("CorridorKey AI chroma screen keyer v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     g_suites.property->propSetString(props, kOfxPropPluginDescription, 0, description.c_str());
