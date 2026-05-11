@@ -84,12 +84,16 @@ DeviceInfo auto_detect() {
 #elif defined(_WIN32)
     auto gpus = core::list_windows_gpus();
 
-    // Tier 1: NVIDIA RTX 30+ through the TorchTRT product path.
+    // Spec 0002 dedicated-node split: NVIDIA RTX 30+ supports BOTH the
+    // Green ONNX Runtime TensorRT path and the Blue Torch-TensorRT path.
+    // Auto-detect returns the legacy TensorRT default so .onnx artifacts
+    // load through Green; engine::normalize_device_for_model_artifact
+    // overrides to TorchTRT when the caller hands in a .ts artifact.
     for (size_t i = 0; i < gpus.size(); ++i) {
         const auto& gpu = gpus[i];
         if (gpu.cuda_available && gpu.compute_capability_major >= 8) {
-            device.name = gpu.adapter_name + " (TorchTRT)";
-            device.backend = Backend::TorchTRT;
+            device.name = gpu.adapter_name + " (TensorRT)";
+            device.backend = Backend::TensorRT;
             device.available_memory_mb = gpu.dedicated_memory_mb;
             device.device_index = static_cast<int>(i);
             return device;
@@ -137,9 +141,16 @@ std::vector<DeviceInfo> list_devices() {
     }
 #elif defined(_WIN32)
     auto gpus = core::list_windows_gpus();
+    // Spec 0002 dedicated-node split: expose each RTX GPU TWICE — once for
+    // the Green ONNX Runtime TensorRT path and once for the Blue
+    // Torch-TensorRT path. The runtime_capabilities probe folds both into
+    // supported_backends so `corridorkey info --json` reports tensorrt +
+    // torchtrt and the package validator sees both families present.
     for (size_t i = 0; i < gpus.size(); ++i) {
         const auto& gpu = gpus[i];
         if (gpu.cuda_available && gpu.compute_capability_major >= 8) {
+            devices.push_back({gpu.adapter_name + " (TensorRT)", gpu.dedicated_memory_mb,
+                               Backend::TensorRT, static_cast<int>(i)});
             devices.push_back({gpu.adapter_name + " (TorchTRT)", gpu.dedicated_memory_mb,
                                Backend::TorchTRT, static_cast<int>(i)});
         }
