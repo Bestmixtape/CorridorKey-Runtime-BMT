@@ -36,7 +36,8 @@ bool has_stage(const std::vector<StageTiming>& timings, const std::string& name)
 
 TEST_CASE("OFX session broker reuses sessions for the same executable model",
           "[integration][ofx][runtime][regression]") {
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
         reason.has_value()) {
         SKIP(*reason);
@@ -99,7 +100,8 @@ TEST_CASE("OFX session broker reuses sessions for the same executable model",
 
 TEST_CASE("OFX session broker records broker writeback timing on render",
           "[integration][ofx][runtime][regression]") {
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
         reason.has_value()) {
         SKIP(*reason);

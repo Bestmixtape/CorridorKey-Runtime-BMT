@@ -80,13 +80,33 @@ endif()
 add_test(NAME integration_tests COMMAND test_integration)
 set_tests_properties(integration_tests PROPERTIES LABELS "integration")
 
-if(CORRIDORKEY_HAS_TORCHTRT AND TARGET corridorkey-torchtrt-runner)
+# The TorchTRT runtime tests are gated on artifact presence at configuration
+# time so a checkout without the staged Blue / Green TorchScript bundles does
+# not produce a ctest "Skipped" line. When the artifact is present and the
+# build type is compatible with the vendored Release-only LibTorch ABI, the
+# tests register normally and run the full smoke / engine assertions.
+set(_corridorkey_blue_dynamic_ts
+    "${PROJECT_SOURCE_DIR}/temp/dynamic-rtx/corridorkey_dynamic_blue_fp16.ts")
+set(_corridorkey_green_sprint0_ts
+    "${PROJECT_SOURCE_DIR}/temp/blue-diagnose/green-torchtrt-local-windows/corridorkey_torchtrt_fp16_512.ts")
+set(_corridorkey_green_dynamic_ts
+    "${PROJECT_SOURCE_DIR}/temp/dynamic-rtx/corridorkey_dynamic_green_fp16.ts")
+
+set(_corridorkey_torchtrt_abi_ok TRUE)
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(_corridorkey_torchtrt_abi_ok FALSE)
+endif()
+
+if(CORRIDORKEY_HAS_TORCHTRT
+    AND TARGET corridorkey-torchtrt-runner
+    AND EXISTS "${_corridorkey_blue_dynamic_ts}"
+    AND _corridorkey_torchtrt_abi_ok)
     add_test(
         NAME torchtrt_dynamic_runner_smoke
         COMMAND
             ${CMAKE_COMMAND}
             -DRUNNER_EXE=$<TARGET_FILE:corridorkey-torchtrt-runner>
-            -DTS_PATH=${PROJECT_SOURCE_DIR}/temp/dynamic-rtx/corridorkey_dynamic_blue_fp16.ts
+            -DTS_PATH=${_corridorkey_blue_dynamic_ts}
             -DBIN_DIR=${CORRIDORKEY_TORCHTRT_RUNTIME_DIR}
             -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DMSVC_TOOLCHAIN=$<BOOL:${MSVC}>
@@ -94,9 +114,22 @@ if(CORRIDORKEY_HAS_TORCHTRT AND TARGET corridorkey-torchtrt-runner)
     )
     set_tests_properties(torchtrt_dynamic_runner_smoke PROPERTIES
         LABELS "integration;torchtrt;dynamic;hardware"
-        SKIP_REGULAR_EXPRESSION "^SKIP:"
         TIMEOUT 300
     )
+endif()
+
+# test_engine_torch_trt.cpp ships three TEST_CASEs split across two
+# scratch artifacts (sprint-0 fixed-resolution + dynamic Green TorchScript).
+# Pass per-artifact defines so each case is compiled in only when its
+# input is staged; the file degrades to an empty translation unit when
+# neither is present.
+if(EXISTS "${_corridorkey_green_sprint0_ts}")
+    target_compile_definitions(test_integration PRIVATE
+        CORRIDORKEY_HAS_SPRINT0_TORCHTRT_FIXTURE=1)
+endif()
+if(EXISTS "${_corridorkey_green_dynamic_ts}")
+    target_compile_definitions(test_integration PRIVATE
+        CORRIDORKEY_HAS_DYNAMIC_TORCHTRT_FIXTURE=1)
 endif()
 
 add_executable(ofx_benchmark_harness

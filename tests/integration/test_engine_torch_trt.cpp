@@ -29,19 +29,24 @@ namespace {
 //
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
+#if defined(CORRIDORKEY_HAS_SPRINT0_TORCHTRT_FIXTURE)
 std::filesystem::path sprint0_torchtrt_artifact(int resolution) {
     return std::filesystem::path(PROJECT_ROOT) / "temp" / "blue-diagnose" /
            "green-torchtrt-local-windows" /
            ("corridorkey_torchtrt_fp16_" + std::to_string(resolution) + ".ts");
 }
+#endif
 
+#if defined(CORRIDORKEY_HAS_DYNAMIC_TORCHTRT_FIXTURE)
 std::filesystem::path dynamic_torchscript_artifact() {
     return std::filesystem::path(PROJECT_ROOT) / "temp" / "dynamic-rtx" /
            "corridorkey_dynamic_green_fp16.ts";
 }
+#endif
 
 }  // namespace
 
+#if defined(CORRIDORKEY_HAS_SPRINT0_TORCHTRT_FIXTURE)
 TEST_CASE("TorchTRT session loads and runs a green .ts engine end-to-end",
           "[integration][torchtrt]") {
 #if !defined(_WIN32)
@@ -51,7 +56,9 @@ TEST_CASE("TorchTRT session loads and runs a green .ts engine end-to-end",
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
             model_path, "TorchTRT engine (Sprint 0 fixture)");
         reason.has_value()) {
-        SKIP(*reason);
+        FAIL("Sprint 0 fixture was present at CMake configure time but is now "
+             "unusable: " +
+             *reason);
     }
 
     auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
@@ -118,7 +125,9 @@ TEST_CASE("TorchTRT session honours output_alpha_only by skipping foreground mat
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
             model_path, "TorchTRT engine (Sprint 0 fixture)");
         reason.has_value()) {
-        SKIP(*reason);
+        FAIL("Sprint 0 fixture was present at CMake configure time but is now "
+             "unusable: " +
+             *reason);
     }
 
     auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
@@ -142,7 +151,9 @@ TEST_CASE("TorchTRT session honours output_alpha_only by skipping foreground mat
     REQUIRE(result->foreground.view().data.empty());
 #endif
 }
+#endif  // CORRIDORKEY_HAS_SPRINT0_TORCHTRT_FIXTURE
 
+#if defined(CORRIDORKEY_HAS_DYNAMIC_TORCHTRT_FIXTURE)
 TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple resolutions",
           "[integration][torchtrt][dynamic]") {
 #if !defined(_WIN32)
@@ -152,7 +163,9 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(
             model_path, "dynamic TorchScript RTX artifact");
         reason.has_value()) {
-        SKIP(*reason);
+        FAIL("Dynamic TorchScript artifact was present at CMake configure time "
+             "but is now unusable: " +
+             *reason);
     }
 
     auto engine = Engine::create(model_path, DeviceInfo{"TorchTRT", 10240, Backend::TorchTRT});
@@ -185,5 +198,6 @@ TEST_CASE("TorchTRT session runs a dynamic TorchScript artifact at multiple reso
     }
 #endif
 }
+#endif  // CORRIDORKEY_HAS_DYNAMIC_TORCHTRT_FIXTURE
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

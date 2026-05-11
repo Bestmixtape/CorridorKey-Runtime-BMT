@@ -28,7 +28,8 @@ TEST_CASE("engine strict create rejects GPU requests that only succeed via CPU f
 #if !defined(_WIN32)
     SKIP("Windows-only fallback policy test");
 #else
-    const std::filesystem::path model_path = "models/corridorkey_int8_512.onnx";
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
     if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
         reason.has_value()) {
         SKIP(*reason);
