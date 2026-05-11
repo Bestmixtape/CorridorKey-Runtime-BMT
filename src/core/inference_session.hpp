@@ -3,8 +3,13 @@
 #include <corridorkey/types.hpp>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+#ifndef ORT_API_MANUAL_INIT
+#define ORT_API_MANUAL_INIT
+#endif
 
 // Keep the C++ wrapper aligned with the provider header layout for each platform.
 // The curated Windows RTX package only ships the core/session layout; falling back
@@ -100,7 +105,8 @@ class InferenceSession {
      */
     [[nodiscard]] Result<FrameResult> run(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params,
-                                          StageTimingCallback on_stage = nullptr);
+                                          StageTimingCallback on_stage = nullptr,
+                                          FrameOutputViews output_views = {});
 
     /**
      * @brief Run inference on a batch of frames.
@@ -118,6 +124,14 @@ class InferenceSession {
 
    private:
     struct BoundIoState;
+    struct PostProcessProgress {
+        bool source_passthrough_applied = false;
+        bool despill_applied = false;
+    };
+    struct RawFrameResult {
+        FrameResult frame;
+        PostProcessProgress post_process;
+    };
 
     explicit InferenceSession(DeviceInfo device);
 
@@ -134,9 +148,10 @@ class InferenceSession {
     /**
      * @brief Internal raw inference (no post-processing).
      */
-    [[nodiscard]] Result<FrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params,
-                                                StageTimingCallback on_stage = nullptr);
+    [[nodiscard]] Result<RawFrameResult> infer_raw(const Image& rgb, const Image& alpha_hint,
+                                                   const InferenceParams& params,
+                                                   StageTimingCallback on_stage = nullptr,
+                                                   FrameOutputViews output_views = {});
 
     /**
      * @brief Internal raw inference on a batch.
@@ -149,11 +164,13 @@ class InferenceSession {
      * @brief Apply despeckle, despill and composition to raw results.
      */
     void apply_post_process(FrameResult& result, const InferenceParams& params, Image source_rgb,
-                            StageTimingCallback on_stage = nullptr);
+                            StageTimingCallback on_stage = nullptr,
+                            PostProcessProgress post_process = {});
 
     [[nodiscard]] Result<FrameResult> run_direct(const Image& rgb, const Image& alpha_hint,
                                                  const InferenceParams& params,
-                                                 StageTimingCallback on_stage = nullptr);
+                                                 StageTimingCallback on_stage = nullptr,
+                                                 FrameOutputViews output_views = {});
 
     [[nodiscard]] Result<FrameResult> run_coarse_to_fine(const Image& rgb, const Image& alpha_hint,
                                                          const InferenceParams& params,
@@ -169,8 +186,10 @@ class InferenceSession {
     DeviceInfo m_device;
     int m_recommended_resolution = 512;
 
-    Ort::Session m_session{nullptr};
-    Ort::SessionOptions m_session_options;
+    std::optional<Ort::Session> m_session = std::nullopt;
+    std::optional<Ort::SessionOptions> m_session_options = std::nullopt;
+    [[nodiscard]] Ort::Session& session();
+    [[nodiscard]] Ort::SessionOptions& session_options();
 
     // Input/Output metadata
     std::vector<std::string> m_input_node_names = {};

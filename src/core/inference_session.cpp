@@ -171,6 +171,15 @@ namespace corridorkey {
 
 namespace {
 
+bool torchtrt_host_roundtrip_input_enabled() {
+    const auto value = common::environment_variable_copy("CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY");
+    if (!value.has_value()) {
+        return false;
+    }
+    const std::string_view mode(*value);
+    return mode == "host_roundtrip" || mode == "host";
+}
+
 template <typename T>
 class AlignedTensorBuffer {
    public:
@@ -812,6 +821,14 @@ InferenceSession::~InferenceSession() = default;
 InferenceSession::InferenceSession(InferenceSession&&) noexcept = default;
 InferenceSession& InferenceSession::operator=(InferenceSession&&) noexcept = default;
 
+Ort::Session& InferenceSession::session() {
+    return *m_session;
+}
+
+Ort::SessionOptions& InferenceSession::session_options() {
+    return *m_session_options;
+}
+
 Result<Ort::Value> InferenceSession::create_input_tensor(float* planar_data,
                                                          std::size_t element_count,
                                                          const std::vector<int64_t>& shape) {
@@ -868,7 +885,7 @@ Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
                                     std::to_string(m_output_element_types[1])});
     }
 
-    auto state = std::make_unique<BoundIoState>(m_session);
+    auto state = std::make_unique<BoundIoState>(session());
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
     const auto batch_size = input_shape[0];
@@ -891,9 +908,9 @@ Result<InferenceSession::BoundIoState*> InferenceSession::ensure_bound_io_state(
             return Unexpected(fg_shape_res.error());
         }
 
-        state->fg_output.emplace();
-        state->fg_output->reset(memory_info, m_output_element_types[1], *fg_shape_res);
-        state->binding.BindOutput(m_output_node_names_ptr[1], state->fg_output->tensor);
+        auto& foreground_output = state->fg_output.emplace();
+        foreground_output.reset(memory_info, m_output_element_types[1], *fg_shape_res);
+        state->binding.BindOutput(m_output_node_names_ptr[1], foreground_output.tensor);
     }
 
     state->input_shape = input_shape;
@@ -910,8 +927,8 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
     debug_log("Configuring shared ORT thread pools and env allocators");
     // Shared thread pools require per-session thread pools to be disabled. Pair that with
     // `session.use_env_allocators=1` so every ORT session in the process reuses the env allocator.
-    m_session_options.DisablePerSessionThreads();
-    m_session_options.AddConfigEntry(kUseEnvAllocatorsConfig, "1");
+    session_options().DisablePerSessionThreads();
+    session_options().AddConfigEntry(kUseEnvAllocatorsConfig, "1");
 
     // Optional per-op profiling gated on `CORRIDORKEY_ORT_PROFILE=1`. When
     // enabled, ORT writes a Chrome-tracing-compatible JSON next to the
@@ -932,9 +949,9 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 #ifdef _WIN32
             // ORT on Windows expects a wide-char path prefix; std::filesystem::path
             // already stores as wchar_t, so use native() directly.
-            m_session_options.EnableProfiling(prefix_path.native().c_str());
+            session_options().EnableProfiling(prefix_path.native().c_str());
 #else
-            m_session_options.EnableProfiling(prefix_path.native().c_str());
+            session_options().EnableProfiling(prefix_path.native().c_str());
 #endif
             debug_log("ORT per-op profiling enabled; output prefix: " + prefix_path.string());
         }
@@ -942,30 +959,30 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
 
     debug_log("Setting graph optimization level");
     if (use_optimized_model_cache) {
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+        session_options().SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
     } else if (m_device.backend == Backend::DirectML) {
         // Microsoft strongly recommends avoiding ORT_ENABLE_ALL (level 3) for DirectML
         // because it enables CPU-specific memory layout optimizations that crash DML execution.
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+        session_options().SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
     } else {
-        m_session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+        session_options().SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     }
 
     debug_log("Setting log severity level");
-    m_session_options.SetLogSeverityLevel(options.log_severity);
+    session_options().SetLogSeverityLevel(options.log_severity);
 
 #ifdef _WIN32
-    override_windows_universal_free_dimensions(m_session_options, m_device.backend);
+    override_windows_universal_free_dimensions(session_options(), m_device.backend);
 #endif
 
     if (m_device.backend != Backend::CPU) {
         if (options.disable_cpu_ep_fallback) {
             debug_log("Disabling CPU EP fallback");
-            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
+            session_options().AddConfigEntry(kDisableCpuEpFallbackConfig, "1");
         } else {
             // Explicitly enable CPU EP fallback to avoid issues in some DirectML environments
             // where ORT might default to disabling it when an EP is added.
-            m_session_options.AddConfigEntry(kDisableCpuEpFallbackConfig, "0");
+            session_options().AddConfigEntry(kDisableCpuEpFallbackConfig, "0");
         }
     }
 
@@ -976,7 +993,7 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
         case Backend::CoreML: {
 #ifdef __APPLE__
             debug_log("Adding CoreML execution provider");
-            append_coreml_execution_provider(m_session_options);
+            append_coreml_execution_provider(session_options());
 #endif
             break;
         }
@@ -984,39 +1001,39 @@ void InferenceSession::configure_session_options(bool use_optimized_model_cache,
             debug_log("Adding CUDA execution provider");
             OrtCUDAProviderOptions cuda_options;
             cuda_options.device_id = 0;
-            m_session_options.AppendExecutionProvider_CUDA(cuda_options);
+            session_options().AppendExecutionProvider_CUDA(cuda_options);
             break;
         }
         case Backend::TensorRT: {
 #ifdef _WIN32
             debug_log("Adding TensorRT RTX execution provider");
-            append_tensorrt_rtx_execution_provider(m_session_options, model_path);
+            append_tensorrt_rtx_execution_provider(session_options(), model_path);
             debug_log("TensorRT RTX execution provider added");
 #else
             debug_log("Adding TensorRT execution provider");
             OrtTensorRTProviderOptions trt_options;
             trt_options.device_id = 0;
-            m_session_options.AppendExecutionProvider_TensorRT(trt_options);
+            session_options().AppendExecutionProvider_TensorRT(trt_options);
 #endif
             break;
         }
 #ifdef _WIN32
         case Backend::DirectML: {
-            append_directml_execution_provider(m_session_options, m_device.device_index);
+            append_directml_execution_provider(session_options(), m_device.device_index);
             break;
         }
         case Backend::WindowsML: {
             debug_log("Adding WindowsML execution provider");
             // In March 2026, WindowsML EP or adapter handles NPU/GPU auto-selection
             std::unordered_map<std::string, std::string> winml_options = {};
-            m_session_options.AppendExecutionProvider("WinML", winml_options);
+            session_options().AppendExecutionProvider("WinML", winml_options);
             break;
         }
         case Backend::OpenVINO: {
             debug_log("Adding OpenVINO execution provider");
             // Intel specific acceleration
             std::unordered_map<std::string, std::string> ov_options = {{"device_type", "AUTO"}};
-            m_session_options.AppendExecutionProvider("OpenVINO", ov_options);
+            session_options().AppendExecutionProvider("OpenVINO", ov_options);
             break;
         }
 #endif
@@ -1031,14 +1048,14 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     debug_log("Extracting model metadata");
     Ort::AllocatorWithDefaultOptions allocator;
 
-    size_t num_input_nodes = m_session.GetInputCount();
+    size_t num_input_nodes = session().GetInputCount();
     debug_log("Model has " + std::to_string(num_input_nodes) + " inputs");
 
     for (size_t i = 0; i < num_input_nodes; i++) {
-        auto input_name_ptr = m_session.GetInputNameAllocated(i, allocator);
+        auto input_name_ptr = session().GetInputNameAllocated(i, allocator);
         m_input_node_names.push_back(input_name_ptr.get());
 
-        auto type_info = m_session.GetInputTypeInfo(i);
+        auto type_info = session().GetInputTypeInfo(i);
         auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
         m_input_node_dims.push_back(tensor_info.GetShape());
 
@@ -1068,7 +1085,7 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     const bool use_packaged_output_contract = core::should_use_packaged_corridorkey_output_contract(
         model_path, m_device.backend,
         m_input_element_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16);
-    size_t num_output_nodes = m_session.GetOutputCount();
+    size_t num_output_nodes = session().GetOutputCount();
     std::vector<std::string> discovered_output_names;
     std::vector<std::vector<int64_t>> discovered_output_dims;
     std::vector<ONNXTensorElementDataType> discovered_output_element_types;
@@ -1076,8 +1093,8 @@ void InferenceSession::extract_metadata(const std::filesystem::path& model_path)
     discovered_output_dims.reserve(num_output_nodes);
     discovered_output_element_types.reserve(num_output_nodes);
     for (size_t i = 0; i < num_output_nodes; ++i) {
-        auto output_name_ptr = m_session.GetOutputNameAllocated(i, allocator);
-        auto output_type_info = m_session.GetOutputTypeInfo(i);
+        auto output_name_ptr = session().GetOutputNameAllocated(i, allocator);
+        auto output_type_info = session().GetOutputTypeInfo(i);
         auto output_tensor_info = output_type_info.GetTensorTypeAndShapeInfo();
         discovered_output_names.push_back(output_name_ptr.get());
         discovered_output_dims.push_back(output_tensor_info.GetShape());
@@ -1151,7 +1168,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
             // by calling any of its symbols. arm_torchtrt_runtime sits in
             // a torch-free TU compiled into corridorkey_core, so the
             // base exe / OFX bundle can run AddDllDirectory and
-            // pre-load the torch / torchtrt DLLs from the blue pack
+            // pre-load the torch / torchtrt DLLs from the TorchTRT pack
             // (or vendor/torchtrt-windows in dev) without ever
             // touching torch headers from this layer. Once the cache
             // is populated, the next implicit resolve from the
@@ -1161,7 +1178,7 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 return Unexpected(Error{
                     ErrorCode::HardwareNotSupported,
                     "TorchTRT runtime DLLs not found. Set CORRIDORKEY_TORCHTRT_RUNTIME_DIR or "
-                    "stage the blue model pack runtime alongside the .ts."});
+                    "stage the TorchTRT runtime pack alongside the .ts."});
             }
             std::string arm_error;
             if (!core::arm_torchtrt_runtime(runtime_bin, arm_error)) {
@@ -1227,13 +1244,14 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                 bool use_cached_model,
                 const std::optional<std::filesystem::path>& optimized_output_path) {
                 common::measure_stage(on_stage, "ort_session_options", [&]() {
+                    session.m_session_options.emplace();
                     session.configure_session_options(use_cached_model, options, model_path);
                     if (!use_cached_model && optimized_output_path.has_value()) {
 #ifdef _WIN32
-                        session.m_session_options.SetOptimizedModelFilePath(
+                        session.session_options().SetOptimizedModelFilePath(
                             optimized_output_path->wstring().c_str());
 #else
-                            session.m_session_options.SetOptimizedModelFilePath(
+                            session.session_options().SetOptimizedModelFilePath(
                                 optimized_output_path->c_str());
 #endif
                     }
@@ -1241,11 +1259,11 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
 
                 common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                    session.m_session = Ort::Session(*env, runtime_model_path.wstring().c_str(),
-                                                     session.m_session_options);
+                    session.m_session.emplace(*env, runtime_model_path.wstring().c_str(),
+                                              session.session_options());
 #else
-                    session.m_session =
-                        Ort::Session(*env, runtime_model_path.c_str(), session.m_session_options);
+                    session.m_session.emplace(*env, runtime_model_path.c_str(),
+                                              session.session_options());
 #endif
                 });
 
@@ -1273,22 +1291,23 @@ Result<std::unique_ptr<InferenceSession>> InferenceSession::create(
                             options.log_severity);
                     });
                     common::measure_stage(on_stage, "ort_session_options", [&]() {
+                        session_ptr->m_session_options.emplace();
                         session_ptr->configure_session_options(false, options, model_path);
 #ifdef _WIN32
-                        session_ptr->m_session_options.SetOptimizedModelFilePath(
+                        session_ptr->session_options().SetOptimizedModelFilePath(
                             optimized_model_path->wstring().c_str());
 #else
-                            session_ptr->m_session_options.SetOptimizedModelFilePath(
+                            session_ptr->session_options().SetOptimizedModelFilePath(
                                 optimized_model_path->c_str());
 #endif
                     });
                     common::measure_stage(on_stage, "ort_session_create", [&]() {
 #ifdef _WIN32
-                        session_ptr->m_session = Ort::Session(*env, model_path.wstring().c_str(),
-                                                              session_ptr->m_session_options);
+                        session_ptr->m_session.emplace(*env, model_path.wstring().c_str(),
+                                                       session_ptr->session_options());
 #else
-                        session_ptr->m_session =
-                            Ort::Session(*env, model_path.c_str(), session_ptr->m_session_options);
+                        session_ptr->m_session.emplace(*env, model_path.c_str(),
+                                                       session_ptr->session_options());
 #endif
                     });
                     common::measure_stage(on_stage, "ort_metadata_extract",
@@ -1545,7 +1564,9 @@ Result<FrameResult> InferenceSession::run_tiled(const Image& rgb, const Image& a
 }
 
 void InferenceSession::apply_post_process(FrameResult& result, const InferenceParams& params,
-                                          Image source_rgb, StageTimingCallback on_stage) {
+                                          Image source_rgb, StageTimingCallback on_stage,
+                                          PostProcessProgress post_process) {
+    if (result.post_processed) return;
     if (result.alpha.view().empty() || result.foreground.view().empty()) return;
 
     int w = result.foreground.view().width;
@@ -1553,7 +1574,8 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
 
     // 1. Source passthrough: blend original source into opaque regions (before despill
     //    so that despill can clean green spill from both model and source pixels)
-    if (params.source_passthrough && !source_rgb.empty()) {
+    const bool source_passthrough_needed = params.source_passthrough && !source_rgb.empty();
+    if (source_passthrough_needed && !post_process.source_passthrough_applied) {
         common::measure_stage(
             on_stage, "post_source_passthrough",
             [&]() {
@@ -1562,6 +1584,7 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
                                                 params.sp_blur_px, m_color_utils_state);
             },
             1);
+        post_process.source_passthrough_applied = true;
     }
 
     // 2. Despeckle alpha
@@ -1572,14 +1595,25 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     }
 
     // 3. Despill foreground (operates on combined fg after source passthrough)
-    common::measure_stage(
-        on_stage, "post_despill",
-        [&]() {
-            despill(result.foreground.view(), params.despill_strength,
-                    effective_despill_method(params.spill_method, params.despill_screen_channel),
-                    params.despill_screen_channel);
-        },
-        1);
+    if (!post_process.despill_applied) {
+        common::measure_stage(
+            on_stage, "post_despill",
+            [&]() {
+                despill(result.foreground.view(), params.despill_strength,
+                        effective_despill_method(DespillMethodRequest{
+                            .requested_method = params.spill_method,
+                            .screen_channel = params.despill_screen_channel,
+                        }),
+                        params.despill_screen_channel);
+            },
+            1);
+        post_process.despill_applied = true;
+    }
+
+    if (!params.output_auxiliary_images) {
+        result.post_processed = true;
+        return;
+    }
 
     // 3. Generate processed: sRGB FG -> linear -> premultiply -> RGBA
     const auto& lut = SrgbLut::instance();
@@ -1612,11 +1646,13 @@ void InferenceSession::apply_post_process(FrameResult& result, const InferencePa
     common::measure_stage(
         on_stage, "post_composite",
         [&]() { ColorUtils::composite_premultiplied_over_checker_to_srgb(proc, comp); }, 1);
+    result.post_processed = true;
 }
 
 Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& alpha_hint,
                                                  const InferenceParams& params,
-                                                 StageTimingCallback on_stage) {
+                                                 StageTimingCallback on_stage,
+                                                 FrameOutputViews output_views) {
     const int model_resolution = m_recommended_resolution > 0 ? m_recommended_resolution : 512;
 
     if (params.enable_tiling && (rgb.width > model_resolution || rgb.height > model_resolution)) {
@@ -1628,12 +1664,12 @@ Result<FrameResult> InferenceSession::run_direct(const Image& rgb, const Image& 
         return tiled_result;
     }
 
-    auto result = infer_raw(rgb, alpha_hint, params, on_stage);
+    auto result = infer_raw(rgb, alpha_hint, params, on_stage, output_views);
     if (!result) {
         return Unexpected(result.error());
     }
-    apply_post_process(*result, params, rgb, on_stage);
-    return result;
+    apply_post_process(result->frame, params, rgb, on_stage, result->post_process);
+    return std::move(result->frame);
 }
 
 Result<FrameResult> InferenceSession::run_coarse_to_fine(const Image& rgb, const Image& alpha_hint,
@@ -1651,8 +1687,8 @@ Result<FrameResult> InferenceSession::run_coarse_to_fine(const Image& rgb, const
     if (!raw_result) {
         return Unexpected(raw_result.error());
     }
-    apply_post_process(*raw_result, params, rgb, on_stage);
-    return raw_result;
+    apply_post_process(raw_result->frame, params, rgb, on_stage, raw_result->post_process);
+    return std::move(raw_result->frame);
 }
 
 Result<std::vector<FrameResult>> InferenceSession::run_batch(const std::vector<Image>& rgbs,
@@ -1711,7 +1747,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             auto frame = m_torch_trt_session->infer(rgbs[index], alpha_hints[index],
                                                     params.output_alpha_only, on_stage);
             if (!frame) return Unexpected(frame.error());
-            results.push_back(std::move(*frame));
+            results.push_back(std::move(frame->frame));
         }
         return results;
     }
@@ -1838,7 +1874,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
                             bound_io_state->binding.SynchronizeInputs();
                         },
                         batch_size);
-                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    session().Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
                     bound_io_state->binding.SynchronizeOutputs();
                 },
                 batch_size);
@@ -1846,7 +1882,7 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
             output_tensors = common::measure_stage(
                 on_stage, "ort_run",
                 [&]() {
-                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                    return session().Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
                                          &input_tensor, 1, m_output_node_names_ptr.data(),
                                          m_output_node_names_ptr.size());
                 },
@@ -1988,17 +2024,144 @@ Result<std::vector<FrameResult>> InferenceSession::infer_batch_raw(
     }
 }
 
-Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& alpha_hint,
-                                                const InferenceParams& params,
-                                                StageTimingCallback on_stage) {
+Result<InferenceSession::RawFrameResult> InferenceSession::infer_raw(
+    const Image& rgb, const Image& alpha_hint, const InferenceParams& params,
+    StageTimingCallback on_stage, FrameOutputViews output_views) {
+    (void)output_views;
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
     if (m_torch_trt_session != nullptr) {
+        auto make_raw_result =
+            [](core::TorchTrtFrameResult&& torch_result) -> RawFrameResult {
+            RawFrameResult raw_result;
+            raw_result.frame = std::move(torch_result.frame);
+            raw_result.post_process.source_passthrough_applied =
+                torch_result.post_source_passthrough_applied;
+            raw_result.post_process.despill_applied = torch_result.post_despill_applied;
+            return raw_result;
+        };
         const int target_res =
             params.target_resolution > 0 ? params.target_resolution : m_recommended_resolution;
-        if (target_res <= 0 || (rgb.width == target_res && rgb.height == target_res)) {
+        if (target_res <= 0) {
             auto batch_res = infer_batch_raw({rgb}, {alpha_hint}, params, on_stage);
             if (!batch_res) return Unexpected(batch_res.error());
-            return std::move((*batch_res)[0]);
+            RawFrameResult raw_result;
+            raw_result.frame = std::move((*batch_res)[0]);
+            return raw_result;
+        }
+
+        auto finalize_model_output = [&](RawFrameResult& raw_result) -> Result<RawFrameResult> {
+            auto finalize_res = common::measure_stage(
+                on_stage, "frame_extract_outputs_finalize",
+                [&]() -> Result<void> {
+                    ColorUtils::clamp_image(raw_result.frame.alpha.view(), 0.0F, 1.0F);
+                    auto alpha_final_res = finalize_output_image(
+                        m_device, target_res, raw_result.frame.alpha.view(),
+                        "alpha_resized_output");
+                    if (!alpha_final_res) {
+                        return Unexpected(alpha_final_res.error());
+                    }
+                    if (!raw_result.frame.foreground.view().empty()) {
+                        auto fg_final_res = finalize_output_image(
+                            m_device, target_res, raw_result.frame.foreground.view(),
+                            "fg_resized_output");
+                        if (!fg_final_res) {
+                            return Unexpected(fg_final_res.error());
+                        }
+                    }
+                    return {};
+                },
+                1);
+            if (!finalize_res) {
+                return Unexpected(finalize_res.error());
+            }
+            return std::move(raw_result);
+        };
+
+        auto resize_model_output = [&](FrameResult& raw_frame) -> Result<RawFrameResult> {
+            RawFrameResult result;
+            result.frame.alpha = ImageBuffer(rgb.width, rgb.height, 1);
+            if (!params.output_alpha_only && !raw_frame.foreground.view().empty()) {
+                result.frame.foreground = ImageBuffer(rgb.width, rgb.height, 3);
+            }
+            const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
+            auto resize_res = common::measure_stage(
+                on_stage, "frame_extract_outputs_resize",
+                [&]() -> Result<void> {
+                    if (use_lanczos) {
+                        ColorUtils::resize_lanczos_into(raw_frame.alpha.view(),
+                                                        result.frame.alpha.view(),
+                                                        m_color_utils_state);
+                        if (!result.frame.foreground.view().empty()) {
+                            ColorUtils::resize_lanczos_into(raw_frame.foreground.view(),
+                                                            result.frame.foreground.view(),
+                                                            m_color_utils_state);
+                        }
+                    } else {
+                        ColorUtils::resize_into(raw_frame.alpha.view(), result.frame.alpha.view());
+                        if (!result.frame.foreground.view().empty()) {
+                            ColorUtils::resize_into(raw_frame.foreground.view(),
+                                                    result.frame.foreground.view());
+                        }
+                    }
+                    return {};
+                },
+                1);
+            if (!resize_res) {
+                return Unexpected(resize_res.error());
+            }
+
+            return finalize_model_output(result);
+        };
+
+        const bool use_host_roundtrip_input = torchtrt_host_roundtrip_input_enabled();
+        if (use_host_roundtrip_input) {
+            common::measure_stage(on_stage, "torchtrt_input_boundary_host_roundtrip", []() {});
+            debug_log("TorchTRT device input boundary disabled by "
+                      "CORRIDORKEY_TORCHTRT_INPUT_BOUNDARY=host_roundtrip");
+        }
+
+        if (!use_host_roundtrip_input && m_gpu_prep.available()) {
+            auto gpu_prepare_res = common::measure_stage(
+                on_stage, "frame_prepare_inputs",
+                [&]() -> Result<core::GpuPreparedInput> {
+                    const auto current_stream = m_torch_trt_session->current_cuda_stream();
+                    if (!current_stream.available) {
+                        return Unexpected(Error{
+                            ErrorCode::HardwareNotSupported,
+                            "TorchTRT current CUDA stream is unavailable for GPU prep"});
+                    }
+                    return m_gpu_prep.prepare_inputs_device_on_stream(
+                        rgb, alpha_hint, target_res, target_res, kCorridorKeyRgbMean,
+                        kCorridorKeyRgbInvStddev, current_stream.handle, on_stage);
+                },
+                1);
+            if (gpu_prepare_res.has_value()) {
+                auto raw_res =
+                    m_torch_trt_session->infer_prepared_cuda_planar_resized(
+                        gpu_prepare_res->planar_device, gpu_prepare_res->width,
+                        gpu_prepare_res->height, rgb.width, rgb.height,
+                        params.output_alpha_only, params.upscale_method == UpscaleMethod::Lanczos4,
+                        on_stage, gpu_prepare_res->ready_event, gpu_prepare_res->ready_start_event,
+                        gpu_prepare_res->ready_event_on_current_stream, &params,
+                        core::TorchTrtDeviceSource{
+                            .host_rgb = rgb,
+                            .rgb_device = gpu_prepare_res->source_rgb_device,
+                            .width = gpu_prepare_res->source_width,
+                            .height = gpu_prepare_res->source_height,
+                            .channels = gpu_prepare_res->source_channels,
+                        },
+                        output_views);
+                if (!raw_res) {
+                    return Unexpected(raw_res.error());
+                }
+                RawFrameResult raw_result = make_raw_result(std::move(*raw_res));
+                if (rgb.width == target_res && rgb.height == target_res) {
+                    return raw_result;
+                }
+                return finalize_model_output(raw_result);
+            }
+            debug_log("GPU TorchScript prep failed, falling back to CPU: " +
+                      gpu_prepare_res.error().message);
         }
 
         Image prepared_rgb = {};
@@ -2030,69 +2193,12 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return Unexpected(prepare_res.error());
         }
 
-        auto raw_res =
-            m_torch_trt_session->infer(prepared_rgb, prepared_hint, params.output_alpha_only,
-                                       on_stage);
+        auto raw_res = m_torch_trt_session->infer(prepared_rgb, prepared_hint,
+                                                  params.output_alpha_only, on_stage);
         if (!raw_res) {
             return Unexpected(raw_res.error());
         }
-
-        FrameResult result;
-        result.alpha = ImageBuffer(rgb.width, rgb.height, 1);
-        if (!params.output_alpha_only && !raw_res->foreground.view().empty()) {
-            result.foreground = ImageBuffer(rgb.width, rgb.height, 3);
-        }
-        const bool use_lanczos = params.upscale_method == UpscaleMethod::Lanczos4;
-        auto resize_res = common::measure_stage(
-            on_stage, "frame_extract_outputs_resize",
-            [&]() -> Result<void> {
-                if (use_lanczos) {
-                    ColorUtils::resize_lanczos_into(raw_res->alpha.view(), result.alpha.view(),
-                                                    m_color_utils_state);
-                    if (!result.foreground.view().empty()) {
-                        ColorUtils::resize_lanczos_into(raw_res->foreground.view(),
-                                                        result.foreground.view(),
-                                                        m_color_utils_state);
-                    }
-                } else {
-                    ColorUtils::resize_into(raw_res->alpha.view(), result.alpha.view());
-                    if (!result.foreground.view().empty()) {
-                        ColorUtils::resize_into(raw_res->foreground.view(),
-                                                result.foreground.view());
-                    }
-                }
-                return {};
-            },
-            1);
-        if (!resize_res) {
-            return Unexpected(resize_res.error());
-        }
-
-        auto finalize_res = common::measure_stage(
-            on_stage, "frame_extract_outputs_finalize",
-            [&]() -> Result<void> {
-                ColorUtils::clamp_image(result.alpha.view(), 0.0F, 1.0F);
-                auto alpha_final_res =
-                    finalize_output_image(m_device, target_res, result.alpha.view(),
-                                          "alpha_resized_output");
-                if (!alpha_final_res) {
-                    return Unexpected(alpha_final_res.error());
-                }
-                if (!result.foreground.view().empty()) {
-                    auto fg_final_res =
-                        finalize_output_image(m_device, target_res, result.foreground.view(),
-                                              "fg_resized_output");
-                    if (!fg_final_res) {
-                        return Unexpected(fg_final_res.error());
-                    }
-                }
-                return {};
-            },
-            1);
-        if (!finalize_res) {
-            return Unexpected(finalize_res.error());
-        }
-        return result;
+        return resize_model_output(raw_res->frame);
     }
 #endif
     if (m_mlx_session != nullptr) {
@@ -2100,7 +2206,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
         if (!batch_res) {
             return Unexpected(batch_res.error());
         }
-        return std::move((*batch_res)[0]);
+        RawFrameResult raw_result;
+        raw_result.frame = std::move((*batch_res)[0]);
+        return raw_result;
     }
 
     try {
@@ -2153,7 +2261,8 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                 if (m_io_binding_enabled && m_gpu_prep.available()) {
                     auto gpu_res = m_gpu_prep.prepare_inputs(
                         rgb, alpha_hint, planar_ptr, static_cast<int>(model_w),
-                        static_cast<int>(model_h), kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev);
+                        static_cast<int>(model_h), kCorridorKeyRgbMean, kCorridorKeyRgbInvStddev,
+                        on_stage);
                     if (gpu_res.has_value()) {
                         return;
                     }
@@ -2203,7 +2312,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
                             bound_io_state->binding.SynchronizeInputs();
                         },
                         1);
-                    m_session.Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
+                    session().Run(Ort::RunOptions{nullptr}, bound_io_state->binding);
                     bound_io_state->binding.SynchronizeOutputs();
                 },
                 1);
@@ -2211,7 +2320,7 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             output_tensors = common::measure_stage(
                 on_stage, "ort_run",
                 [&]() {
-                    return m_session.Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
+                    return session().Run(Ort::RunOptions{nullptr}, m_input_node_names_ptr.data(),
                                          &input_tensor, 1, m_output_node_names_ptr.data(),
                                          m_output_node_names_ptr.size());
                 },
@@ -2347,7 +2456,9 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
             return Unexpected(extract_res.error());
         }
 
-        return result;
+        RawFrameResult raw_result;
+        raw_result.frame = std::move(result);
+        return raw_result;
     } catch (const Ort::Exception& e) {
         return Unexpected(Error{ErrorCode::InferenceFailed,
                                 std::string("ONNX Runtime execution failed: ") + e.what()});
@@ -2356,19 +2467,20 @@ Result<FrameResult> InferenceSession::infer_raw(const Image& rgb, const Image& a
 
 Result<FrameResult> InferenceSession::run(const Image& rgb, const Image& alpha_hint,
                                           const InferenceParams& params,
-                                          StageTimingCallback on_stage) {
+                                          StageTimingCallback on_stage,
+                                          FrameOutputViews output_views) {
 #if defined(CORRIDORKEY_HAS_TORCHTRT) && CORRIDORKEY_HAS_TORCHTRT
     const bool dynamic_torchtrt_session =
         m_torch_trt_session != nullptr && m_recommended_resolution == 0;
     if (dynamic_torchtrt_session) {
-        return run_direct(rgb, alpha_hint, params, on_stage);
+        return run_direct(rgb, alpha_hint, params, on_stage, output_views);
     }
 #endif
     if (core::should_use_coarse_to_fine_path(params, m_recommended_resolution)) {
         return run_coarse_to_fine(rgb, alpha_hint, params, on_stage);
     }
 
-    return run_direct(rgb, alpha_hint, params, on_stage);
+    return run_direct(rgb, alpha_hint, params, on_stage, output_views);
 }
 
 }  // namespace corridorkey

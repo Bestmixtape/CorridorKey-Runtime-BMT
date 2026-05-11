@@ -100,6 +100,17 @@ if(CORRIDORKEY_HAS_TORCHTRT)
             NOMINMAX WIN32_LEAN_AND_MEAN
         )
     endif()
+    # Spec 0002 Fase B1 — Blue Torch-TensorRT engine evolved to use CUDA NPP
+    # APIs directly (input prep + output resize on the GPU work stream). Link
+    # the CUDA runtime and NPP modules into corridorkey_torchtrt so the
+    # delay-loaded backend resolves the symbols at runtime.
+    if(TARGET CUDA::cudart_static)
+        target_link_libraries(corridorkey_torchtrt PRIVATE CUDA::cudart_static)
+    endif()
+    if(CORRIDORKEY_HAS_CUDA)
+        target_link_libraries(corridorkey_torchtrt PRIVATE CUDA::nppc CUDA::nppif CUDA::nppig)
+        target_compile_definitions(corridorkey_torchtrt PRIVATE CORRIDORKEY_HAS_CUDA=1)
+    endif()
 
     # corridorkey_core gets the dispatch enabled and the torch-free
     # loader TU, but DOES NOT link torch directly. The dispatch in

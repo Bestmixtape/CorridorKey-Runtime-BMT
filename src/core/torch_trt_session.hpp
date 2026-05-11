@@ -16,17 +16,36 @@
 // and dllimport (when consumed by corridorkey_core / cli / ofx /
 // tests). Without the explicit attribute MSVC skips the import-table
 // entries and /DELAYLOAD becomes a no-op (LNK4199).
-#if defined(_WIN32)
-#  if defined(CORRIDORKEY_TORCHTRT_BUILDING)
-#    define CORRIDORKEY_TORCHTRT_API __declspec(dllexport)
-#  else
-#    define CORRIDORKEY_TORCHTRT_API __declspec(dllimport)
-#  endif
+#ifdef _WIN32
+#ifdef CORRIDORKEY_TORCHTRT_BUILDING
+#define CORRIDORKEY_TORCHTRT_API __declspec(dllexport)
 #else
-#  define CORRIDORKEY_TORCHTRT_API
+#define CORRIDORKEY_TORCHTRT_API __declspec(dllimport)
+#endif
+#else
+#define CORRIDORKEY_TORCHTRT_API
 #endif
 
 namespace corridorkey::core {
+
+struct TorchTrtDeviceSource {
+    Image host_rgb = {};
+    void* rgb_device = nullptr;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+};
+
+struct TorchTrtFrameResult {
+    FrameResult frame;
+    bool post_source_passthrough_applied = false;
+    bool post_despill_applied = false;
+};
+
+struct TorchTrtCudaStream {
+    void* handle = nullptr;
+    bool available = false;
+};
 
 // Wraps a Torch-TensorRT compiled .ts engine for in-process forward.
 // Sister to MlxSession - same wrapping pattern used by InferenceSession,
@@ -46,8 +65,8 @@ namespace corridorkey::core {
 // and thunk through to Impl internally. Same suppression pattern Apple
 // and PyTorch ship in their own libtorch headers.
 #if defined(_WIN32) && defined(_MSC_VER)
-#  pragma warning(push)
-#  pragma warning(disable : 4251)
+#pragma warning(push)
+#pragma warning(disable : 4251)
 #endif
 class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
    public:
@@ -62,9 +81,32 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
     TorchTrtSession(TorchTrtSession&&) noexcept;
     TorchTrtSession& operator=(TorchTrtSession&&) noexcept;
 
-    [[nodiscard]] Result<FrameResult> infer(const Image& rgb, const Image& alpha_hint,
-                                            bool output_alpha_only = false,
-                                            StageTimingCallback on_stage = nullptr);
+    [[nodiscard]] Result<TorchTrtFrameResult> infer(const Image& rgb, const Image& alpha_hint,
+                                                    bool output_alpha_only = false,
+                                                    StageTimingCallback on_stage = nullptr);
+
+    [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_planar(
+        const float* planar_input, int input_width, int input_height,
+        bool output_alpha_only = false, StageTimingCallback on_stage = nullptr);
+
+    [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_cuda_planar(
+        void* planar_device_input, int input_width, int input_height,
+        bool output_alpha_only = false, StageTimingCallback on_stage = nullptr,
+        void* input_ready_event = nullptr, void* input_ready_start_event = nullptr,
+        bool input_ready_event_on_current_stream = false,
+        const InferenceParams* post_process_params = nullptr,
+        TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
+
+    [[nodiscard]] Result<TorchTrtFrameResult> infer_prepared_cuda_planar_resized(
+        void* planar_device_input, int input_width, int input_height, int output_width,
+        int output_height, bool output_alpha_only = false, bool use_lanczos_resize = false,
+        StageTimingCallback on_stage = nullptr, void* input_ready_event = nullptr,
+        void* input_ready_start_event = nullptr,
+        bool input_ready_event_on_current_stream = false,
+        const InferenceParams* post_process_params = nullptr,
+        TorchTrtDeviceSource source = {}, FrameOutputViews output_views = {});
+
+    [[nodiscard]] TorchTrtCudaStream current_cuda_stream() const;
 
     [[nodiscard]] int model_resolution() const;
 
@@ -75,7 +117,7 @@ class CORRIDORKEY_TORCHTRT_API TorchTrtSession {
     std::unique_ptr<Impl> m_impl;
 };
 #if defined(_WIN32) && defined(_MSC_VER)
-#  pragma warning(pop)
+#pragma warning(pop)
 #endif
 
 }  // namespace corridorkey::core
