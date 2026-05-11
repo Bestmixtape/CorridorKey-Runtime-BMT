@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <corridorkey/detail/constants.hpp>
 #include <corridorkey/engine.hpp>
 #include <optional>
+#include <string_view>
 
 #include "windows_rtx_probe_internal.hpp"
 
@@ -13,6 +15,10 @@
 #include <dxgi1_6.h>
 #include <windows.h>
 #include <wrl/client.h>
+#ifndef ORT_API_MANUAL_INIT
+#define ORT_API_MANUAL_INIT
+#endif
+#include <onnxruntime/onnxruntime_cxx_api.h>
 #endif
 
 namespace corridorkey::core {
@@ -223,28 +229,90 @@ std::vector<detail::CudaDeviceIdentity> enumerate_cuda_devices() {
     return devices;
 }
 
+bool provider_available(const std::string& provider_name) {
+    try {
+        // ORT_API_MANUAL_INIT is project-wide (see inference_session.hpp).
+        // The CLI info / device-list path does not go through the runtime
+        // server's process-context bootstrap, so Ort::InitApi has not been
+        // called when this probe runs. Initialise lazily here on first use;
+        // subsequent calls are no-ops because InitApi is idempotent.
+        static const bool kOrtInitialized = [] {
+            Ort::InitApi();
+            return true;
+        }();
+        (void)kOrtInitialized;
+        Ort::Env dummy_env{ORT_LOGGING_LEVEL_WARNING, "probe"};
+        auto providers = Ort::GetAvailableProviders();
+        return std::ranges::find(providers, provider_name) != providers.end();
+    } catch (...) {
+        return false;
+    }
+}
+
+bool onnxruntime_export_available(const char* export_name) {
+    HMODULE runtime_module = GetModuleHandleW(L"onnxruntime.dll");
+    if (runtime_module == nullptr) {
+        runtime_module = LoadLibraryW(L"onnxruntime.dll");
+    }
+    if (runtime_module == nullptr) {
+        return false;
+    }
+    return GetProcAddress(runtime_module, export_name) != nullptr;
+}
+
 #endif
 
 }  // namespace
 
+// Spec 0002 dedicated-node split: restore the legacy provider-availability
+// probes from main. The torchtrt investigation branch hardcoded every helper
+// to false because its experimental product path routed Green through the
+// Torch-TensorRT runtime and never asked ONNX Runtime which providers it
+// had loaded. The dedicated-node release needs honest answers here so the
+// packaged doctor reports tensorrt_rtx_available alongside the TorchTRT
+// flag for each detected RTX adapter.
 bool tensorrt_rtx_provider_available() {
+#ifdef _WIN32
+    return provider_available(std::string(corridorkey::detail::providers::TENSORRT));
+#else
     return false;
+#endif
 }
 
 bool cuda_provider_available() {
+#ifdef _WIN32
+    return provider_available(std::string(corridorkey::detail::providers::CUDA));
+#else
     return false;
+#endif
 }
 
 bool directml_provider_available() {
+#ifdef _WIN32
+    return onnxruntime_export_available("OrtSessionOptionsAppendExecutionProvider_DML") ||
+           provider_available("DML") || provider_available("DirectML") ||
+           provider_available(std::string(corridorkey::detail::providers::DIRECTML));
+#else
     return false;
+#endif
 }
 
 bool winml_provider_available() {
+#ifdef _WIN32
+    return provider_available("WinML") ||
+           provider_available(std::string(corridorkey::detail::providers::WINML));
+#else
     return false;
+#endif
 }
 
 bool openvino_provider_available() {
+#ifdef _WIN32
+    return provider_available("OpenVINO") ||
+           provider_available(std::string(corridorkey::detail::providers::OPENVINO));
+#else
     return false;
+#endif
 }
 
 std::vector<WindowsGpuInfo> list_windows_gpus() {
