@@ -18,6 +18,7 @@
 #include "ofxProperty.h"
 #include "ofx_constants.hpp"
 #include "ofx_model_selection.hpp"
+#include "ofx_plugin_descriptors.hpp"
 #include "post_process/alpha_edge.hpp"
 
 #ifdef _WIN32
@@ -32,13 +33,10 @@ namespace corridorkey::ofx {
 
 class OfxRuntimeClient;
 
-// The plugin identifier carries the legacy ".resolve" suffix because changing
-// it would orphan every existing CorridorKey node in saved DaVinci Resolve
-// projects. The string is otherwise opaque to OFX hosts and the plugin runs
-// unchanged in any spec-compliant host (Resolve, Foundry Nuke, others).
-constexpr const char* kPluginIdentifier = "com.corridorkey.resolve";
-constexpr const char* kPluginLabel = "CorridorKey";
-constexpr const char* kPluginGroup = "Keying";
+// Per-descriptor identifiers and labels live in ofx_plugin_descriptors.hpp.
+// kPluginIdentifierGreen preserves the legacy reverse-DNS string that saved
+// Resolve projects depend on; kPluginIdentifierBlue is the dedicated-screen
+// identifier locked at acceptance of ADR-0006.
 
 // Values that supported hosts report for their kOfxPropName host property
 // (the globally unique reverse-DNS string defined by ofxCore.h). Sourced from
@@ -433,7 +431,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance);
 OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle in_args);
 
 OfxStatus on_load();
-OfxStatus describe(OfxImageEffectHandle descriptor);
+OfxStatus describe(OfxImageEffectHandle descriptor, const char* plugin_identifier);
 OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* context);
 OfxStatus create_instance(OfxImageEffectHandle instance);
 OfxStatus destroy_instance(OfxImageEffectHandle instance);

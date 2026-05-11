@@ -1,6 +1,6 @@
 # ADR-0006: Expose Dedicated OFX Nodes
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-05-10
 **Deciders:** Runtime maintainers
 
@@ -20,9 +20,16 @@ screen-color policy coercion.
 
 ## Decision
 
-We will ship one OFX bundle that exposes two OFX plugin descriptors: the legacy
-Green descriptor keeps `com.corridorkey.resolve`, and the Blue descriptor gets a
-new stable reverse-DNS identifier before descriptor implementation begins.
+We will ship one OFX bundle that exposes two OFX plugin descriptors:
+
+- The legacy Green descriptor keeps the persisted identifier
+  `com.corridorkey.resolve` and its existing label.
+- The Blue descriptor uses the stable reverse-DNS identifier
+  `com.corridorkey.resolve.blue` and the user-visible label `CorridorKey Blue`.
+
+Both identifier strings and the Blue label are persisted product contracts.
+They are locked at acceptance of this ADR and may not be renamed without a
+superseding ADR.
 
 The bundle remains one installable plugin package for now. Runtime selection,
 model selection, session caching, diagnostics, and packaging must treat the two

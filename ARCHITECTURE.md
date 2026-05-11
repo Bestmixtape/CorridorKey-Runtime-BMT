@@ -359,4 +359,5 @@ Superseded or proposed ADRs are not listed here.
 | [ADR-0003](doc/adr/0003-run-torchtrt-input-prep-on-torch-current-stream.md) | TorchTRT input prep runs on Torch's current stream to avoid cross-stream readiness waits. |
 | [ADR-0004](doc/adr/0004-own-torchtrt-work-stream.md) | TorchTRT owns a dedicated work stream guarded against host-side serialization. |
 | [ADR-0005](doc/adr/0005-default-ofx-torchtrt-cuda-graph-off.md) | OFX TorchTRT defaults to CUDA Graph capture off; graph capture is opt-in. |
+| [ADR-0006](doc/adr/0006-expose-dedicated-ofx-nodes.md) | One OFX bundle exposes two dedicated descriptors: legacy Green (`com.corridorkey.resolve`) and new Blue (`com.corridorkey.resolve.blue`, label `CorridorKey Blue`). Both identifier strings and the Blue label are persisted product contracts. |
 

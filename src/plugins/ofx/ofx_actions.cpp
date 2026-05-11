@@ -250,7 +250,7 @@ void define_group_param(OfxParamSetHandle param_set, const char* name, const cha
 
 }  // namespace
 
-OfxStatus describe(OfxImageEffectHandle descriptor) {
+OfxStatus describe(OfxImageEffectHandle descriptor, const char* plugin_identifier) {
     if (g_suites.property == nullptr || g_suites.image_effect == nullptr) {
         log_message("describe", "Missing property or image_effect suite.");
         return kOfxStatErrMissingHostFeature;
@@ -262,9 +262,10 @@ OfxStatus describe(OfxImageEffectHandle descriptor) {
         return kOfxStatFailed;
     }
 
-    std::string long_label = std::string(kPluginLabel) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
-    g_suites.property->propSetString(props, kOfxPropLabel, 0, kPluginLabel);
-    g_suites.property->propSetString(props, kOfxPropShortLabel, 0, kPluginLabel);
+    const char* plugin_label = label_for_identifier(plugin_identifier);
+    std::string long_label = std::string(plugin_label) + " v" + CORRIDORKEY_DISPLAY_VERSION_STRING;
+    g_suites.property->propSetString(props, kOfxPropLabel, 0, plugin_label);
+    g_suites.property->propSetString(props, kOfxPropShortLabel, 0, plugin_label);
     g_suites.property->propSetString(props, kOfxPropLongLabel, 0, long_label.c_str());
     std::string description =
         std::string("CorridorKey AI chroma screen keyer v") + CORRIDORKEY_DISPLAY_VERSION_STRING;

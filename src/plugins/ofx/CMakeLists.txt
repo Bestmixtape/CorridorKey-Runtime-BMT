@@ -15,6 +15,8 @@ if(WIN32)
         ofx_instance.cpp
         ofx_logging.cpp
         ofx_plugin.cpp
+        ofx_plugin_descriptors.cpp
+        ofx_plugin_descriptors.hpp
         ofx_render.cpp
         ofx_image_utils.hpp
         ofx_logging.hpp
@@ -31,6 +33,8 @@ else()
         ofx_instance.cpp
         ofx_logging.cpp
         ofx_plugin.cpp
+        ofx_plugin_descriptors.cpp
+        ofx_plugin_descriptors.hpp
         ofx_render.cpp
         ofx_image_utils.hpp
         ofx_logging.hpp

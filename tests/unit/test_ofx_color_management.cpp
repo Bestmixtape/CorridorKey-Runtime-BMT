@@ -476,7 +476,8 @@ TEST_CASE("ofx descriptor advertises core colour management support", "[unit][of
     SuiteScope suites;
     FakeEffect descriptor;
 
-    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
+    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                     kPluginIdentifierGreen) == kOfxStatOK);
     CHECK(prop_strings(descriptor.props, kOfxImageEffectPropColourManagementStyle).front() ==
           kOfxImageEffectColourManagementCore);
     CHECK(prop_strings(descriptor.props, kOfxImageEffectPropColourManagementAvailableConfigs)
@@ -540,7 +541,8 @@ TEST_CASE("describe_in_context makes deterministic screen paths explicit in OFX 
     SuiteScope suites;
     FakeEffect descriptor;
 
-    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
+    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                     kPluginIdentifierGreen) == kOfxStatOK);
     REQUIRE(describe_in_context(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
                                 kOfxImageEffectContextFilter) == kOfxStatOK);
 
@@ -754,7 +756,8 @@ TEST_CASE("describe omits OFX 1.5 colour management properties on Foundry Nuke",
 
     auto previous_host_name = g_host_name;
     g_host_name = kHostNameNuke;
-    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor)) == kOfxStatOK);
+    REQUIRE(describe(reinterpret_cast<OfxImageEffectHandle>(&descriptor),
+                     kPluginIdentifierGreen) == kOfxStatOK);
     g_host_name = previous_host_name;
 
     CHECK(prop_strings(descriptor.props, kOfxImageEffectPropColourManagementStyle).empty());

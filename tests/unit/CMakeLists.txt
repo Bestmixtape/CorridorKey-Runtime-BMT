@@ -6,6 +6,7 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_instance.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
     test_alpha_edge.cpp
@@ -25,6 +26,7 @@ add_executable(test_unit
     test_model_input_normalization.cpp
     test_ort_process_context.cpp
     test_ofx_color_management.cpp
+    test_ofx_descriptor_split.cpp
     test_ofx_frame_cache.cpp
     test_ofx_help_routing.cpp
     test_ofx_host_detection.cpp

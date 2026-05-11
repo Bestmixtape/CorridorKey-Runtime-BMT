@@ -15,23 +15,19 @@ namespace corridorkey::ofx {
 // ofx_plugin.cpp tidy-suppression rationale.
 //
 // The OpenFX 1.4 C ABI mandates a fixed set of TU-local globals (host,
-// suite pointers, plugin descriptor) that the host queries through
-// OfxSetHost / OfxGetPlugin. The host hands actions in as a void*
-// handle that the spec requires the plugin to interpret as the typed
-// OfxImageEffectHandle - the reinterpret_cast plus const_cast pair is
-// the canonical OFX dispatcher form. plugin_main_entry's size and
-// branching reflects the action-dispatch table the spec defines, not
-// accidental complexity. The g_plugin POD is initialised in the field
-// order required by the OfxPlugin struct contract; designated
-// initialisers would obscure the spec field order.
+// suite pointers) that the host queries through OfxSetHost. The host
+// hands actions in as a void* handle that the spec requires the plugin
+// to interpret as the typed OfxImageEffectHandle - the reinterpret_cast
+// plus const_cast pair is the canonical OFX dispatcher form.
+// plugin_main_entry_dispatch's size and branching reflects the
+// action-dispatch table the spec defines, not accidental complexity.
+// The two OfxPlugin descriptor PODs (Green and Blue) live in
+// ofx_plugin_descriptors.cpp so the unit test target can link the
+// descriptor surface without pulling the entire dispatcher in.
 OfxHost* g_host = nullptr;
 OfxSuites g_suites = {};
 std::unique_ptr<SharedFrameCache> g_frame_cache = nullptr;
 std::string g_host_name;
-
-static void set_host(OfxHost* host) {
-    g_host = host;
-}
 
 // Reads the host's kOfxPropName into g_host_name. Per the OpenFX 1.4 spec
 // (ofxCore.h, kOfxPropName) this is the globally unique reverse-DNS string
@@ -262,8 +258,9 @@ OfxStatus on_load() {
     return kOfxStatOK;
 }
 
-static OfxStatus plugin_main_entry(const char* action, const void* handle,
-                                   OfxPropertySetHandle in_args, OfxPropertySetHandle out_args) {
+OfxStatus plugin_main_entry_dispatch(const char* plugin_identifier, const char* action,
+                                     const void* handle, OfxPropertySetHandle in_args,
+                                     OfxPropertySetHandle out_args) {
     try {
         // Suppress high-frequency bookkeeping actions from the log. Render fires
         // per frame; BeginInstanceChanged/EndInstanceChanged fire as wrappers
@@ -280,7 +277,8 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
             return on_load();
         }
         if (std::strcmp(action, kOfxActionDescribe) == 0) {
-            return describe(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)));
+            return describe(reinterpret_cast<OfxImageEffectHandle>(const_cast<void*>(handle)),
+                            plugin_identifier);
         }
         if (std::strcmp(action, kOfxImageEffectActionDescribeInContext) == 0) {
             const char* context_value = kOfxImageEffectContextFilter;
@@ -361,12 +359,6 @@ static OfxStatus plugin_main_entry(const char* action, const void* handle,
     }
 }
 
-static OfxPlugin g_plugin = {
-    kOfxImageEffectPluginApi,  kOfxImageEffectPluginApiVersion, kPluginIdentifier,
-    CORRIDORKEY_VERSION_MAJOR, CORRIDORKEY_VERSION_MINOR,       &set_host,
-    &plugin_main_entry,
-};
-
 }  // namespace corridorkey::ofx
 
 extern "C" {
@@ -375,7 +367,7 @@ CORRIDORKEY_OFX_EXPORT OfxStatus OfxSetHost(const OfxHost* host) {
     try {
         corridorkey::ofx::log_message("OfxSetHost",
                                       host == nullptr ? "Host pointer is null." : "Host received.");
-        corridorkey::ofx::set_host(const_cast<OfxHost*>(host));
+        corridorkey::ofx::g_host = const_cast<OfxHost*>(host);
         return kOfxStatOK;
     } catch (...) {
         return kOfxStatFailed;
@@ -384,8 +376,10 @@ CORRIDORKEY_OFX_EXPORT OfxStatus OfxSetHost(const OfxHost* host) {
 
 CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
     try {
-        corridorkey::ofx::log_message("OfxGetNumberOfPlugins", "Returning 1.");
-        return 1;
+        const int count = corridorkey::ofx::descriptor_count();
+        corridorkey::ofx::log_message("OfxGetNumberOfPlugins",
+                                      std::string("Returning ") + std::to_string(count) + ".");
+        return count;
     } catch (...) {
         return 0;
     }
@@ -393,12 +387,14 @@ CORRIDORKEY_OFX_EXPORT int OfxGetNumberOfPlugins(void) {
 
 CORRIDORKEY_OFX_EXPORT OfxPlugin* OfxGetPlugin(int nth) {
     try {
+        OfxPlugin* descriptor = corridorkey::ofx::descriptor_at(nth);
         corridorkey::ofx::log_message(
-            "OfxGetPlugin", nth == 0 ? "Returning plugin 0." : "Requested invalid index.");
-        if (nth == 0) {
-            return &corridorkey::ofx::g_plugin;
-        }
-        return nullptr;
+            "OfxGetPlugin",
+            descriptor != nullptr
+                ? std::string("Returning plugin ") + std::to_string(nth) + " (" +
+                      descriptor->pluginIdentifier + ")."
+                : std::string("Requested invalid index ") + std::to_string(nth) + ".");
+        return descriptor;
     } catch (...) {
         return nullptr;
     }

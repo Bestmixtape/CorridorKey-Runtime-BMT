@@ -28,6 +28,7 @@
 #endif
 
 typedef OfxPlugin* (*OfxGetPluginFunc)(int);
+typedef int (*OfxGetNumberOfPluginsFunc)(void);
 typedef OfxStatus (*OfxSetHostFunc)(const OfxHost*);
 
 extern "C" {
@@ -114,6 +115,52 @@ TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
 
     // 4. Validate that the host application did not crash and gracefully captured kOfxStatFailed
     REQUIRE(exception_status == kOfxStatFailed);
+
+#if defined(_WIN32)
+    FreeLibrary(handle);
+#else
+    dlclose(handle);
+#endif
+#endif
+}
+
+TEST_CASE("OFX bundle exposes Green and Blue descriptors over the C ABI",
+          "[integration][ofx][descriptor]") {
+#if defined(CORRIDORKEY_DEPS_HAVE_ASAN)
+    SKIP(
+        "ASAN-instrumented dependency aborts on late dlopen; "
+        "coverage ships via non-sanitized preset runs.");
+#else
+    std::string plugin_path = OFX_PLUGIN_PATH;
+#if defined(_WIN32)
+    HMODULE handle = LoadLibraryA(plugin_path.c_str());
+    REQUIRE(handle != nullptr);
+    auto p_OfxGetNumberOfPlugins =
+        (OfxGetNumberOfPluginsFunc)GetProcAddress(handle, "OfxGetNumberOfPlugins");
+    auto p_OfxGetPlugin = (OfxGetPluginFunc)GetProcAddress(handle, "OfxGetPlugin");
+#else
+    void* handle = dlopen(plugin_path.c_str(), RTLD_LAZY);
+    REQUIRE(handle != nullptr);
+    auto p_OfxGetNumberOfPlugins =
+        (OfxGetNumberOfPluginsFunc)dlsym(handle, "OfxGetNumberOfPlugins");
+    auto p_OfxGetPlugin = (OfxGetPluginFunc)dlsym(handle, "OfxGetPlugin");
+#endif
+
+    REQUIRE(p_OfxGetNumberOfPlugins != nullptr);
+    REQUIRE(p_OfxGetPlugin != nullptr);
+
+    REQUIRE(p_OfxGetNumberOfPlugins() == 2);
+
+    OfxPlugin* green = p_OfxGetPlugin(0);
+    REQUIRE(green != nullptr);
+    REQUIRE(std::string(green->pluginIdentifier) == "com.corridorkey.resolve");
+
+    OfxPlugin* blue = p_OfxGetPlugin(1);
+    REQUIRE(blue != nullptr);
+    REQUIRE(std::string(blue->pluginIdentifier) == "com.corridorkey.resolve.blue");
+
+    REQUIRE(p_OfxGetPlugin(2) == nullptr);
+    REQUIRE(p_OfxGetPlugin(-1) == nullptr);
 
 #if defined(_WIN32)
     FreeLibrary(handle);
