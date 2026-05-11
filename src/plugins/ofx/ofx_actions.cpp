@@ -542,20 +542,40 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
 
-    // Per-descriptor screen-color contract (spec 0002 FR-8): the Blue node
-    // locks screen_color to Blue and hides the chooser, so users cannot
-    // accidentally flip a dedicated Blue node into the Green model path.
-    // Green keeps the mutable chooser so saved projects that relied on the
-    // historical Blue-Green channel-swap fallback continue to load and
-    // render with their persisted choice.
-    const int screen_color_default = is_blue_descriptor ? kScreenColorBlue : kDefaultScreenColor;
+    // Per-descriptor screen-color contract (spec 0002 FR-8):
+    //
+    // - Blue descriptor hides the chooser entirely (secret=true) and
+    //   exposes a single option indexed at 0. The dedicated Blue model is
+    //   the only valid path; the render override in ofx_render.cpp maps
+    //   the raw choice value to kScreenColorBlue regardless of what the
+    //   param reports, so the param's actual storage shape stays clean
+    //   even on hosts that ignore secret-param defaults.
+    // - Green descriptor exposes a TWO-option chooser:
+    //   index 0 = Green direct (maps to kScreenColorGreen),
+    //   index 1 = Blue-Green Channel Swap (maps to kScreenColorBlueGreen).
+    //   Standalone "Blue" is no longer offered on the Green descriptor
+    //   because the dedicated Blue node serves that workflow now. Saved
+    //   projects whose Green node had the legacy `kScreenColorBlue` (1)
+    //   value naturally land on index 1 in the new layout, which the
+    //   render path remaps to Blue-Green Channel Swap — the closest
+    //   deterministic equivalent using the Green model.
+    const int screen_color_default = 0;
+    const std::vector<const char*> screen_color_options =
+        is_blue_descriptor
+            ? std::vector<const char*>{"Blue"}
+            : std::vector<const char*>{"Green", "Blue-Green Channel Swap"};
+    const char* screen_color_hint =
+        is_blue_descriptor
+            ? "Locked to Blue for this dedicated node. The screen path uses the "
+              "Blue Torch-TensorRT model directly."
+            : "Select the deterministic Green path. 'Green' uses the optimized "
+              "Green model on a green screen plate. 'Blue-Green Channel Swap' "
+              "maps a blue screen plate into the Green model domain via the "
+              "validated channel-swap technique. For a blue screen with the "
+              "dedicated Blue model, use the CorridorKey Blue node.";
     define_choice_param(param_set, kParamScreenColor, "Screen Color", screen_color_default,
-                        {"Green", "Blue", "Blue-Green Channel Swap"},
-                        "Select the deterministic screen path. Green uses the optimized green "
-                        "model. Blue uses the dedicated CorridorKeyBlue model. Blue-Green "
-                        "Channel Swap maps a blue screen into the green model domain for the "
-                        "explicit channel-swap fallback path.",
-                        "setup_group", /*enabled=*/true, /*secret=*/is_blue_descriptor);
+                        screen_color_options, screen_color_hint, "setup_group",
+                        /*enabled=*/true, /*secret=*/is_blue_descriptor);
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),

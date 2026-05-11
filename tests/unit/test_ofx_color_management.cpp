@@ -558,12 +558,13 @@ TEST_CASE("describe_in_context makes deterministic screen paths explicit in OFX 
               .find("chroma screen keyer") != std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
-              .find("deterministic screen path") != std::string::npos);
-    CHECK(prop_strings(screen_color_props, kOfxParamPropHint).front().find("CorridorKeyBlue") !=
-          std::string::npos);
+              .find("deterministic Green path") != std::string::npos);
     CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
               .front()
-              .find("Blue-Green") != std::string::npos);
+              .find("dedicated Blue model, use the CorridorKey Blue node") != std::string::npos);
+    CHECK(prop_strings(screen_color_props, kOfxParamPropHint)
+              .front()
+              .find("Blue-Green Channel Swap") != std::string::npos);
     CHECK(prop_strings(despill_props, kOfxParamPropHint).front().find("selected screen color") !=
           std::string::npos);
     CHECK(prop_strings(spill_method_props, kOfxParamPropHint)
@@ -660,7 +661,7 @@ TEST_CASE("describe_in_context keeps runtime first and help second with advanced
 // Spec 0002 FR-8 + task 0009: dedicated Blue nodes lock screen_color and
 // hide the chooser. Verifies describe_in_context emits the right defaults
 // and secret state per descriptor identity.
-TEST_CASE("Blue descriptor describe_in_context locks screen_color to Blue and hides the chooser",
+TEST_CASE("Blue descriptor describe_in_context locks screen_color to a single hidden option",
           "[unit][ofx][descriptor]") {
     SuiteScope suites;
     FakeEffect descriptor;
@@ -670,13 +671,18 @@ TEST_CASE("Blue descriptor describe_in_context locks screen_color to Blue and hi
                                 kPluginIdentifierBlue) == kOfxStatOK);
 
     const auto& screen_color_props = descriptor.param_set.params.at(kParamScreenColor)->props;
+    // The Blue descriptor exposes a single-option choice list at index 0.
+    // The descriptor identity (not the param value) is the authoritative
+    // signal at render time — ofx_render.cpp forces kScreenColorBlue.
     REQUIRE(screen_color_props.ints.count(kOfxParamPropDefault) == 1);
-    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == kScreenColorBlue);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == 0);
     REQUIRE(screen_color_props.ints.count(kOfxParamPropSecret) == 1);
     REQUIRE(screen_color_props.ints.at(kOfxParamPropSecret).front() == 1);
+    REQUIRE(screen_color_props.strings.at(kOfxParamPropChoiceOption) ==
+            std::vector<std::string>{"Blue"});
 }
 
-TEST_CASE("Green descriptor describe_in_context keeps screen_color visible at default Green",
+TEST_CASE("Green descriptor describe_in_context exposes Green and Blue-Green Channel Swap only",
           "[unit][ofx][descriptor]") {
     SuiteScope suites;
     FakeEffect descriptor;
@@ -687,8 +693,9 @@ TEST_CASE("Green descriptor describe_in_context keeps screen_color visible at de
 
     const auto& screen_color_props = descriptor.param_set.params.at(kParamScreenColor)->props;
     REQUIRE(screen_color_props.ints.count(kOfxParamPropDefault) == 1);
-    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == kDefaultScreenColor);
-    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == kScreenColorGreen);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == 0);
+    REQUIRE(screen_color_props.strings.at(kOfxParamPropChoiceOption) ==
+            std::vector<std::string>{"Green", "Blue-Green Channel Swap"});
     // kOfxParamPropSecret is either absent (default 0) or explicitly 0.
     const auto secret_it = screen_color_props.ints.find(kOfxParamPropSecret);
     if (secret_it != screen_color_props.ints.end()) {

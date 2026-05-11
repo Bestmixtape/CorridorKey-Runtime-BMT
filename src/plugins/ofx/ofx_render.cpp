@@ -781,15 +781,25 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->screen_color_param) {
         g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
     }
-    // Spec 0002 FR-8 / task 0009: dedicated Blue nodes must not be coerced
-    // into the Green model path even if the persisted screen_color value
-    // disagrees (corrupted project, programmer error, or a Green project
-    // legacy-loaded into a Blue descriptor by a saved-graph migration).
-    // The descriptor identity is the authoritative signal — override the
-    // param read here so all downstream model-selection sites observe a
-    // Blue request.
+    // Spec 0002 FR-8 / task 0009: translate the raw OFX choice index into a
+    // semantic ScreenColorMode based on the descriptor's identity. The
+    // descriptor identity is the authoritative signal; the OFX-index
+    // mapping varies per descriptor (Blue has a 1-option locked list,
+    // Green has a 2-option {direct, BG-swap} list).
     if (is_blue_node_identifier(data->plugin_identifier)) {
+        // Blue descriptor: any param value resolves to the dedicated Blue
+        // model path. Guards against corrupted projects, programmer
+        // errors, or a saved-graph migration that crossed identities.
         screen_color = kScreenColorBlue;
+    } else {
+        // Green descriptor: the new 2-option chooser maps index 0 → Green
+        // direct and index 1 → Blue-Green Channel Swap. Saved projects
+        // that had the legacy 3-option layout (with standalone "Blue" at
+        // index 1) land on index 1 too — render them as Blue-Green
+        // Channel Swap, the closest deterministic equivalent using the
+        // Green model. Out-of-range values (legacy index 2 from before
+        // the chooser shrank) also resolve to Blue-Green Channel Swap.
+        screen_color = (screen_color <= 0) ? kScreenColorGreen : kScreenColorBlueGreen;
     }
     if (data->temporal_smoothing_param) {
         g_suites.parameter->paramGetValueAtTime(data->temporal_smoothing_param, time,

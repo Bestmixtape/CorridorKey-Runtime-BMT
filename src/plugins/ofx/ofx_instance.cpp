@@ -208,7 +208,13 @@ std::string processing_backend_label(Backend backend) {
         case Backend::TorchTRT:
             return "Torch-TensorRT GPU";
         default:
-            return "Auto";
+            // Backend::Auto is the transient state between create_instance
+            // (which defers the runtime-server bootstrap) and the first
+            // prepare_session response. The dedicated-node UX intent rules
+            // out exposing an "Auto" label anywhere in the surface — show
+            // an honest "Initializing..." instead so users see loading
+            // state, not a heuristic.
+            return "Initializing...";
     }
 }
 
