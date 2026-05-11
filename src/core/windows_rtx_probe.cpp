@@ -256,6 +256,12 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
     }
 
     const auto cuda_devices = enumerate_cuda_devices();
+    // Spec 0002 dedicated-node split: query TensorRT-RTX provider availability
+    // once so each detected RTX GPU advertises tensorrt_rtx_available
+    // alongside its cuda flag. The torchtrt investigation branch dropped this
+    // hoist (and forced the flag to false); the dedicated-node release
+    // restores it so the Green ORT TensorRT path is visible to the doctor.
+    const bool trt_available = tensorrt_rtx_provider_available();
 
     for (UINT adapter_index = 0;; ++adapter_index) {
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
@@ -289,7 +295,17 @@ std::vector<WindowsGpuInfo> list_windows_gpus() {
                 info.driver_query_available = true;
                 info.compute_capability_major = cuda_device->compute_capability_major;
                 info.compute_capability_minor = cuda_device->compute_capability_minor;
-                info.tensorrt_rtx_available = false;
+                // Spec 0002 dedicated-node split: TensorRT-RTX must remain
+                // available alongside TorchTRT so the Green node routes
+                // through the ONNX Runtime TensorRT path. The torchtrt
+                // investigation branch zeroed this flag (forcing every RTX
+                // GPU through TorchTRT); the dedicated-node release
+                // restores the legacy detection from main so both backends
+                // co-exist.
+                info.tensorrt_rtx_available =
+                    info.is_rtx && trt_available &&
+                    detail::compute_capability_supports_tensorrt_rtx(info.compute_capability_major,
+                                                                     info.compute_capability_minor);
             }
         } else if (info.vendor_id == kIntelVendorId) {
             info.openvino_available = false;
