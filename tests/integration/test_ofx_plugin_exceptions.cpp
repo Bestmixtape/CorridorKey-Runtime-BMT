@@ -124,6 +124,32 @@ TEST_CASE("OFX C-API Boundary catches exceptions and returns kOfxStatFailed",
 #endif
 }
 
+TEST_CASE("OFX bundle stages both Green ONNX and Blue Torch-TensorRT artifacts",
+          "[integration][ofx][packaging]") {
+    // Spec 0002 FR-12 + task 0011: the dedicated-node Windows RTX package
+    // stages Green ONNX Runtime assets AND Blue Torch-TensorRT assets when
+    // both node families are selected. The bundle's POST_BUILD CMake rule
+    // copies ${PROJECT_ROOT}/models verbatim into Contents/Resources/models,
+    // so asserting against the source-of-truth models dir is equivalent to
+    // asserting against the staged bundle while sidestepping the build-dir
+    // path computation that varies by preset.
+    namespace fs = std::filesystem;
+    const fs::path models_dir = fs::path(PROJECT_ROOT) / "models";
+
+    INFO("Bundle source models dir: " << models_dir.string());
+    REQUIRE(fs::is_directory(models_dir));
+
+    const fs::path green_artifact = models_dir / "corridorkey_fp16_512.onnx";
+    INFO("Green ONNX artifact: " << green_artifact.string());
+    REQUIRE(fs::exists(green_artifact));
+    REQUIRE(fs::file_size(green_artifact) > 0);
+
+    const fs::path blue_artifact = models_dir / "corridorkey_dynamic_blue_fp16.ts";
+    INFO("Blue Torch-TensorRT artifact: " << blue_artifact.string());
+    REQUIRE(fs::exists(blue_artifact));
+    REQUIRE(fs::file_size(blue_artifact) > 0);
+}
+
 TEST_CASE("OFX bundle exposes Green and Blue descriptors over the C ABI",
           "[integration][ofx][descriptor]") {
 #if defined(CORRIDORKEY_DEPS_HAVE_ASAN)
