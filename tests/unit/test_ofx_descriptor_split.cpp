@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "common/runtime_paths.hpp"
 #include "ofxImageEffect.h"
 #include "plugins/ofx/ofx_plugin_descriptors.hpp"
 
@@ -120,6 +121,28 @@ TEST_CASE("is_blue_node_identifier classifies descriptor identities correctly",
     // string — the helper falls back to string_view comparison.
     const std::string blue_copy = kPluginIdentifierBlue;
     REQUIRE(is_blue_node_identifier(blue_copy.c_str()));
+}
+
+TEST_CASE("Sidecar ports are distinct per node-family identifier",
+          "[unit][ofx][descriptor][runtime]") {
+    // Spec 0002 task 0010 follow-up: Green and Blue must compute different
+    // sidecar ports so they get separate runtime-server processes. Same
+    // family converges on one port; legacy empty-family hash matches the
+    // backwards-compat default_ofx_runtime_port.
+    const auto green_port =
+        corridorkey::common::default_ofx_runtime_port_for_family(kPluginIdentifierGreen);
+    const auto blue_port =
+        corridorkey::common::default_ofx_runtime_port_for_family(kPluginIdentifierBlue);
+    REQUIRE(green_port != blue_port);
+
+    const auto green_port_again =
+        corridorkey::common::default_ofx_runtime_port_for_family(kPluginIdentifierGreen);
+    REQUIRE(green_port_again == green_port);
+
+    const auto legacy_port = corridorkey::common::default_ofx_runtime_port();
+    const auto empty_family_port =
+        corridorkey::common::default_ofx_runtime_port_for_family({});
+    REQUIRE(legacy_port == empty_family_port);
 }
 
 TEST_CASE("Identifier strings have stable storage across descriptor lookups",

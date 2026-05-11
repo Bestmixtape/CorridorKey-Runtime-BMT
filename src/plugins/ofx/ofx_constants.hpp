@@ -28,7 +28,11 @@ inline const char* quality_mode_ui_label(int quality_mode) {
         case kQualityMaximum:
             return "Maximum (2048)";
         default:
-            return "Recommended";
+            // Legacy kQualityAuto slot. The heuristic that previously read this
+            // value was removed in favor of a deterministic static default; the
+            // label is preserved as "Default (Draft 512)" so saved projects
+            // open without an index shift and the dropdown stays self-evident.
+            return "Default (Draft 512)";
     }
 }
 
@@ -43,7 +47,10 @@ inline const char* quality_fallback_mode_ui_label(int choice) {
         case kQualityFallbackCoarseToFine:
             return "Coarse to Fine";
         default:
-            return "Recommended";
+            // Legacy kQualityFallbackAuto slot. Same migration as
+            // quality_mode_ui_label — heuristic removed, label preserved as
+            // "Default (Direct)" to preserve saved-project indices.
+            return "Default (Direct)";
     }
 }
 
@@ -54,7 +61,11 @@ inline QualityFallbackMode quality_fallback_mode_from_choice(int choice) {
         case kQualityFallbackCoarseToFine:
             return QualityFallbackMode::CoarseToFine;
         default:
-            return QualityFallbackMode::Auto;
+            // Was QualityFallbackMode::Auto (heuristic that picked between
+            // Direct and CoarseToFine based on hardware). Now resolves
+            // deterministically to Direct so the saved-project index 0 always
+            // takes the same path regardless of host hardware.
+            return QualityFallbackMode::Direct;
     }
 }
 

@@ -130,8 +130,12 @@ TEST_CASE("fixed mlx quality fails when the exact bridge is unavailable",
     REQUIRE_FALSE(selection.has_value());
 }
 
-TEST_CASE("auto mlx quality may fall back to the highest available lower bridge",
+TEST_CASE("kQualityAuto resolves deterministically to Draft (512) on MLX",
           "[unit][ofx][regression]") {
+    // The kQualityAuto slot previously ran a hardware-dependent heuristic
+    // that climbed the ladder based on input dimensions. The static-default
+    // migration replaces that heuristic with a deterministic 512 rung so
+    // saved-project index 0 renders predictably on every host.
     TempDirGuard temp_dir("corridorkey-ofx-quality-auto");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_512.mlxfn");
     touch_file(temp_dir.path() / "corridorkey_mlx_bridge_1024.mlxfn");
@@ -141,10 +145,10 @@ TEST_CASE("auto mlx quality may fall back to the highest available lower bridge"
         select_quality_artifact(temp_dir.path(), Backend::MLX, kQualityAuto, 4096, 2160);
 
     REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 2048);
-    REQUIRE(selection->effective_resolution == 1536);
-    REQUIRE(selection->used_fallback);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_mlx_bridge_1536.mlxfn");
+    REQUIRE(selection->requested_resolution == 512);
+    REQUIRE(selection->effective_resolution == 512);
+    REQUIRE_FALSE(selection->used_fallback);
+    REQUIRE(selection->executable_model_path.filename() == "corridorkey_mlx_bridge_512.mlxfn");
 }
 
 TEST_CASE("fixed windows tensorRT quality fails when the exact model is unavailable",
@@ -219,7 +223,7 @@ TEST_CASE("fixed windows tensorRT ultra and maximum resolve exact packaged model
 }
 
 TEST_CASE("ofx quality mode labels expose fixed resolutions in the UI", "[unit][ofx][regression]") {
-    REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Recommended");
+    REQUIRE(std::string(quality_mode_ui_label(kQualityAuto)) == "Default (Draft 512)");
     REQUIRE(std::string(quality_mode_ui_label(kQualityPreview)) == "Draft (512)");
     REQUIRE(std::string(quality_mode_ui_label(kQualityHigh)) == "High (1024)");
     REQUIRE(std::string(quality_mode_ui_label(kQualityUltra)) == "Ultra (1536)");
@@ -473,9 +477,13 @@ TEST_CASE("quality compile failure cache invalidates when backend device or mode
     REQUIRE(cache.entries.empty());
 }
 
-TEST_CASE("auto windows tensorRT quality falls back to the highest packaged model",
+TEST_CASE("kQualityAuto fails closed when the Draft (512) artifact is missing",
           "[unit][ofx][regression]") {
-    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto");
+    // Before the static-default migration, kQualityAuto used a hardware-
+    // dependent ladder fallback to find any usable rung. Now kQualityAuto
+    // deterministically requests the 512 artifact and fails when the 512
+    // file is not staged — same contract as kQualityPreview.
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-missing-512");
     touch_file(temp_dir.path() / "corridorkey_fp16_768.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
@@ -490,11 +498,7 @@ TEST_CASE("auto windows tensorRT quality falls back to the highest packaged mode
     auto selection =
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160);
 
-    REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 2048);
-    REQUIRE(selection->effective_resolution == 1536);
-    REQUIRE(selection->used_fallback);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1536.onnx");
+    REQUIRE_FALSE(selection.has_value());
 }
 
 TEST_CASE("auto windows tensorRT resolves small inputs to the 512 rung",
@@ -514,47 +518,34 @@ TEST_CASE("auto windows tensorRT resolves small inputs to the 512 rung",
     REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
-TEST_CASE("auto windows tensorRT quality respects the device VRAM ceiling",
+TEST_CASE("kQualityAuto ignores VRAM and input size after the static-default migration",
           "[unit][ofx][regression]") {
-    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-vram-guardrail");
+    // The legacy heuristic decreased the requested rung when VRAM was tight
+    // or the input was small. After the migration, kQualityAuto is a
+    // synonym for kQualityPreview (Draft 512); the test asserts that the
+    // selection ignores VRAM and input dimensions and always asks for the
+    // 512 rung.
+    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-vram-deterministic");
+    touch_file(temp_dir.path() / "corridorkey_fp16_512.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
     touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
 
-    auto selection = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096,
-                                             2160, 10240);
+    auto selection_low_vram = select_quality_artifact(
+        temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160, 10240);
+    REQUIRE(selection_low_vram.has_value());
+    REQUIRE(selection_low_vram->requested_resolution == 512);
+    REQUIRE(selection_low_vram->effective_resolution == 512);
+    REQUIRE_FALSE(selection_low_vram->used_fallback);
+    REQUIRE(selection_low_vram->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 
-    REQUIRE(selection.has_value());
-    REQUIRE(selection->requested_resolution == 2048);
-    REQUIRE(selection->effective_resolution == 1024);
-    REQUIRE(selection->used_fallback);
-    REQUIRE(selection->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
-}
-
-TEST_CASE("auto windows tensorRT quality keeps direct 2048 only for fully supported tiers",
-          "[unit][ofx][regression]") {
-    TempDirGuard temp_dir("corridorkey-ofx-windows-quality-auto-strong-gpu");
-    touch_file(temp_dir.path() / "corridorkey_fp16_1024.onnx");
-    touch_file(temp_dir.path() / "corridorkey_fp16_1536.onnx");
-    touch_file(temp_dir.path() / "corridorkey_fp16_2048.onnx");
-
-    auto selection_16gb = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto,
-                                                  3200, 1800, 16384);
-    REQUIRE(selection_16gb.has_value());
-    REQUIRE(selection_16gb->requested_resolution == 2048);
-    REQUIRE(selection_16gb->effective_resolution == 1024);
-    REQUIRE(selection_16gb->used_fallback);
-    REQUIRE(selection_16gb->coarse_to_fine);
-    REQUIRE(selection_16gb->executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
-
-    auto selection_24gb = select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto,
-                                                  4096, 2160, 24576);
-    REQUIRE(selection_24gb.has_value());
-    REQUIRE(selection_24gb->requested_resolution == 2048);
-    REQUIRE(selection_24gb->effective_resolution == 2048);
-    REQUIRE_FALSE(selection_24gb->used_fallback);
-    REQUIRE_FALSE(selection_24gb->coarse_to_fine);
-    REQUIRE(selection_24gb->executable_model_path.filename() == "corridorkey_fp16_2048.onnx");
+    auto selection_high_vram = select_quality_artifact(
+        temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160, 24576);
+    REQUIRE(selection_high_vram.has_value());
+    REQUIRE(selection_high_vram->requested_resolution == 512);
+    REQUIRE(selection_high_vram->effective_resolution == 512);
+    REQUIRE_FALSE(selection_high_vram->used_fallback);
+    REQUIRE(selection_high_vram->executable_model_path.filename() == "corridorkey_fp16_512.onnx");
 }
 
 TEST_CASE("fixed windows tensorRT quality reports unsupported tiers before engine creation",

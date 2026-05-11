@@ -1164,6 +1164,12 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
 
     OfxRuntimeClientOptions client_options;
     client_options.endpoint = common::default_ofx_runtime_endpoint();
+    // Spec 0002 task 0010 follow-up: route Green and Blue descriptors to
+    // distinct sidecar ports so each family owns its own server process.
+    // Same-family instances still share a sidecar via the existing Health
+    // probe before launch_server in OfxRuntimeClient::ensure_server_running.
+    client_options.endpoint.port = common::default_ofx_runtime_port_for_family(
+        data->plugin_identifier != nullptr ? data->plugin_identifier : "");
     client_options.server_binary = data->runtime_server_path;
     client_options.request_timeout_ms = render_timeout_s * kMillisecondsPerSecondI;
     client_options.prepare_timeout_ms = prepare_timeout_s * kMillisecondsPerSecondI;

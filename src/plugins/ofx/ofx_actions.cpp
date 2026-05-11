@@ -561,10 +561,10 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
          quality_mode_ui_label(kQualityHigh), quality_mode_ui_label(kQualityUltra),
          quality_mode_ui_label(kQualityMaximum)},
-        "Inference quality. Draft (512) is the default. Recommended follows the current public "
-        "ladder based on input size and the runtime safe quality ceiling for the active hardware "
-        "tier. Higher values produce better detail at the cost of speed. Resolutions: Draft "
-        "(512), High (1024), Ultra (1536), Maximum (2048).",
+        "Inference quality. Draft (512) is the default and the value the legacy 'Default' "
+        "slot resolves to so saved projects render predictably without a host-dependent "
+        "heuristic. Higher values produce better detail at the cost of speed. Resolutions: "
+        "Draft (512), High (1024), Ultra (1536), Maximum (2048).",
         "setup_group");
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
                         kDefaultInputColorSpace, {"sRGB", "Linear", "Host Managed"},
@@ -711,8 +711,9 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         {quality_fallback_mode_ui_label(kQualityFallbackAuto),
          quality_fallback_mode_ui_label(kQualityFallbackDirect),
          quality_fallback_mode_ui_label(kQualityFallbackCoarseToFine)},
-        "Advanced diagnostics override. Recommended chooses the safest runtime path. Direct "
-        "disables coarse-to-fine. Coarse to Fine forces the fallback path.",
+        "Advanced diagnostics override. The 'Default' slot resolves deterministically to "
+        "Direct (no coarse-to-fine). Direct disables coarse-to-fine. Coarse to Fine forces "
+        "the fallback path.",
         "advanced_processing_group");
     define_choice_param(
         param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,

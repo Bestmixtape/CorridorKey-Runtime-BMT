@@ -420,7 +420,18 @@ inline std::filesystem::path ofx_runtime_server_log_path() {
            ("ofx_runtime_server_v" + std::string(CORRIDORKEY_DISPLAY_VERSION_STRING) + ".log");
 }
 
-inline std::uint16_t default_ofx_runtime_port() {
+// Spec 0002 task 0010 follow-up: derive a stable sidecar port per node-family
+// identifier. Green and Blue instances compute distinct ports so each family
+// owns its own sidecar process. N instances of the same family converge on
+// one port (and one sidecar via the existing Health-probe-before-launch
+// logic in OfxRuntimeClient). Mixed Green + Blue end up on different
+// processes, eliminating any in-process ONNX RT ↔ Torch-TensorRT loader
+// collision.
+//
+// The legacy `default_ofx_runtime_port()` (no family argument) stays as the
+// backward-compat entry point for callers that have not been threaded with
+// identity yet; it folds an empty family token into the same hash.
+inline std::uint16_t default_ofx_runtime_port_for_family(std::string_view family_id) {
     if (auto override_port = environment_variable_copy("CORRIDORKEY_OFX_RUNTIME_PORT");
         override_port.has_value()) {
         return static_cast<std::uint16_t>(std::stoi(*override_port));
@@ -429,7 +440,12 @@ inline std::uint16_t default_ofx_runtime_port() {
     auto cache_root = ofx_runtime_root().string();
     constexpr std::uint16_t kBasePort = 43000;
     constexpr std::uint16_t kPortSpan = 1000;
-    return static_cast<std::uint16_t>(kBasePort + (detail::fnv1a_64(cache_root) % kPortSpan));
+    auto seed = cache_root + "|" + std::string(family_id);
+    return static_cast<std::uint16_t>(kBasePort + (detail::fnv1a_64(seed) % kPortSpan));
+}
+
+inline std::uint16_t default_ofx_runtime_port() {
+    return default_ofx_runtime_port_for_family({});
 }
 
 inline std::optional<std::filesystem::path> optimized_model_cache_path(

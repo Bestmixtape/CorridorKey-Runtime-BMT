@@ -340,10 +340,12 @@ inline int resolve_target_resolution(int quality_mode, int input_width, int inpu
     if (quality_mode == kQualityUltra) return selection_detail::kRes1536;
     if (quality_mode == kQualityMaximum) return selection_detail::kRes2048;
 
-    const int max_dim = std::max(input_width, input_height);
-    if (max_dim > selection_detail::kAutoThreshold2048) return selection_detail::kRes2048;
-    if (max_dim > selection_detail::kAutoThreshold1536) return selection_detail::kRes1536;
-    if (max_dim > selection_detail::kAutoThreshold1024) return selection_detail::kRes1024;
+    // Legacy kQualityAuto slot — the input-size heuristic was removed in favor
+    // of a deterministic static default. Resolves to Draft (512) so a saved
+    // project whose persisted index 0 used to mean "Recommended" now renders
+    // at the predictable Draft rung instead of a hardware-dependent value.
+    (void)input_width;
+    (void)input_height;
     return selection_detail::kRes512;
 }
 
