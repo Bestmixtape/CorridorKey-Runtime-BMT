@@ -647,6 +647,15 @@ function Build-OnlineDownloadQueueProcedure {
     # freeze after the user clicked Install. Per-file SHA256 integrity
     # is still enforced via DownloadPage.Add's third argument (Inno
     # verifies after download, before files leave {tmp}).
+    #
+    # Clean install gate: `WizardIsTaskSelected('cleaninstall')` short-
+    # circuits the per-pack cache predicate so every selected pack
+    # enqueues unconditionally. Without this gate the wipe in
+    # CorridorKeyPrepareSelectedPackCaches (which runs in
+    # PrepareToInstall, after wpReady) would delete the staged files
+    # but the download queue would already have skipped them — the
+    # subsequent [Files] install step would then find an empty {tmp}
+    # entry and fail.
     param([object]$Manifest)
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('procedure CorridorKeyEnqueueDownloads(const DownloadPage: TDownloadWizardPage);')
@@ -660,7 +669,7 @@ function Build-OnlineDownloadQueueProcedure {
         $packNameEscaped = ConvertTo-IssEscapedString -Value $pack.Name
         [void]$sb.AppendLine("  if WizardIsComponentSelected('$component') then begin")
         if ($pack.Name -eq "blue-runtime") {
-            [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+            [void]$sb.AppendLine("    if WizardIsTaskSelected('cleaninstall') or not CorridorKeyBlueRuntimeCacheValid then begin")
             foreach ($file in $readyFiles) {
                 $url = ConvertTo-IssEscapedString -Value $file.url
                 $name = ConvertTo-IssEscapedString -Value $file.filename
@@ -672,7 +681,7 @@ function Build-OnlineDownloadQueueProcedure {
         } else {
             $aggregate = Get-PackAggregateSha256 -PackMeta $packMeta
             $aggregateEscaped = ConvertTo-IssEscapedString -Value $aggregate
-            [void]$sb.AppendLine("    if not CorridorKeyPackCacheValid('$destSubdir', '$packNameEscaped', '$aggregateEscaped') then begin")
+            [void]$sb.AppendLine("    if WizardIsTaskSelected('cleaninstall') or not CorridorKeyPackCacheValid('$destSubdir', '$packNameEscaped', '$aggregateEscaped') then begin")
             foreach ($file in $readyFiles) {
                 $url = ConvertTo-IssEscapedString -Value $file.url
                 $name = ConvertTo-IssEscapedString -Value $file.filename
