@@ -420,16 +420,48 @@ function Test-PackExtractsArchive {
         -and ($PackMeta.PSObject.Properties.Match('extract').Count -gt 0 -and $PackMeta.extract)
 }
 
-function Get-ResourceCacheCheck {
+function Get-PackAggregateSha256 {
+    # Aggregate hash for a pack's "ready" files. Algorithm: take each
+    # ready file's sha256 (lowercased hex), sort by filename, join with
+    # \n, then SHA256 the resulting UTF-8 byte sequence. The marker file
+    # written at install-time embeds this exact string; the Pascal
+    # `CorridorKeyPackCacheValid` helper compares against it. A manifest
+    # edit (new file, hash change, file removed) naturally produces a
+    # different aggregate and invalidates the cache.
+    param([object]$PackMeta)
+    $readyFiles = @($PackMeta.files | Where-Object { $_.status -eq 'ready' } | Sort-Object filename)
+    if ($readyFiles.Count -eq 0) {
+        return ""
+    }
+    $sb = [System.Text.StringBuilder]::new()
+    foreach ($file in $readyFiles) {
+        [void]$sb.AppendLine($file.sha256.ToLowerInvariant())
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($sb.ToString())
+        $hash = $sha.ComputeHash($bytes)
+        return -join ($hash | ForEach-Object { $_.ToString("x2") })
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-PackCacheCheck {
+    # Render the `not CorridorKeyPackCacheValid(...)` Pascal expression
+    # used both in [Files] Check: parameters and in the body of the
+    # generated `CorridorKeyEnqueueDownloads` / `CorridorKeyPrepareSelectedPackCaches`
+    # procedures. Pack name is the manifest key; dest_subdir is the
+    # install-time location relative to {app}\Contents\Resources.
     param(
         [string]$DestSubdir,
-        [string]$Filename,
-        [string]$Sha256
+        [string]$PackName,
+        [string]$AggregateSha256
     )
     $subdir = ConvertTo-IssEscapedString -Value ($DestSubdir -replace '/', '\')
-    $name = ConvertTo-IssEscapedString -Value $Filename
-    $hash = ConvertTo-IssEscapedString -Value $Sha256
-    return "CorridorKeyShouldInstallResourceFile('$subdir', '$name', '$hash')"
+    $name = ConvertTo-IssEscapedString -Value $PackName
+    $hash = ConvertTo-IssEscapedString -Value $AggregateSha256
+    return "CorridorKeyPackCacheValid('$subdir', '$name', '$hash')"
 }
 
 function Build-OnlineExternalFilesBlock {
@@ -441,6 +473,7 @@ function Build-OnlineExternalFilesBlock {
         $component = $packMeta.component
         $destSubdir = $packMeta.dest_subdir -replace '/', '\'
         $isExtractArchive = Test-PackExtractsArchive -PackMeta $packMeta
+        $packAggregateSha256 = Get-PackAggregateSha256 -PackMeta $packMeta
         foreach ($file in $packMeta.files) {
             if ($file.status -ne 'ready') { continue }
             $line = "Source: `"{tmp}\$($file.filename)`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; ExternalSize: $($file.size_bytes); Flags: external ignoreversion"
@@ -450,7 +483,7 @@ function Build-OnlineExternalFilesBlock {
                     $line += "; Check: not CorridorKeyBlueRuntimeCacheValid"
                 }
             } else {
-                $line += "; Check: $(Get-ResourceCacheCheck -DestSubdir $destSubdir -Filename $file.filename -Sha256 $file.sha256)"
+                $line += "; Check: not $(Get-PackCacheCheck -DestSubdir $destSubdir -PackName $pack.Name -AggregateSha256 $packAggregateSha256)"
             }
             [void]$sb.AppendLine($line)
         }
@@ -478,6 +511,7 @@ function Build-OfflineFilesBlock {
         $destSubdir = $packMeta.dest_subdir -replace '/', '\'
         $packDir = Join-Path $PayloadRoot $destSubdir
         $isExtractArchive = Test-PackExtractsArchive -PackMeta $packMeta
+        $packAggregateSha256 = Get-PackAggregateSha256 -PackMeta $packMeta
         if ($isExtractArchive) {
             if (-not (Test-Path $packDir)) {
                 throw "Offline payload missing pre-extracted archive dir: $packDir. Re-run scripts/installer/stage_offline_payload.ps1."
@@ -501,13 +535,26 @@ function Build-OfflineFilesBlock {
                 throw "Offline payload missing file: $sourcePath. Pre-populate before invoking with -Flavor offline."
             }
             $sourceForIss = ($sourcePath -replace '/', '\') -replace '\\\\', '\'
-            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion; Check: $(Get-ResourceCacheCheck -DestSubdir $destSubdir -Filename $file.filename -Sha256 $file.sha256)")
+            [void]$sb.AppendLine("Source: `"$sourceForIss`"; DestDir: `"{app}\Contents\Resources\$destSubdir`"; Components: $component; Flags: ignoreversion; Check: not $(Get-PackCacheCheck -DestSubdir $destSubdir -PackName $pack.Name -AggregateSha256 $packAggregateSha256)")
         }
     }
     return $sb.ToString().TrimEnd()
 }
 
 function Build-PackCachePrepareProcedure {
+    # Runs from PrepareToInstall (main thread, after wpSelectTasks). Two
+    # decision points per pack:
+    #   1. Component deselected → wipe the pack's files + marker so a
+    #      re-selection on a future install does a clean download. Use
+    #      per-file DeleteFile rather than DelTree because two non-archive
+    #      packs share `models\`; nuking the directory would clobber the
+    #      sibling pack.
+    #   2. Component selected → if WizardIsTaskSelected('cleaninstall')
+    #      OR the pack cache marker is stale/missing, delete the files
+    #      and the marker so the [Files] Check and the download queue
+    #      both fall through to the install path. The blue-runtime
+    #      archive pack keeps its existing CorridorKeyBlueRuntimeCacheValid
+    #      gate (also bypassed by the cleaninstall task).
     param([object]$Manifest)
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('procedure CorridorKeyPrepareSelectedPackCaches;')
@@ -519,25 +566,31 @@ function Build-PackCachePrepareProcedure {
         foreach ($pack in $componentPacks) {
             $packMeta = $pack.Value
             $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+            $packNameEscaped = ConvertTo-IssEscapedString -Value $pack.Name
             if (Test-PackExtractsArchive -PackMeta $packMeta) {
                 if ($pack.Name -eq "blue-runtime") {
-                    [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+                    [void]$sb.AppendLine("    if WizardIsTaskSelected('cleaninstall') or not CorridorKeyBlueRuntimeCacheValid then begin")
                     [void]$sb.AppendLine('      DelTree(CorridorKeyBlueRuntimeBinPath, True, True, True);')
                     [void]$sb.AppendLine('    end;')
                 }
                 continue
             }
+            $aggregate = Get-PackAggregateSha256 -PackMeta $packMeta
+            $aggregateEscaped = ConvertTo-IssEscapedString -Value $aggregate
+            [void]$sb.AppendLine("    if WizardIsTaskSelected('cleaninstall') or not CorridorKeyPackCacheValid('$destSubdir', '$packNameEscaped', '$aggregateEscaped') then begin")
             foreach ($file in $packMeta.files) {
                 if ($file.status -ne 'ready') { continue }
                 $name = ConvertTo-IssEscapedString -Value $file.filename
-                $hash = ConvertTo-IssEscapedString -Value $file.sha256
-                [void]$sb.AppendLine("    CorridorKeyDeleteResourceFileIfInvalid('$destSubdir', '$name', '$hash');")
+                [void]$sb.AppendLine("      CorridorKeyDeleteResourceFile('$destSubdir', '$name');")
             }
+            [void]$sb.AppendLine("      CorridorKeyDeletePackMarker('$destSubdir', '$packNameEscaped');")
+            [void]$sb.AppendLine('    end;')
         }
         [void]$sb.AppendLine('  end else begin')
         foreach ($pack in $componentPacks) {
             $packMeta = $pack.Value
             $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+            $packNameEscaped = ConvertTo-IssEscapedString -Value $pack.Name
             if (Test-PackExtractsArchive -PackMeta $packMeta) {
                 if ($pack.Name -eq "blue-runtime") {
                     [void]$sb.AppendLine("    DelTree(ExpandConstant('{app}\Contents\Resources\torchtrt-runtime'), True, True, True);")
@@ -549,6 +602,36 @@ function Build-PackCachePrepareProcedure {
                 $name = ConvertTo-IssEscapedString -Value $file.filename
                 [void]$sb.AppendLine("    CorridorKeyDeleteResourceFile('$destSubdir', '$name');")
             }
+            [void]$sb.AppendLine("    CorridorKeyDeletePackMarker('$destSubdir', '$packNameEscaped');")
+        }
+        [void]$sb.AppendLine('  end;')
+    }
+    [void]$sb.AppendLine('end;')
+    return $sb.ToString().TrimEnd()
+}
+
+function Build-PackMarkerWriteProcedure {
+    # Runs from CurStepChanged(ssPostInstall). For every selected
+    # component's non-archive packs, write the aggregate-hash marker so
+    # the next install short-circuits the entire pack via
+    # CorridorKeyPackCacheValid. The blue-runtime marker is handled
+    # separately by CorridorKeyWriteBlueRuntimeCacheMarker.
+    param([object]$Manifest)
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine('procedure CorridorKeyWriteSelectedPackMarkers;')
+    [void]$sb.AppendLine('begin')
+    foreach ($component in @('green', 'blue')) {
+        $componentPacks = @($Manifest.packs.PSObject.Properties | Where-Object { $_.Value.component -eq $component })
+        $writable = @($componentPacks | Where-Object { -not (Test-PackExtractsArchive -PackMeta $_.Value) })
+        if ($writable.Count -eq 0) { continue }
+        [void]$sb.AppendLine("  if WizardIsComponentSelected('$component') then begin")
+        foreach ($pack in $writable) {
+            $packMeta = $pack.Value
+            $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+            $packNameEscaped = ConvertTo-IssEscapedString -Value $pack.Name
+            $aggregate = Get-PackAggregateSha256 -PackMeta $packMeta
+            $aggregateEscaped = ConvertTo-IssEscapedString -Value $aggregate
+            [void]$sb.AppendLine("    CorridorKeyWritePackMarker('$destSubdir', '$packNameEscaped', '$aggregateEscaped');")
         }
         [void]$sb.AppendLine('  end;')
     }
@@ -557,6 +640,13 @@ function Build-PackCachePrepareProcedure {
 }
 
 function Build-OnlineDownloadQueueProcedure {
+    # Runs from NextButtonClick(wpReady) on the wizard UI thread. Pack-
+    # level cache predicate (one tiny marker read per pack) replaces the
+    # legacy per-file GetSHA256OfFile sweep that previously hashed every
+    # locally cached model on the UI thread and produced a multi-second
+    # freeze after the user clicked Install. Per-file SHA256 integrity
+    # is still enforced via DownloadPage.Add's third argument (Inno
+    # verifies after download, before files leave {tmp}).
     param([object]$Manifest)
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('procedure CorridorKeyEnqueueDownloads(const DownloadPage: TDownloadWizardPage);')
@@ -566,23 +656,31 @@ function Build-OnlineDownloadQueueProcedure {
         $component = $packMeta.component
         $readyFiles = @($packMeta.files | Where-Object { $_.status -eq 'ready' })
         if ($readyFiles.Count -eq 0) { continue }
+        $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+        $packNameEscaped = ConvertTo-IssEscapedString -Value $pack.Name
         [void]$sb.AppendLine("  if WizardIsComponentSelected('$component') then begin")
-        foreach ($file in $readyFiles) {
-            $url = ConvertTo-IssEscapedString -Value $file.url
-            $name = ConvertTo-IssEscapedString -Value $file.filename
-            $hash = $file.sha256
-            if ($pack.Name -eq "blue-runtime") {
-                [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+        if ($pack.Name -eq "blue-runtime") {
+            [void]$sb.AppendLine('    if not CorridorKeyBlueRuntimeCacheValid then begin')
+            foreach ($file in $readyFiles) {
+                $url = ConvertTo-IssEscapedString -Value $file.url
+                $name = ConvertTo-IssEscapedString -Value $file.filename
+                $hash = $file.sha256
                 [void]$sb.AppendLine("      DownloadPage.Add('$url', '$name', '$hash');")
                 [void]$sb.AppendLine("      CorridorKeyTrackPlannedDownload($($file.size_bytes));")
-                [void]$sb.AppendLine('    end;')
-            } else {
-                $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
-                [void]$sb.AppendLine("    if not CorridorKeyResourceFileSha256Matches('$destSubdir', '$name', '$hash') then begin")
-                [void]$sb.AppendLine("      DownloadPage.Add('$url', '$name', '$hash');")
-                [void]$sb.AppendLine("      CorridorKeyTrackPlannedDownload($($file.size_bytes));")
-                [void]$sb.AppendLine('    end;')
             }
+            [void]$sb.AppendLine('    end;')
+        } else {
+            $aggregate = Get-PackAggregateSha256 -PackMeta $packMeta
+            $aggregateEscaped = ConvertTo-IssEscapedString -Value $aggregate
+            [void]$sb.AppendLine("    if not CorridorKeyPackCacheValid('$destSubdir', '$packNameEscaped', '$aggregateEscaped') then begin")
+            foreach ($file in $readyFiles) {
+                $url = ConvertTo-IssEscapedString -Value $file.url
+                $name = ConvertTo-IssEscapedString -Value $file.filename
+                $hash = $file.sha256
+                [void]$sb.AppendLine("      DownloadPage.Add('$url', '$name', '$hash');")
+                [void]$sb.AppendLine("      CorridorKeyTrackPlannedDownload($($file.size_bytes));")
+            }
+            [void]$sb.AppendLine('    end;')
         }
         [void]$sb.AppendLine('  end;')
     }
@@ -608,6 +706,7 @@ $onlineFilesBlock = ""
 $offlineFilesBlock = ""
 $downloadQueueProcedure = ""
 $packCachePrepareProcedure = Build-PackCachePrepareProcedure -Manifest $manifest
+$packMarkerWriteProcedure = Build-PackMarkerWriteProcedure -Manifest $manifest
 if ($Flavor -eq "online") {
     $onlineFilesBlock = Build-OnlineExternalFilesBlock -Manifest $manifest
     $downloadQueueProcedure = Build-OnlineDownloadQueueProcedure -Manifest $manifest
@@ -648,6 +747,7 @@ $rendered = $rendered.Replace('@@OFFLINE_FILES_BLOCK@@', $offlineFilesBlock)
 $rendered = $rendered.Replace('@@ONLINE_EXTERNAL_FILES_BLOCK@@', $onlineFilesBlock)
 $rendered = $rendered.Replace('@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@', $downloadQueueProcedure)
 $rendered = $rendered.Replace('@@PACK_CACHE_PREPARE_PROCEDURE@@', $packCachePrepareProcedure)
+$rendered = $rendered.Replace('@@PACK_MARKER_WRITE_PROCEDURE@@', $packMarkerWriteProcedure)
 
 $tempIssPath = Join-Path $tempIssDir "corridorkey_setup.iss"
 Set-Content -Path $tempIssPath -Value $rendered -Encoding UTF8

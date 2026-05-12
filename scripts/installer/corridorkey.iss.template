@@ -200,8 +200,13 @@ Source: "{#PluginPayloadDir}\Contents\Resources\torchtrt-runtime\bin\corridorkey
 #endif
 
 [Tasks]
-; No optional checkboxes for now. Reserved for future: "create
-; desktop shortcut", "add to PATH", etc.
+; Default unchecked so a normal upgrade reuses the local pack cache
+; (~600 MB of green models + ~3 GB blue runtime) and the wizard returns
+; from `wpReady` immediately. Ticking the box wipes every selected
+; pack's payload + cache marker before the download phase begins, which
+; is the supported recovery path when a user suspects their local
+; cache is stale or corrupt.
+Name: "cleaninstall"; Description: "Clean install (delete cached models and runtime before download)"; Flags: unchecked
 
 [Run]
 ; The OFX host (Resolve / Nuke) auto-discovers the bundle on its
@@ -274,37 +279,57 @@ begin
   Result := ExpandConstant('{app}\Contents\Resources\' + DestSubdir + '\' + FileName);
 end;
 
-function CorridorKeyResourceFileSha256Matches(
-  const DestSubdir, FileName, ExpectedSha256: String): Boolean;
-var
-  Path: String;
-begin
-  Path := CorridorKeyResourceFilePath(DestSubdir, FileName);
-  Result := FileExists(Path) and
-    (CompareText(GetSHA256OfFile(Path), ExpectedSha256) = 0);
-end;
-
-function CorridorKeyShouldInstallResourceFile(
-  const DestSubdir, FileName, ExpectedSha256: String): Boolean;
-begin
-  Result := not CorridorKeyResourceFileSha256Matches(DestSubdir, FileName, ExpectedSha256);
-end;
-
 procedure CorridorKeyDeleteResourceFile(
   const DestSubdir, FileName: String);
 begin
   DeleteFile(CorridorKeyResourceFilePath(DestSubdir, FileName));
 end;
 
-procedure CorridorKeyDeleteResourceFileIfInvalid(
-  const DestSubdir, FileName, ExpectedSha256: String);
-var
-  Path: String;
+// Per-pack cache marker. Two non-archive packs (green-models, blue-models)
+// share a `models\` dest_subdir, so the marker filename must namespace by
+// pack name (`.cache.<packname>.sha256`) instead of by directory. The
+// aggregate hash embedded as the expected value is computed at packaging
+// time by build_installer.ps1 (SHA256 of the concatenated, sorted, per-
+// file SHA256 lines from the manifest) so a manifest change naturally
+// invalidates the marker on the next install.
+//
+// This collapses the per-file `GetSHA256OfFile` sweep that previously ran
+// inside `NextButtonClick(wpReady)` (hashing ~600 MB of staged model
+// files on the UI thread → multi-second wizard freeze) down to one tiny
+// marker read per pack. Pack integrity stays covered: every queued
+// `DownloadPage.Add(...)` still passes the per-file SHA256 as its third
+// argument, so Inno verifies the downloaded file before letting it leave
+// `{tmp}`.
+function CorridorKeyPackMarkerPath(
+  const DestSubdir, PackName: String): String;
 begin
-  Path := CorridorKeyResourceFilePath(DestSubdir, FileName);
-  if FileExists(Path) and not CorridorKeyResourceFileSha256Matches(DestSubdir, FileName, ExpectedSha256) then begin
-    DeleteFile(Path);
-  end;
+  Result := ExpandConstant('{app}\Contents\Resources\' + DestSubdir +
+    '\.cache.' + PackName + '.sha256');
+end;
+
+function CorridorKeyPackCacheValid(
+  const DestSubdir, PackName, ExpectedAggregateSha256: String): Boolean;
+var
+  MarkerPath: String;
+  MarkerValue: AnsiString;
+begin
+  MarkerPath := CorridorKeyPackMarkerPath(DestSubdir, PackName);
+  Result := FileExists(MarkerPath) and
+    LoadStringFromFile(MarkerPath, MarkerValue) and
+    (CompareText(Trim(String(MarkerValue)), ExpectedAggregateSha256) = 0);
+end;
+
+procedure CorridorKeyWritePackMarker(
+  const DestSubdir, PackName, AggregateSha256: String);
+begin
+  SaveStringToFile(CorridorKeyPackMarkerPath(DestSubdir, PackName),
+    AggregateSha256, False);
+end;
+
+procedure CorridorKeyDeletePackMarker(
+  const DestSubdir, PackName: String);
+begin
+  DeleteFile(CorridorKeyPackMarkerPath(DestSubdir, PackName));
 end;
 
 function CorridorKeyBlueRuntimeBinPath: String;
@@ -378,6 +403,8 @@ end;
 
 @@PACK_CACHE_PREPARE_PROCEDURE@@
 
+@@PACK_MARKER_WRITE_PROCEDURE@@
+
 procedure CorridorKeyCleanInstallDir;
 begin
   if not DirExists(ExpandConstant('{app}')) then begin
@@ -416,6 +443,7 @@ begin
   if CurStep = ssPostInstall then begin
     UpdateCorridorKeyPath('Install');
     CorridorKeyWriteBlueRuntimeCacheMarker;
+    CorridorKeyWriteSelectedPackMarkers;
     ClearHostOfxCaches;
   end;
 end;
