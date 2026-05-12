@@ -119,6 +119,14 @@ SetupIconFile={#InstallerIcon}
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 ShowLanguageDialog=no
+; Setup writes a diagnostic log to %TEMP%\Setup Log YYYY-MM-DD #NNN.txt
+; for every install. Captures the Pascal Script `Log()` calls, the
+; HTTP transcript that TDownloadWizardPage emits via WinHttp (URL,
+; redirect chain, response codes), per-file SHA-256 verification
+; results, and the [Files] copy decisions. Keeping it on by default
+; is cheap (a few hundred KB per install) and turns "wizard sat on
+; 'Preparing N files' for a minute" into a postmortem-able artifact.
+SetupLogging=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -542,14 +550,24 @@ begin
       Result := True;
       Exit;
     end;
+    // The progress callback only fires once the first chunk arrives.
+    // For Hugging Face the first call typically takes 5-30 seconds
+    // while WinHttp does DNS + TLS + a 302 to cdn-lfs.huggingface.co,
+    // and during that window the wizard sits on Msg1Label. Set the
+    // pre-download caption to something self-explaining so the user
+    // does not read silence as a hang.
     DownloadPage.Msg1Label.Caption :=
-      Format('Preparing %d file(s) to download', [DownloadCount]);
+      Format('Connecting to Hugging Face for %d file(s)...', [DownloadCount]);
     DownloadPage.Msg2Label.Caption :=
-      Format('Selected total: %s', [CorridorKeyFormatBytes(DownloadTotalBytes)]);
+      Format('Selected total: %s. First chunk can take up to 30 seconds.',
+        [CorridorKeyFormatBytes(DownloadTotalBytes)]);
+    Log(Format('[CorridorKey] Download queue prepared: %d files, %s total bytes',
+      [DownloadCount, CorridorKeyFormatBytes(DownloadTotalBytes)]));
     DownloadPage.Show;
     try
       try
         DownloadPage.Download;
+        Log(Format('[CorridorKey] Download phase completed for %d file(s).', [DownloadCount]));
         Result := True;
       except
         if DownloadPage.AbortedByUser then begin
