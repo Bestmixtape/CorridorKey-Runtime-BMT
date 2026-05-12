@@ -556,18 +556,19 @@ begin
     // and during that window the wizard sits on Msg1Label. Set the
     // pre-download caption to something self-explaining so the user
     // does not read silence as a hang.
-    DownloadPage.Msg1Label.Caption :=
-      Format('Connecting to Hugging Face for %d file(s)...', [DownloadCount]);
-    DownloadPage.Msg2Label.Caption :=
-      Format('Selected total: %s. First chunk can take up to 30 seconds.',
-        [CorridorKeyFormatBytes(DownloadTotalBytes)]);
-    Log(Format('[CorridorKey] Download queue prepared: %d files, %s total bytes',
-      [DownloadCount, CorridorKeyFormatBytes(DownloadTotalBytes)]));
+    // Inno Setup's preprocessor reads any line whose first non-blank
+    // character is `[` as a section tag (the leading whitespace is
+    // ignored), so Format(...) calls whose `[args]` would otherwise
+    // wrap to a new line MUST stay on one line. That is the reason
+    // the captions below are not pretty-printed across lines.
+    DownloadPage.Msg1Label.Caption := Format('Connecting to Hugging Face for %d file(s)...', [DownloadCount]);
+    DownloadPage.Msg2Label.Caption := Format('Selected total: %s. First chunk can take up to 30 seconds.', [CorridorKeyFormatBytes(DownloadTotalBytes)]);
+    Log(Format('CorridorKey: download queue prepared: %d files, %s total bytes.', [DownloadCount, CorridorKeyFormatBytes(DownloadTotalBytes)]));
     DownloadPage.Show;
     try
       try
         DownloadPage.Download;
-        Log(Format('[CorridorKey] Download phase completed for %d file(s).', [DownloadCount]));
+        Log(Format('CorridorKey: download phase completed for %d file(s).', [DownloadCount]));
         Result := True;
       except
         if DownloadPage.AbortedByUser then begin
