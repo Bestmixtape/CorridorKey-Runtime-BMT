@@ -2121,11 +2121,9 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
         return kOfxStatReplyDefault;
     }
     // Main-thread action: flush any panel state that was marked dirty during
-    // a render sequence. Hosts call this before save/serialize, which is
-    // exactly when the user needs the runtime status reflected in the project
-    // file. paramSetValue is allowed here under the canonical SyncPrivateData
-    // contract (OFX 1.5 vendor/openfx/include/ofxCore.h:298-301: "synchronise
-    // any private data structures to its parameter set").
+    // a render sequence. paramSetValue is allowed here under the canonical
+    // SyncPrivateData contract (OFX 1.5 vendor/openfx/include/ofxCore.h:298-
+    // 301: "synchronise any private data structures to its parameter set").
     //
     // Foundry Nuke 17 sessions in 2026-04 logs went silent mid-sync at
     // 17:15:42 after an Alpha Hint render. Without entry/exit telemetry we
@@ -2136,7 +2134,21 @@ OfxStatus sync_private_data(OfxImageEffectHandle instance) {
                 std::string("enter dirty=") + (data->runtime_panel_dirty ? "1" : "0") +
                     " in_render=" + (data->in_render ? "1" : "0") +
                     " in_render_sequence=" + (data->in_render_sequence ? "1" : "0"));
-    flush_runtime_panel(data);
+    // The render-thread deferral in update_runtime_panel_values explicitly
+    // excludes Resolve (`!is_resolve_host()` at the deferral gate), so on
+    // Resolve the panel writes already happened synchronously during the
+    // render — there is nothing pending to flush here. Re-firing the per-
+    // instance paramSetValue cascade has been observed to crash Resolve's
+    // openfx.plugin host bridge during project teardown when several
+    // CorridorKey instances each emit a long chain of paramSetValue +
+    // InstanceChanged callbacks while the bridge is already destroying the
+    // project. Skip the flush on Resolve; instance_changed picks up the dirty
+    // bit on the next user interaction if the instance is still alive.
+    if (!is_resolve_host()) {
+        flush_runtime_panel(data);
+    } else {
+        log_message("sync_private_data", "skip flush reason=resolve_host");
+    }
     log_message("sync_private_data", "exit ok");
     return kOfxStatOK;
 }

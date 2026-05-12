@@ -524,9 +524,14 @@ TEST_CASE("sync_private_data drains a deferred render-thread update", "[unit][of
     auto* previous_parameter = g_suites.parameter;
     auto* previous_property = g_suites.property;
     auto* previous_image = g_suites.image_effect;
+    auto previous_host_name = g_host_name;
     g_suites.parameter = &parameter_suite;
     g_suites.property = &property_suite;
     g_suites.image_effect = &image_suite;
+    // Use the strict deferring host (Nuke) so the test exercises the canonical
+    // SyncPrivateData drain path. A separate test below covers the Resolve
+    // bypass.
+    g_host_name = kHostNameNuke;
     g_param_set_value_count = 0;
 
     FakeEffectProps props{.instance_data = &data};
@@ -535,9 +540,58 @@ TEST_CASE("sync_private_data drains a deferred render-thread update", "[unit][of
     g_suites.parameter = previous_parameter;
     g_suites.property = previous_property;
     g_suites.image_effect = previous_image;
+    g_host_name = previous_host_name;
 
     CHECK(g_param_set_value_count > 0);
     CHECK_FALSE(data.runtime_panel_dirty);
+}
+
+// Regression: Resolve's openfx.plugin host bridge crashed with ACCESS_VIOLATION
+// at openfx.plugin+0x235A0 writing into Resolve.exe when the user closed a
+// project containing two CorridorKey instances. Each instance's
+// sync_private_data fired 13 paramSetValue + InstanceChanged callbacks into the
+// bridge while Resolve was already tearing the project down. The render-thread
+// deferral that originally motivated the SyncPrivateData drain explicitly
+// excludes Resolve, so the flush here is structurally redundant for that host
+// and is the only safe thing to remove from the teardown sequence.
+TEST_CASE("sync_private_data does not paramSetValue on Resolve hosts",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    wire_runtime_status_param_handles(data);
+    // Same precondition as the deferred-drain test: panel marked dirty by a
+    // prior render, action runs on the main thread.
+    data.runtime_panel_dirty = true;
+    data.in_render = false;
+    data.in_render_sequence = false;
+
+    OfxParameterSuiteV1 parameter_suite = make_counting_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto previous_host_name = g_host_name;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_host_name = kHostNameResolve;
+    g_param_set_value_count = 0;
+
+    FakeEffectProps props{.instance_data = &data};
+    REQUIRE(sync_private_data(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_host_name = previous_host_name;
+
+    // Zero paramSetValue traffic during sync_private_data on Resolve. The
+    // dirty bit stays set so the next non-teardown InstanceChanged drains it
+    // through the normal path.
+    CHECK(g_param_set_value_count == 0);
+    CHECK(data.runtime_panel_dirty);
 }
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
