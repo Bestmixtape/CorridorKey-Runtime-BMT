@@ -610,6 +610,55 @@ function Build-PackCachePrepareProcedure {
     return $sb.ToString().TrimEnd()
 }
 
+function Build-PackMigrationProcedure {
+    # Runs from InitializeWizard, before any gate. For each non-archive
+    # pack, if the marker file is absent but every manifest file is
+    # already on disk with the expected size, write the marker now so
+    # the subsequent CorridorKeyPackCacheValid check short-circuits to
+    # "cache valid" and the install skips downloads. Conservative — any
+    # missing file or size mismatch leaves the marker absent and the
+    # normal download flow fires.
+    #
+    # Size-only validation here mirrors CorridorKeyBlueRuntimeFilesMatch
+    # (corridorkey.iss.template), which has been in production for the
+    # multi-gigabyte blue-runtime pack since the cache marker pattern
+    # landed. The "Clean install" task remains the explicit recovery
+    # path for any rare same-size corruption that slips through.
+    param([object]$Manifest)
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine('procedure CorridorKeyMigrateLegacyPackMarkers;')
+    [void]$sb.AppendLine('var')
+    [void]$sb.AppendLine('  AllPresent: Boolean;')
+    [void]$sb.AppendLine('  Size: Int64;')
+    [void]$sb.AppendLine('begin')
+    foreach ($pack in $Manifest.packs.PSObject.Properties) {
+        $packMeta = $pack.Value
+        if (Test-PackExtractsArchive -PackMeta $packMeta) { continue }
+        $readyFiles = @($packMeta.files | Where-Object { $_.status -eq 'ready' })
+        if ($readyFiles.Count -eq 0) { continue }
+        $destSubdir = ConvertTo-IssEscapedString -Value ($packMeta.dest_subdir -replace '/', '\')
+        $packNameEscaped = ConvertTo-IssEscapedString -Value $pack.Name
+        $aggregate = Get-PackAggregateSha256 -PackMeta $packMeta
+        $aggregateEscaped = ConvertTo-IssEscapedString -Value $aggregate
+        [void]$sb.AppendLine("  if not FileExists(CorridorKeyPackMarkerPath('$destSubdir', '$packNameEscaped')) then begin")
+        [void]$sb.AppendLine('    AllPresent := True;')
+        foreach ($file in $readyFiles) {
+            $name = ConvertTo-IssEscapedString -Value $file.filename
+            $expectedSize = [Int64]$file.size_bytes
+            [void]$sb.AppendLine('    if AllPresent then begin')
+            [void]$sb.AppendLine("      AllPresent := FileSize64(CorridorKeyResourceFilePath('$destSubdir', '$name'), Size) and (Size = Int64($expectedSize));")
+            [void]$sb.AppendLine('    end;')
+        }
+        [void]$sb.AppendLine('    if AllPresent then begin')
+        [void]$sb.AppendLine("      Log('CorridorKey: legacy cache detected for pack ""$packNameEscaped""; back-filling marker.');")
+        [void]$sb.AppendLine("      CorridorKeyWritePackMarker('$destSubdir', '$packNameEscaped', '$aggregateEscaped');")
+        [void]$sb.AppendLine('    end;')
+        [void]$sb.AppendLine('  end;')
+    }
+    [void]$sb.AppendLine('end;')
+    return $sb.ToString().TrimEnd()
+}
+
 function Build-PackMarkerWriteProcedure {
     # Runs from CurStepChanged(ssPostInstall). For every selected
     # component's non-archive packs, write the aggregate-hash marker so
@@ -716,6 +765,7 @@ $offlineFilesBlock = ""
 $downloadQueueProcedure = ""
 $packCachePrepareProcedure = Build-PackCachePrepareProcedure -Manifest $manifest
 $packMarkerWriteProcedure = Build-PackMarkerWriteProcedure -Manifest $manifest
+$packMigrationProcedure = Build-PackMigrationProcedure -Manifest $manifest
 if ($Flavor -eq "online") {
     $onlineFilesBlock = Build-OnlineExternalFilesBlock -Manifest $manifest
     $downloadQueueProcedure = Build-OnlineDownloadQueueProcedure -Manifest $manifest
@@ -757,6 +807,7 @@ $rendered = $rendered.Replace('@@ONLINE_EXTERNAL_FILES_BLOCK@@', $onlineFilesBlo
 $rendered = $rendered.Replace('@@ONLINE_DOWNLOAD_QUEUE_PROCEDURE@@', $downloadQueueProcedure)
 $rendered = $rendered.Replace('@@PACK_CACHE_PREPARE_PROCEDURE@@', $packCachePrepareProcedure)
 $rendered = $rendered.Replace('@@PACK_MARKER_WRITE_PROCEDURE@@', $packMarkerWriteProcedure)
+$rendered = $rendered.Replace('@@PACK_MIGRATION_PROCEDURE@@', $packMigrationProcedure)
 
 $tempIssPath = Join-Path $tempIssDir "corridorkey_setup.iss"
 Set-Content -Path $tempIssPath -Value $rendered -Encoding UTF8
