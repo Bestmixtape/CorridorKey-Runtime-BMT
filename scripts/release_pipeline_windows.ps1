@@ -57,6 +57,10 @@ function Publish-CorridorKeyGithubRelease {
     $tagLabel = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $Version } else { $DisplayVersionLabel }
     $tagName = "v$tagLabel"
     $isPrerelease = -not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)
+    $releaseTarget = (& git -C $RepoRoot rev-parse HEAD 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($releaseTarget)) {
+        throw "Cannot publish GitHub release: unable to resolve the current HEAD commit."
+    }
 
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if (-not $gh) {
@@ -125,7 +129,8 @@ function Publish-CorridorKeyGithubRelease {
         "release", "create", $tagName,
         "--repo", $GithubRepo,
         "--title", $title,
-        "--notes-file", $NotesFile
+        "--notes-file", $NotesFile,
+        "--target", $releaseTarget
     )
     if ($isPrerelease) {
         $ghArgs += "--prerelease"
@@ -147,6 +152,13 @@ try {
     Assert-CorridorKeyWindowsReleaseLabel -Version $Version -DisplayVersionLabel $DisplayVersionLabel
     if ($PublishGithub -and $Flavor -ne "online") {
         throw "Windows GitHub publication is online-only. Re-run with -Flavor online; offline packages are local/private artifacts and must not be uploaded to GitHub."
+    }
+    if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel) -and -not $PublishGithub) {
+        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+        if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
+            $DisplayVersionLabel = $derivedLabel
+            Write-Host "Using local build display label: $DisplayVersionLabel" -ForegroundColor Yellow
+        }
     }
 
     $needsRtxTrack = $Track -in @("rtx", "all")

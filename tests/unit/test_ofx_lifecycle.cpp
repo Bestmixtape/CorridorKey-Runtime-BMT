@@ -1,5 +1,6 @@
 #include <array>
 #include <catch2/catch_all.hpp>
+#include <cstdarg>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -66,6 +67,13 @@ OfxStatus fake_get_property_set(OfxImageEffectHandle handle, OfxPropertySetHandl
         return kOfxStatErrBadHandle;
     }
     *props = reinterpret_cast<OfxPropertySetHandle>(handle);
+    return kOfxStatOK;
+}
+
+int g_clear_persistent_message_count = 0;
+
+OfxStatus fake_clear_persistent_message(void*) {
+    ++g_clear_persistent_message_count;
     return kOfxStatOK;
 }
 
@@ -321,9 +329,20 @@ TEST_CASE("ensure_runtime_client is idempotent when data is null again",
 namespace {
 
 int g_param_set_value_count = 0;
+std::map<OfxParamHandle, std::string> g_param_set_values;
 
 OfxStatus counting_param_set_value(OfxParamHandle, ...) {
     ++g_param_set_value_count;
+    return kOfxStatOK;
+}
+
+OfxStatus capturing_param_set_value(OfxParamHandle handle, ...) {
+    ++g_param_set_value_count;
+    va_list args;
+    va_start(args, handle);
+    const char* value = va_arg(args, const char*);
+    va_end(args);
+    g_param_set_values[handle] = value != nullptr ? value : "";
     return kOfxStatOK;
 }
 
@@ -350,6 +369,14 @@ OfxParameterSuiteV1 make_counting_parameter_suite() {
     return suite;
 }
 
+OfxParameterSuiteV1 make_capturing_parameter_suite() {
+    OfxParameterSuiteV1 suite{};
+    suite.paramSetValue = capturing_param_set_value;
+    suite.paramGetValue = passthrough_param_get_value;
+    suite.paramGetPropertySet = accept_param_get_property_set;
+    return suite;
+}
+
 OfxPropertySuiteV1 make_accepting_property_suite() {
     OfxPropertySuiteV1 suite{};
     suite.propSetInt = accept_prop_set_int;
@@ -360,6 +387,28 @@ OfxPropertySuiteV1 make_accepting_property_suite() {
 // instead of short-circuiting on the null-handle guard.
 OfxParamHandle dummy_param_handle() {
     static int sentinel = 0;
+    return reinterpret_cast<OfxParamHandle>(&sentinel);
+}
+
+struct RuntimeStatusParamSentinels {
+    int processing = 0;
+    int device = 0;
+    int requested_quality = 0;
+    int effective_quality = 0;
+    int safe_quality_ceiling = 0;
+    int artifact = 0;
+    int guide_source = 0;
+    int path = 0;
+    int session = 0;
+    int status = 0;
+    int timings = 0;
+    int backend_work = 0;
+    int update_status = 0;
+    int open_update_page = 0;
+    int include_pre_releases = 0;
+};
+
+OfxParamHandle param_handle(int& sentinel) {
     return reinterpret_cast<OfxParamHandle>(&sentinel);
 }
 
@@ -380,6 +429,32 @@ void wire_runtime_status_param_handles(InstanceData& data) {
     data.update_status_param = handle;
     data.open_update_page_param = handle;
     data.include_pre_releases_param = handle;
+}
+
+void wire_runtime_status_param_handles(InstanceData& data, RuntimeStatusParamSentinels& handles) {
+    data.runtime_processing_param = param_handle(handles.processing);
+    data.runtime_device_param = param_handle(handles.device);
+    data.runtime_requested_quality_param = param_handle(handles.requested_quality);
+    data.runtime_effective_quality_param = param_handle(handles.effective_quality);
+    data.runtime_safe_quality_ceiling_param = param_handle(handles.safe_quality_ceiling);
+    data.runtime_artifact_param = param_handle(handles.artifact);
+    data.runtime_guide_source_param = param_handle(handles.guide_source);
+    data.runtime_path_param = param_handle(handles.path);
+    data.runtime_session_param = param_handle(handles.session);
+    data.runtime_status_param = param_handle(handles.status);
+    data.runtime_timings_param = param_handle(handles.timings);
+    data.runtime_backend_work_param = param_handle(handles.backend_work);
+    data.update_status_param = param_handle(handles.update_status);
+    data.open_update_page_param = param_handle(handles.open_update_page);
+    data.include_pre_releases_param = param_handle(handles.include_pre_releases);
+}
+
+std::string captured_param_value(OfxParamHandle handle) {
+    auto it = g_param_set_values.find(handle);
+    if (it == g_param_set_values.end()) {
+        return {};
+    }
+    return it->second;
 }
 
 }  // namespace
@@ -463,6 +538,54 @@ TEST_CASE("DaVinci Resolve flushes paramSetValue live during render",
 
     CHECK(g_param_set_value_count > 0);
     CHECK_FALSE(data.runtime_panel_dirty);
+}
+
+TEST_CASE("runtime panel reports failed first bootstrap instead of initializing",
+          "[unit][ofx][regression]") {
+    InstanceData data{};
+    RuntimeStatusParamSentinels handles{};
+    wire_runtime_status_param_handles(data, handles);
+    data.in_render = true;
+    data.in_render_sequence = true;
+    data.device.backend = Backend::Auto;
+    data.device.name = "Pending runtime server bootstrap";
+    data.runtime_panel_state.requested_quality_mode = kQualityPreview;
+    data.runtime_panel_state.requested_resolution = 512;
+    data.runtime_panel_state.effective_resolution = 0;
+    data.runtime_panel_state.artifact_path = "corridorkey_dynamic_blue_fp16.ts";
+    data.last_error =
+        "Failed to prepare runtime session for Draft (512) using "
+        "corridorkey_dynamic_blue_fp16.ts: TorchTRT runtime arm failed: "
+        "LoadLibrary corridorkey_torchtrt.dll failed (GetLastError=126)";
+
+    auto previous_host_name = g_host_name;
+    g_host_name = kHostNameResolve;
+    OfxParameterSuiteV1 parameter_suite = make_capturing_parameter_suite();
+    OfxPropertySuiteV1 property_suite = make_accepting_property_suite();
+    auto* previous_parameter = g_suites.parameter;
+    auto* previous_property = g_suites.property;
+    g_suites.parameter = &parameter_suite;
+    g_suites.property = &property_suite;
+    g_param_set_value_count = 0;
+    g_param_set_values.clear();
+
+    update_runtime_panel(&data);
+
+    g_suites.parameter = previous_parameter;
+    g_suites.property = previous_property;
+    g_host_name = previous_host_name;
+
+    CHECK_FALSE(data.runtime_panel_dirty);
+    CHECK(captured_param_value(data.runtime_processing_param) == "Unavailable");
+    CHECK(captured_param_value(data.runtime_device_param) == "Unavailable");
+    CHECK(captured_param_value(data.runtime_effective_quality_param) == "Not loaded");
+    CHECK(captured_param_value(data.runtime_session_param) == "Unavailable");
+    CHECK(captured_param_value(data.runtime_status_param).rfind("Error: ", 0) == 0);
+    for (const auto& [handle, value] : g_param_set_values) {
+        (void)handle;
+        CHECK(value != "Initializing...");
+        CHECK(value != "Loading...");
+    }
 }
 
 TEST_CASE("update_runtime_panel flushes paramSetValue on the main thread",
@@ -592,6 +715,110 @@ TEST_CASE("sync_private_data does not paramSetValue on Resolve hosts",
     // through the normal path.
     CHECK(g_param_set_value_count == 0);
     CHECK(data.runtime_panel_dirty);
+}
+
+// Regression: DaVinci Resolve 20.3.2 closed after project close with a BEX64
+// c0000409 / fail-fast 7 in CorridorKey.ofx while dispatching
+// OfxActionDestroyInstance. The OFX log stopped at the action entry before
+// the persistent-message clear returned, so Resolve teardown must not receive
+// that optional host-suite call.
+TEST_CASE("destroy_instance does not clear persistent message on Resolve teardown",
+          "[unit][ofx][regression]") {
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxMessageSuiteV2 message_suite{};
+    message_suite.clearPersistentMessage = fake_clear_persistent_message;
+
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto* previous_message = g_suites.message;
+    auto previous_host_name = g_host_name;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.message = &message_suite;
+    g_host_name = kHostNameResolve;
+    g_clear_persistent_message_count = 0;
+
+    auto* data = new InstanceData();
+    FakeEffectProps props{.instance_data = data};
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_suites.message = previous_message;
+    g_host_name = previous_host_name;
+
+    CHECK(g_clear_persistent_message_count == 0);
+    CHECK(props.instance_data == nullptr);
+}
+
+TEST_CASE("destroy_instance does not clear persistent message on Nuke teardown",
+          "[unit][ofx][regression]") {
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxMessageSuiteV2 message_suite{};
+    message_suite.clearPersistentMessage = fake_clear_persistent_message;
+
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto* previous_message = g_suites.message;
+    auto previous_host_name = g_host_name;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.message = &message_suite;
+    g_host_name = kHostNameNuke;
+    g_clear_persistent_message_count = 0;
+
+    auto* data = new InstanceData();
+    FakeEffectProps props{.instance_data = data};
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_suites.message = previous_message;
+    g_host_name = previous_host_name;
+
+    CHECK(g_clear_persistent_message_count == 0);
+    CHECK(props.instance_data == nullptr);
+}
+
+TEST_CASE("destroy_instance clears persistent message on generic hosts",
+          "[unit][ofx][regression]") {
+    OfxPropertySuiteV1 property_suite{};
+    property_suite.propGetPointer = fake_prop_get_pointer;
+    property_suite.propSetPointer = fake_prop_set_pointer;
+    OfxImageEffectSuiteV1 image_suite{};
+    image_suite.getPropertySet = fake_get_property_set;
+    OfxMessageSuiteV2 message_suite{};
+    message_suite.clearPersistentMessage = fake_clear_persistent_message;
+
+    auto* previous_property = g_suites.property;
+    auto* previous_image = g_suites.image_effect;
+    auto* previous_message = g_suites.message;
+    auto previous_host_name = g_host_name;
+    g_suites.property = &property_suite;
+    g_suites.image_effect = &image_suite;
+    g_suites.message = &message_suite;
+    g_host_name = "com.example.generic-ofx-host";
+    g_clear_persistent_message_count = 0;
+
+    auto* data = new InstanceData();
+    FakeEffectProps props{.instance_data = data};
+    REQUIRE(destroy_instance(reinterpret_cast<OfxImageEffectHandle>(&props)) == kOfxStatOK);
+
+    g_suites.property = previous_property;
+    g_suites.image_effect = previous_image;
+    g_suites.message = previous_message;
+    g_host_name = previous_host_name;
+
+    CHECK(g_clear_persistent_message_count == 1);
+    CHECK(props.instance_data == nullptr);
 }
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
