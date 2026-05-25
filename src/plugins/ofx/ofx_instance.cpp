@@ -14,16 +14,16 @@
 #include <thread>
 #include <vector>
 
+#include "app/host_plugin_runtime_client.hpp"
 #include "app/runtime_contracts.hpp"
 #include "app/version_check.hpp"
-#include "common/ofx_runtime_defaults.hpp"
+#include "common/host_plugin_runtime_defaults.hpp"
 #include "common/runtime_paths.hpp"
 #include "ofx_backend_matching.hpp"
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_model_selection.hpp"
-#include "ofx_runtime_client.hpp"
 #include "ofx_shared.hpp"
 
 #ifdef __APPLE__
@@ -428,7 +428,8 @@ std::string format_duration_ms(double duration_ms) {
     }
     std::ostringstream oss;
     if (duration_ms >= kMillisecondsPerSecondD) {
-        oss << std::fixed << std::setprecision(1) << (duration_ms / kMillisecondsPerSecondD) << " s";
+        oss << std::fixed << std::setprecision(1) << (duration_ms / kMillisecondsPerSecondD)
+            << " s";
     } else {
         oss << std::fixed << std::setprecision(1) << duration_ms << " ms";
     }
@@ -614,9 +615,9 @@ std::string runtime_timings_runtime_label_impl(const InstanceData& data) {
             break;
     }
     if (hottest_stage != nullptr && hottest_stage->total_ms > 0.0 && !hottest_stage->name.empty()) {
-        label += " | Hotspot: " +
-                 truncate_status_message(hottest_stage->name, kHotspotLabelMaxLength) + " " +
-                 format_duration_ms(hottest_stage->total_ms);
+        label +=
+            " | Hotspot: " + truncate_status_message(hottest_stage->name, kHotspotLabelMaxLength) +
+            " " + format_duration_ms(hottest_stage->total_ms);
     }
     return label;
 }
@@ -671,8 +672,7 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
         return summary;
     }
 
-    const bool has_session =
-        data.runtime_client != nullptr && data.runtime_client->has_session();
+    const bool has_session = data.runtime_client != nullptr && data.runtime_client->has_session();
     const bool has_recorded_frame_timing =
         data.last_frame_ms > 0.0 || !data.last_render_stage_timings.empty();
     if (!has_session && !has_recorded_frame_timing) {
@@ -695,8 +695,8 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     }
     if (const StageTiming* hot = hottest_actionable_stage(data.last_render_stage_timings);
         hot != nullptr && hot->total_ms > 0.0 && !hot->name.empty()) {
-        body += " · Hot: " + truncate_status_message(hot->name, kNodeSummaryHotStageMaxLen) +
-                " " + format_duration_ms(hot->total_ms);
+        body += " · Hot: " + truncate_status_message(hot->name, kNodeSummaryHotStageMaxLen) + " " +
+                format_duration_ms(hot->total_ms);
     }
     switch (data.last_render_work_origin) {
         case LastRenderWorkOrigin::SharedCache:
@@ -712,8 +712,7 @@ RuntimeNodeSummary compose_runtime_node_summary_impl(const InstanceData& data) {
     }
 
     if (!data.last_warning.empty()) {
-        body += " · Note: " +
-                truncate_status_message(data.last_warning, kNodeSummaryWarningMaxLen);
+        body += " · Note: " + truncate_status_message(data.last_warning, kNodeSummaryWarningMaxLen);
         summary.severity = kOfxMessageWarning;
     } else {
         summary.severity = kOfxMessageMessage;
@@ -1040,10 +1039,10 @@ std::filesystem::path resolve_models_root() {
     return fallback;
 }
 
-app::OfxRuntimePrepareSessionRequest build_prepare_request(
+app::HostPluginRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
     int requested_quality_mode, const char* node_identity) {
-    app::OfxRuntimePrepareSessionRequest request;
+    app::HostPluginRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
     request.artifact_name = selection.executable_model_path.filename().string();
@@ -1162,7 +1161,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
 
     if (data->runtime_server_path.empty()) {
         data->runtime_server_path =
-            resolve_ofx_runtime_server_binary(plugin_module_path().value_or(""));
+            app::resolve_host_plugin_runtime_server_binary(plugin_module_path().value_or(""));
     }
     if (!runtime_server_binary_present(data->runtime_server_path)) {
         // The .ofx is the host's address space; running ORT/TRT-RTX in it
@@ -1178,8 +1177,8 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         return false;
     }
 
-    int render_timeout_s = common::kDefaultOfxRenderTimeoutSeconds;
-    int prepare_timeout_s = common::kDefaultOfxPrepareTimeoutSeconds;
+    int render_timeout_s = common::kDefaultHostPluginRenderTimeoutSeconds;
+    int prepare_timeout_s = common::kDefaultHostPluginPrepareTimeoutSeconds;
     if (data->render_timeout_param != nullptr) {
         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_timeout_s);
     }
@@ -1187,18 +1186,19 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         g_suites.parameter->paramGetValue(data->prepare_timeout_param, &prepare_timeout_s);
     }
 
-    OfxRuntimeClientOptions client_options;
-    client_options.endpoint = common::default_ofx_runtime_endpoint();
+    app::HostPluginRuntimeClientOptions client_options;
+    client_options.endpoint = common::default_host_plugin_runtime_endpoint();
     // Spec 0002 task 0010 follow-up: route Green and Blue descriptors to
     // distinct sidecar ports so each family owns its own server process.
     // Same-family instances still share a sidecar via the existing Health
-    // probe before launch_server in OfxRuntimeClient::ensure_server_running.
-    client_options.endpoint.port = common::default_ofx_runtime_port_for_family(
+    // probe before launch_server in HostPluginRuntimeClient::ensure_server_running.
+    client_options.endpoint.port = common::default_host_plugin_runtime_port_for_family(
         data->plugin_identifier != nullptr ? data->plugin_identifier : "");
     client_options.server_binary = data->runtime_server_path;
+    client_options.log_callback = log_message;
     client_options.request_timeout_ms = render_timeout_s * kMillisecondsPerSecondI;
     client_options.prepare_timeout_ms = prepare_timeout_s * kMillisecondsPerSecondI;
-    auto runtime_client = OfxRuntimeClient::create(std::move(client_options));
+    auto runtime_client = app::HostPluginRuntimeClient::create(std::move(client_options));
     if (!runtime_client) {
         data->last_error = runtime_client.error().message;
         log_message("ensure_runtime_client",
@@ -1207,7 +1207,7 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         return false;
     }
     data->runtime_client = std::move(*runtime_client);
-    log_message("ensure_runtime_client", "Using out-of-process OFX runtime.");
+    log_message("ensure_runtime_client", "Using out-of-process host plugin runtime.");
     return true;
 }
 
@@ -1674,9 +1674,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         // (TensorRT engine compile dominates first-launch wall time per
         // help/TROUBLESHOOTING.md "First-Run Warmup").
         const std::string progress_label =
-            std::string("CorridorKey: preparing ") +
-            quality_mode_label(requested_quality_mode) + " engine (" +
-            std::to_string(selection.effective_resolution) + "px) — first launch may take 10-30s";
+            std::string("CorridorKey: preparing ") + quality_mode_label(requested_quality_mode) +
+            " engine (" + std::to_string(selection.effective_resolution) +
+            "px) — first launch may take 10-30s";
         // Progress-bar tick fractions for the OFX progress suite. The 5%
         // initial tick gives the host a non-empty first frame, the 50% tick
         // surfaces mid-compile activity, and the 100% tick closes the modal.
@@ -1740,22 +1740,21 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         }
         effective_device = prepare_result->session.effective_device;
         fallback = prepare_result->session.backend_fallback;
-        log_message(
-            "ensure_engine_for_quality",
-            "Runtime session prepared. reused_existing_session=" +
-                std::string(prepare_result->session.reused_existing_session ? "1" : "0") +
-                " ref_count=" + std::to_string(prepare_result->session.ref_count));
+        log_message("ensure_engine_for_quality",
+                    "Runtime session prepared. reused_existing_session=" +
+                        std::string(prepare_result->session.reused_existing_session ? "1" : "0") +
+                        " ref_count=" + std::to_string(prepare_result->session.ref_count));
 
         log_engine_event("ensure_engine_for_quality", "engine_create_result", kQualitySwitchPhase,
                          candidate_requested_device, effective_device,
                          selection.executable_model_path, requested_resolution,
                          selection.effective_resolution, fallback);
         if (!backend_matches_request(effective_device, candidate_requested_device)) {
-            data->last_error =
-                "Quality switch requested backend " +
-                backend_label(candidate_requested_device.backend) + " for " +
-                selection.executable_model_path.filename().string() +
-                " but the runtime is using " + backend_label(effective_device.backend) + ".";
+            data->last_error = "Quality switch requested backend " +
+                               backend_label(candidate_requested_device.backend) + " for " +
+                               selection.executable_model_path.filename().string() +
+                               " but the runtime is using " +
+                               backend_label(effective_device.backend) + ".";
             if (fallback.has_value() && !fallback->reason.empty()) {
                 data->last_error += " Reason: " + fallback->reason;
             }
@@ -1874,8 +1873,8 @@ void update_runtime_node_indicator(InstanceData* data) {
         summary.body == data->last_persistent_body) {
         return;
     }
-    set_persistent_message(summary.severity, "corridorkey_runtime_status",
-                           summary.body.c_str(), data->effect);
+    set_persistent_message(summary.severity, "corridorkey_runtime_status", summary.body.c_str(),
+                           data->effect);
     data->last_persistent_severity = severity_str;
     data->last_persistent_body = summary.body;
 }
@@ -2059,9 +2058,9 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 std::error_code error;
                 std::filesystem::create_directories(log_dir, error);
                 if (!open_external_url(log_dir.string())) {
-                    post_message(
-                        kOfxMessageError,
-                        ("Failed to open log folder: " + log_dir.string()).c_str(), instance);
+                    post_message(kOfxMessageError,
+                                 ("Failed to open log folder: " + log_dir.string()).c_str(),
+                                 instance);
                 }
                 return kOfxStatOK;
             }
@@ -2104,8 +2103,8 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
             }
             if (changed_param == kParamRenderTimeout || changed_param == kParamPrepareTimeout) {
                 if (data->runtime_client != nullptr) {
-                    int render_t = common::kDefaultOfxRenderTimeoutSeconds;
-                    int prepare_t = common::kDefaultOfxPrepareTimeoutSeconds;
+                    int render_t = common::kDefaultHostPluginRenderTimeoutSeconds;
+                    int prepare_t = common::kDefaultHostPluginPrepareTimeoutSeconds;
                     if (data->render_timeout_param != nullptr) {
                         g_suites.parameter->paramGetValue(data->render_timeout_param, &render_t);
                     }
@@ -2182,8 +2181,7 @@ OfxStatus destroy_instance(OfxImageEffectHandle instance) {
         log_message("destroy_instance",
                     "skip persistent message clear reason=resolve_host_teardown");
     } else if (is_nuke_host()) {
-        log_message("destroy_instance",
-                    "skip persistent message clear reason=nuke_host_teardown");
+        log_message("destroy_instance", "skip persistent message clear reason=nuke_host_teardown");
     } else {
         clear_persistent_message(instance);
     }

@@ -3,7 +3,7 @@
 #include <corridorkey/types.hpp>
 #include <cstring>
 
-#include "plugins/ofx/ofx_runtime_client.hpp"
+#include "app/host_plugin_runtime_client.hpp"
 #include "plugins/ofx/ofx_shared.hpp"
 
 using corridorkey::StageTiming;
@@ -374,8 +374,7 @@ TEST_CASE("alpha hint policy prefers external hints and falls back to rough guid
 // fields. The unit tests below pin the formatting + severity contract
 // so a future refactor cannot silently drop fields that the user docs
 // reference.
-TEST_CASE("compose_runtime_node_summary surfaces idle state",
-          "[unit][ofx][runtime][panel]") {
+TEST_CASE("compose_runtime_node_summary surfaces idle state", "[unit][ofx][runtime][panel]") {
     InstanceData data{};
     data.last_render_work_origin = LastRenderWorkOrigin::None;
 
@@ -384,8 +383,9 @@ TEST_CASE("compose_runtime_node_summary surfaces idle state",
     CHECK(std::string(summary.severity) == kOfxMessageMessage);
 }
 
-TEST_CASE("compose_runtime_node_summary reports backend, device and effective quality on ready state",
-          "[unit][ofx][runtime][panel]") {
+TEST_CASE(
+    "compose_runtime_node_summary reports backend, device and effective quality on ready state",
+    "[unit][ofx][runtime][panel]") {
     InstanceData data{};
     data.device.backend = corridorkey::Backend::TensorRT;
     data.device.name = "NVIDIA GeForce RTX 3080";
@@ -428,8 +428,9 @@ TEST_CASE("compose_runtime_node_summary escalates severity on warning",
     CHECK(std::string(summary.severity) == kOfxMessageWarning);
 }
 
-TEST_CASE("compose_runtime_node_summary escalates severity to error and short-circuits other fields",
-          "[unit][ofx][runtime][panel]") {
+TEST_CASE(
+    "compose_runtime_node_summary escalates severity to error and short-circuits other fields",
+    "[unit][ofx][runtime][panel]") {
     InstanceData data{};
     data.device.backend = corridorkey::Backend::TensorRT;
     data.device.name = "NVIDIA GeForce RTX 3080";
@@ -437,12 +438,12 @@ TEST_CASE("compose_runtime_node_summary escalates severity to error and short-ci
     data.last_frame_ms = 1300.0;
     data.last_render_work_origin = LastRenderWorkOrigin::BackendRender;
     data.render_count = 1;
-    data.last_error = "OFX runtime server process exited during startup.";
+    data.last_error = "host plugin runtime server process exited during startup.";
 
     const auto summary = compose_runtime_node_summary(data);
     INFO("body=" << summary.body);
     CHECK(summary.body.rfind("Error: ", 0) == 0);
-    CHECK(summary.body.find("OFX runtime server process exited during startup.") !=
+    CHECK(summary.body.find("host plugin runtime server process exited during startup.") !=
           std::string::npos);
     // Error path is exclusive — the backend/device/timing chain is not
     // mixed in so the user sees the actionable message immediately.

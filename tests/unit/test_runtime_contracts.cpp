@@ -355,9 +355,9 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
 
     SECTION("Blue request returns the same artifact across VRAM tiers") {
         for (const auto memory_mb : {8192, 10240, 16384, 24576}) {
-            auto entry = default_model_for_request(
-                windows_capabilities, DeviceInfo{"RTX", memory_mb, Backend::TensorRT},
-                windows_default, "blue");
+            auto entry = default_model_for_request(windows_capabilities,
+                                                   DeviceInfo{"RTX", memory_mb, Backend::TensorRT},
+                                                   windows_default, "blue");
             REQUIRE(entry.has_value());
             REQUIRE(entry->filename == "corridorkey_dynamic_blue_fp16.ts");
             REQUIRE(entry->screen_color == "blue");
@@ -492,6 +492,46 @@ TEST_CASE("runtime artifact selection prefers lower packaged candidates automati
     CHECK((*expected)[1].filename() == "corridorkey_fp16_512.onnx");
 
     std::filesystem::remove_all(temp_dir);
+}
+
+TEST_CASE("host plugin runtime artifact selection keeps color and backend policy in app layer",
+          "[unit][runtime][screen-color][regression]") {
+    const std::filesystem::path models_root{"models"};
+
+    auto green = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"auto", 0, Backend::Auto}, 1024, false, QualityFallbackMode::Direct,
+        "green");
+    REQUIRE(green.has_value());
+    CHECK(green->model_path == models_root / "corridorkey_fp16_1024.onnx");
+    CHECK(green->requested_device.backend == Backend::Auto);
+
+    auto green_from_torchtrt = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"TorchTRT", 0, Backend::TorchTRT}, 1024, false,
+        QualityFallbackMode::Direct, "green");
+    REQUIRE(green_from_torchtrt.has_value());
+    CHECK(green_from_torchtrt->model_path == models_root / "corridorkey_fp16_1024.onnx");
+    CHECK(green_from_torchtrt->requested_device.backend == Backend::TensorRT);
+
+    auto blue = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"auto", 0, Backend::Auto}, 1024, false, QualityFallbackMode::Direct,
+        "blue");
+    REQUIRE(blue.has_value());
+    CHECK(blue->model_path == models_root / "corridorkey_dynamic_blue_fp16.ts");
+    CHECK(blue->requested_device.backend == Backend::TorchTRT);
+    CHECK(blue->requested_device.name == "TorchTRT");
+}
+
+TEST_CASE("host plugin runtime artifact selection accepts explicit coarse quality override",
+          "[unit][runtime][quality][regression]") {
+    const std::filesystem::path models_root{"models"};
+
+    auto green = host_plugin_runtime_artifact_selection_for_request(
+        models_root, DeviceInfo{"auto", 0, Backend::Auto}, 2048, false,
+        QualityFallbackMode::CoarseToFine, "green", 1024);
+
+    REQUIRE(green.has_value());
+    CHECK(green->model_path == models_root / "corridorkey_fp16_1024.onnx");
+    CHECK(green->requested_device.backend == Backend::Auto);
 }
 
 TEST_CASE("packaged model resolution uses catalog entries for non-onnx artifacts",

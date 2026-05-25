@@ -9,8 +9,8 @@
 #include <system_error>
 #include <vector>
 
+#include "app/host_plugin_session_broker.hpp"
 #include "app/job_orchestrator.hpp"
-#include "app/ofx_session_broker.hpp"
 #include "app/runtime_contracts.hpp"
 #include "common/runtime_paths.hpp"
 #include "common/shared_memory_transport.hpp"
@@ -47,6 +47,7 @@ struct HarnessOptions {
     int frame_height = 0;
     int iterations = 5;
     core::IoBindingMode io_binding_mode = core::IoBindingMode::Auto;
+    UpscaleMethod upscale_method = UpscaleMethod::Bilinear;
     // When both video paths are set the harness runs in "video" mode: it
     // decodes pairs of frames from the two clips and drives them into the
     // shared transport before each render. Frame width/height auto-populate
@@ -115,6 +116,18 @@ Result<HarnessOptions> parse_arguments(int argc, char* argv[]) {
                     Error{ErrorCode::InvalidParameters, "Unsupported --io-binding value."});
             }
             options.io_binding_mode = *parsed;
+            continue;
+        }
+        if (argument == "--upscale-method" && index + 1 < argc) {
+            const std::string method = argv[++index];
+            if (method == "bilinear") {
+                options.upscale_method = UpscaleMethod::Bilinear;
+            } else if (method == "lanczos4") {
+                options.upscale_method = UpscaleMethod::Lanczos4;
+            } else {
+                return Unexpected(
+                    Error{ErrorCode::InvalidParameters, "Unsupported --upscale-method value."});
+            }
             continue;
         }
         if (argument == "--input-video" && index + 1 < argc) {
@@ -341,7 +354,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    const auto transport_path = common::next_ofx_shared_frame_path();
+    const auto transport_path = common::next_host_plugin_shared_frame_path();
     std::error_code cleanup_error;
     std::filesystem::remove(transport_path, cleanup_error);
 
@@ -357,9 +370,9 @@ int main(int argc, char* argv[]) {
     std::fill(transport.hint_view().data.begin(), transport.hint_view().data.end(), 0.0f);
 
     common::StageProfiler profiler;
-    OfxSessionBroker broker;
+    HostPluginSessionBroker broker;
 
-    OfxRuntimePrepareSessionRequest prepare_request;
+    HostPluginRuntimePrepareSessionRequest prepare_request;
     prepare_request.client_instance_id = "benchmark";
     prepare_request.model_path = options.model_path;
     prepare_request.artifact_name = options.model_path.filename().string();
@@ -412,13 +425,14 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        OfxRuntimeRenderFrameRequest render_request;
+        HostPluginRuntimeRenderFrameRequest render_request;
         render_request.session_id = session_id;
         render_request.shared_frame_path = transport_path;
         render_request.width = options.frame_width;
         render_request.height = options.frame_height;
         render_request.render_index = static_cast<std::uint64_t>(iteration);
         render_request.params.target_resolution = options.resolution;
+        render_request.params.upscale_method = options.upscale_method;
 
         auto render_start = std::chrono::steady_clock::now();
         auto render_res = broker.render_frame(render_request);
@@ -452,7 +466,7 @@ int main(int argc, char* argv[]) {
     }
 
     auto release_start = std::chrono::steady_clock::now();
-    auto release_res = broker.release_session(OfxRuntimeReleaseSessionRequest{session_id});
+    auto release_res = broker.release_session(HostPluginRuntimeReleaseSessionRequest{session_id});
     auto release_end = std::chrono::steady_clock::now();
     std::filesystem::remove(transport_path, cleanup_error);
     if (!release_res) {
@@ -490,6 +504,8 @@ int main(int argc, char* argv[]) {
     results["backend"] = backend_to_string(effective_device.backend);
     results["batch_size"] = 1;
     results["tiling_enabled"] = false;
+    results["upscale_method"] =
+        options.upscale_method == UpscaleMethod::Lanczos4 ? "lanczos4" : "bilinear";
     results["io_binding"]["requested_mode"] =
         std::string(core::io_binding_mode_to_string(options.io_binding_mode));
     results["io_binding"]["eligible"] =
@@ -499,7 +515,8 @@ int main(int argc, char* argv[]) {
     results["io_binding"]["observed"] = has_stage(stage_timings, "ort_io_binding_bind_inputs");
 #if defined(CORRIDORKEY_HAS_CUDA) && CORRIDORKEY_HAS_CUDA
     results["io_binding"]["memory_mode"] = "pinned";
-    results["io_binding"]["resize_mode"] = "gpu";
+    results["io_binding"]["resize_mode"] =
+        options.upscale_method == UpscaleMethod::Bilinear ? "gpu" : "cpu";
 #else
     results["io_binding"]["memory_mode"] = "pageable";
     results["io_binding"]["resize_mode"] = "cpu";

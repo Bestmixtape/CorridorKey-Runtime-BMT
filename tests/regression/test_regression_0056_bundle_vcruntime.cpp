@@ -1,9 +1,9 @@
 // Regression test for Issue #56:
-// "Failed to prepare runtime session for ... OFX runtime server process exited
+// "Failed to prepare runtime session for ... host plugin runtime server process exited
 //  during startup" reported on Foundry Nuke 17.0v2 + Windows + RTX 3090 Ti
 //  against v0.8.2-win.2.
 //
-// The OFX runtime sidecar imported MSVCP140.dll from Foundry Nuke's install
+// The host plugin runtime sidecar imported MSVCP140.dll from Foundry Nuke's install
 // directory instead of from %WINDIR%\System32 because Nuke calls
 // SetDllDirectory on its own process — Microsoft documents at
 // https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-search-order
@@ -55,11 +55,7 @@ namespace {
 // blocking; the core MSVCP140 + VCRUNTIME140 entries are what protect against
 // the Issue #56 crash.
 constexpr std::array<const char*, 5> kRequiredRedistNames = {
-    "MSVCP140.dll",
-    "MSVCP140_1.dll",
-    "MSVCP140_2.dll",
-    "VCRUNTIME140.dll",
-    "VCRUNTIME140_1.dll",
+    "MSVCP140.dll", "MSVCP140_1.dll", "MSVCP140_2.dll", "VCRUNTIME140.dll", "VCRUNTIME140_1.dll",
 };
 
 }  // namespace
@@ -67,9 +63,10 @@ constexpr std::array<const char*, 5> kRequiredRedistNames = {
 TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local",
           "[regression][packaging][windows]") {
 #if !defined(CORRIDORKEY_OFX_BUNDLE_WIN64_DIR)
-    SKIP("CORRIDORKEY_OFX_BUNDLE_WIN64_DIR not defined; bundle staging path "
-         "not propagated by CMake (e.g. when the test target was built without "
-         "corridorkey_ofx as a dependency).");
+    SKIP(
+        "CORRIDORKEY_OFX_BUNDLE_WIN64_DIR not defined; bundle staging path "
+        "not propagated by CMake (e.g. when the test target was built without "
+        "corridorkey_ofx as a dependency).");
 #else
     const std::filesystem::path bundle_win64_dir = CORRIDORKEY_OFX_BUNDLE_WIN64_DIR;
 
@@ -79,7 +76,8 @@ TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local
 
     for (const char* name : kRequiredRedistNames) {
         const auto candidate = bundle_win64_dir / name;
-        INFO("Expecting app-local " << name << " at " << candidate.string()
+        INFO("Expecting app-local "
+             << name << " at " << candidate.string()
              << " (Issue #56: required to win Win32 DLL search step #1 over "
              << "Foundry Nuke's app-local MSVCP140 inherited via SetDllDirectory)");
         REQUIRE(std::filesystem::exists(candidate));
@@ -107,8 +105,9 @@ TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local
 
 TEST_CASE("Regression #56: OFX bundle ships Visual C++ Redistributable app-local",
           "[regression][packaging][windows]") {
-    SUCCEED("Visual C++ Redistributable bundling only applies to Windows; "
-            "non-Windows builds are not affected by Issue #56.");
+    SUCCEED(
+        "Visual C++ Redistributable bundling only applies to Windows; "
+        "non-Windows builds are not affected by Issue #56.");
 }
 
 #endif  // _WIN32

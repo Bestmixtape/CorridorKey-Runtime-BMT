@@ -29,9 +29,13 @@
 #define CORRIDORKEY_OFX_EXPORT
 #endif
 
-namespace corridorkey::ofx {
+namespace corridorkey::app {
 
-class OfxRuntimeClient;
+class HostPluginRuntimeClient;
+
+}  // namespace corridorkey::app
+
+namespace corridorkey::ofx {
 
 // Per-descriptor identifiers and labels live in ofx_plugin_descriptors.hpp.
 // kPluginIdentifierGreen preserves the legacy reverse-DNS string that saved
@@ -202,10 +206,10 @@ struct InstanceData {
     OfxParamHandle include_pre_releases_param = nullptr;
     // No in-class = nullptr initializer for the unique_ptr below: clang/libc++
     // instantiates ~unique_ptr<T>() at the NSDMI site, which then requires
-    // complete OfxRuntimeClient and fails with "sizeof to an incomplete type"
+    // complete HostPluginRuntimeClient and fails with "sizeof to an incomplete type"
     // in TUs that don't include its full definition. unique_ptr default-
     // constructs to nullptr already.
-    std::unique_ptr<OfxRuntimeClient> runtime_client;
+    std::unique_ptr<app::HostPluginRuntimeClient> runtime_client;
     std::filesystem::path models_root = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};
@@ -352,8 +356,8 @@ void post_message(const char* message_type, const char* message, OfxImageEffectH
 // safety note. These exist so render-thread code can surface dynamic
 // runtime telemetry on hosts that do not allow render-thread
 // paramSetValue (Foundry Nuke 17).
-void set_persistent_message(const char* message_type, const char* message_id,
-                            const char* message, OfxImageEffectHandle effect);
+void set_persistent_message(const char* message_type, const char* message_id, const char* message,
+                            OfxImageEffectHandle effect);
 void clear_persistent_message(OfxImageEffectHandle effect);
 
 // kOfxProgressSuite (V1 + V2) wrapper used during long-running prepare /

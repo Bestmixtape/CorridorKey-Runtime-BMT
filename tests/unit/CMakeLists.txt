@@ -8,8 +8,12 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
-    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_runtime_client.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_frame_output.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_client_cache.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_bridge.cpp
     test_alpha_edge.cpp
+    test_adobe_bridge.cpp
     test_color_utils.cpp
     test_coarse_to_fine_policy.cpp
     test_despill.cpp
@@ -36,10 +40,10 @@ add_executable(test_unit
     test_ofx_model_selection.cpp
     test_ofx_output_modes.cpp
     test_ofx_screen_color.cpp
-    test_ofx_runtime_client.cpp
+    test_host_plugin_runtime_client.cpp
     test_ofx_runtime_panel.cpp
-    test_ofx_runtime_protocol.cpp
-    test_ofx_session_policy.cpp
+    test_host_plugin_runtime_protocol.cpp
+    test_host_plugin_session_policy.cpp
     test_output_path_utils.cpp
     test_process_paths.cpp
     test_runtime_diagnostics.cpp
@@ -50,6 +54,7 @@ add_executable(test_unit
     test_fp16_convert.cpp
     test_pinned_buffer.cpp
     test_stage_profiler.cpp
+    test_synthetic_chroma_quality.cpp
     test_ofx_stubs.cpp
     test_tile_blend.cpp
     test_version_check.cpp
@@ -71,6 +76,23 @@ target_include_directories(test_unit
     PRIVATE
         ${PROJECT_SOURCE_DIR}/vendor/openfx/include
 )
+
+if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)
+    target_sources(test_unit
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect.cpp
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_render.cpp
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_runtime_request.cpp
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_effect_parameters.cpp
+            test_adobe_effect.cpp
+    )
+    target_include_directories(test_unit
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/plugins/adobe
+            ${PROJECT_BINARY_DIR}/src/plugins/adobe/generated
+            ${CORRIDORKEY_ADOBE_SDK_INCLUDE_DIR}
+    )
+endif()
 
 target_compile_definitions(test_unit PRIVATE
     PROJECT_ROOT="${CMAKE_SOURCE_DIR}"

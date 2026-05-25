@@ -3,7 +3,7 @@
 #include <initializer_list>
 #include <vector>
 
-#include "common/ofx_runtime_defaults.hpp"
+#include "common/host_plugin_runtime_defaults.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
 
@@ -18,7 +18,7 @@
 // would force every call site in describe_in_context to wrap every
 // argument in a designated-init aggregate for negligible review
 // benefit. The numeric defaults / min / max values are the canonical
-// OFX panel ranges defined in common/ofx_runtime_defaults.hpp; magic-
+// OFX panel ranges defined in common/host_plugin_runtime_defaults.hpp; magic-
 // number warnings on the literals are noise once that header is
 // understood. The remaining c-arrays / function-size / sign-comparison
 // / unchecked-container-access suppressions are driven by the OFX
@@ -565,18 +565,16 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     //   deterministic equivalent using the Green model.
     const int screen_color_default = 0;
     const std::vector<const char*> screen_color_options =
-        is_blue_descriptor
-            ? std::vector<const char*>{"Blue"}
-            : std::vector<const char*>{"Green", "Blue-Green Channel Swap"};
+        is_blue_descriptor ? std::vector<const char*>{"Blue"}
+                           : std::vector<const char*>{"Green", "Blue-Green Channel Swap"};
     const char* screen_color_hint =
-        is_blue_descriptor
-            ? "Locked to Blue for this dedicated node. The screen path uses the "
-              "Blue Torch-TensorRT model directly."
-            : "Select the deterministic Green path. 'Green' uses the optimized "
-              "Green model on a green screen plate. 'Blue-Green Channel Swap' "
-              "maps a blue screen plate into the Green model domain via the "
-              "validated channel-swap technique. For a blue screen with the "
-              "dedicated Blue model, use the CorridorKey Blue node.";
+        is_blue_descriptor ? "Locked to Blue for this dedicated node. The screen path uses the "
+                             "Blue Torch-TensorRT model directly."
+                           : "Select the deterministic Green path. 'Green' uses the optimized "
+                             "Green model on a green screen plate. 'Blue-Green Channel Swap' "
+                             "maps a blue screen plate into the Green model domain via the "
+                             "validated channel-swap technique. For a blue screen with the "
+                             "dedicated Blue model, use the CorridorKey Blue node.";
     define_choice_param(param_set, kParamScreenColor, "Screen Color", screen_color_default,
                         screen_color_options, screen_color_hint, "setup_group",
                         /*enabled=*/true, /*secret=*/is_blue_descriptor);
@@ -752,12 +750,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "advanced_processing_group");
 
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)",
-                     common::kDefaultOfxRenderTimeoutSeconds, 10, 300,
+                     common::kDefaultHostPluginRenderTimeoutSeconds, 10, 300,
                      "Maximum time in seconds to wait for a single frame render. "
                      "Increase for high-resolution modes on slower hardware.",
                      "advanced_runtime_group");
     define_int_param(param_set, kParamPrepareTimeout, "Prepare Timeout (s)",
-                     common::kDefaultOfxPrepareTimeoutSeconds, 30, 600,
+                     common::kDefaultHostPluginPrepareTimeoutSeconds, 30, 600,
                      "Maximum time in seconds to wait for model loading and bootstrap. "
                      "Increase if first-frame initialization times out.",
                      "advanced_runtime_group");

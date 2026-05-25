@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -15,6 +15,8 @@ param(
     # Inno Setup installer from the same staged OFX bundle.
     [ValidateSet("", "online", "offline")]
     [string]$Flavor = "",
+    [switch]$EnableAdobePlugin,
+    [string]$AdobeSdkRoot = "",
     [string[]]$ForwardArguments = @()
 )
 
@@ -23,6 +25,10 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
+
+if ($Task -ne "build" -and ($EnableAdobePlugin -or -not [string]::IsNullOrWhiteSpace($AdobeSdkRoot))) {
+    throw "-EnableAdobePlugin and -AdobeSdkRoot are supported only with -Task build."
+}
 
 function Assert-CorridorKeyWindowsReleaseLabelFormat {
     param(
@@ -103,15 +109,16 @@ $stableGithubReleaseRequested = $Task -eq "release" -and $publishGithubRequested
 # label from git. The strict X.Y.Z-win.N format only applies when the
 # operator explicitly opts in to the published-prerelease label shape;
 # the derived form (mechanism #3 in docs/RELEASE_GUIDELINES.md
-# "Windows Release Label Plumbing") is the longer git-describe shape
-# `0.8.2-win.2-82-g4a75ef2[-dirty]` and is intentionally allowed to
-# bypass that strict format.
+# "Windows Release Label Plumbing") is the longer local-build shape
+# `0.8.5-win.0-82-g4a75ef2[-dirty]-b...` and is intentionally allowed
+# to bypass that strict format.
 Assert-CorridorKeyWindowsReleaseLabelFormat `
     -Version $resolvedVersion `
     -DisplayVersionLabel $DisplayVersionLabel
 
-# Mechanism #3: derive the local-build label from `git describe` plus a
-# per-build reference when the operator did not pass an explicit override.
+# Mechanism #3: derive the local-build label from the current project
+# version plus `git describe` source identity and a per-build reference
+# when the operator did not pass an explicit override.
 # Without the build reference, rebuilding the same dirty commit overwrites
 # an installer name that still looks identical in Resolve's OFX panel.
 # Stable GitHub releases are the only clean-label path: when publishing
@@ -120,19 +127,19 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
 if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     if ($stableGithubReleaseRequested) {
         Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
-    } elseif ($Task -eq "package-ofx") {
+    } elseif ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host")) {
         $buildDir = Join-Path $repoRoot ("build\" + $Preset)
         $builtLabel = Get-CorridorKeyBuiltCliDisplayLabel -BuildDir $buildDir
         if ([string]::IsNullOrWhiteSpace($builtLabel)) {
-            throw "Task 'package-ofx' could not read a built CLI label from $buildDir. Run scripts\windows.ps1 -Task build -Preset $Preset first."
+            throw "Task '$Task' could not read a built CLI label from $buildDir. Run scripts\windows.ps1 -Task build -Preset $Preset first."
         }
         if ($builtLabel -eq $resolvedVersion) {
-            throw "Task 'package-ofx' found a bare built CLI label '$builtLabel'. Rebuild through scripts\windows.ps1 -Task build -Preset $Preset so the panel and installer name carry a build reference."
+            throw "Task '$Task' found a bare built CLI label '$builtLabel'. Rebuild through scripts\windows.ps1 -Task build -Preset $Preset so the panel and installer name carry a build reference."
         }
         $DisplayVersionLabel = $builtLabel
         Write-Host "[windows] Reusing display version label from built CLI: $DisplayVersionLabel" -ForegroundColor Yellow
     } else {
-        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot
+        $derivedLabel = Get-CorridorKeyDerivedDisplayLabel -RepoRoot $repoRoot -Version $resolvedVersion
         if (-not [string]::IsNullOrWhiteSpace($derivedLabel)) {
             $DisplayVersionLabel = $derivedLabel
             Write-Host "[windows] Derived display version label from git/build: $DisplayVersionLabel" -ForegroundColor Yellow
@@ -156,7 +163,7 @@ Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
 if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     Write-Host "[windows] Display version label: $DisplayVersionLabel" -ForegroundColor Cyan
 }
-if ($Task -in @("package-ofx", "package-runtime", "release")) {
+if ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
 }
 
@@ -173,6 +180,14 @@ switch ($Task) {
         $arguments = @("-Preset", $Preset)
         if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
             $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        if ($EnableAdobePlugin) {
+            $arguments += @("-EnableAdobePlugin")
+            if (-not [string]::IsNullOrWhiteSpace($AdobeSdkRoot)) {
+                $arguments += @("-AdobeSdkRoot", $AdobeSdkRoot)
+            }
+        } elseif (-not [string]::IsNullOrWhiteSpace($AdobeSdkRoot)) {
+            throw "-AdobeSdkRoot requires -EnableAdobePlugin."
         }
         Invoke-CorridorKeyScript -ScriptName "build.ps1" -Arguments $arguments
         break
@@ -269,6 +284,51 @@ switch ($Task) {
                 }
                 Invoke-CorridorKeyScript -ScriptName "installer\build_installer.ps1" -Arguments $innoArgs
             }
+        }
+        break
+    }
+    "package-adobe" {
+        foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $resolvedTrack) {
+            $arguments = @(
+                "-Version", $resolvedVersion,
+                "-ReleaseSuffix", $variant.Suffix,
+                "-ModelProfile", $variant.ModelProfile
+            )
+            if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+                $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($Flavor)) {
+                $arguments += @("-Flavor", $Flavor)
+            }
+            $arguments += $additionalArguments
+            Invoke-CorridorKeyScript -ScriptName "package_adobe_plugins_windows.ps1" -Arguments $arguments
+
+            $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
+            $validationPath = Join-Path $repoRoot ("dist\CorridorKey_Adobe_v${stagedTag}_Windows_$($variant.Suffix)\adobe_package_validation.json")
+            Assert-CorridorKeyAdobePackageValidationHealthy `
+                -ValidationReportPath $validationPath `
+                -Label "Adobe $($variant.Suffix) package" | Out-Null
+        }
+        break
+    }
+    "smoke-adobe-host" {
+        foreach ($variant in Get-CorridorKeyWindowsOfxReleaseVariants -Track $resolvedTrack) {
+            $stagedTag = if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) { $resolvedVersion } else { $DisplayVersionLabel }
+            $packagePath = Join-Path $repoRoot ("dist\CorridorKey_Adobe_v${stagedTag}_Windows_$($variant.Suffix)")
+            if (-not (Test-Path -LiteralPath $packagePath)) {
+                throw "Adobe host smoke package path not found: $packagePath. Run scripts\windows.ps1 -Task package-adobe -Preset $Preset -Track $resolvedTrack first."
+            }
+
+            $reportPath = Join-Path $packagePath "adobe_after_effects_host_smoke_green.json"
+            $arguments = @(
+                "-PackagePath", $packagePath,
+                "-ExpectedDisplayVersionLabel", $stagedTag,
+                "-ReportPath", $reportPath
+            ) + $additionalArguments
+            Invoke-CorridorKeyScript -ScriptName "smoke_adobe_after_effects_host_win.ps1" -Arguments $arguments
+            Assert-CorridorKeyAdobeHostSmokeHealthy `
+                -ValidationReportPath $reportPath `
+                -Label "Adobe After Effects $($variant.Suffix) host smoke" | Out-Null
         }
         break
     }

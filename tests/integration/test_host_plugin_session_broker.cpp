@@ -1,0 +1,270 @@
+#include <algorithm>
+#include <catch2/catch_all.hpp>
+#include <filesystem>
+#include <system_error>
+
+#include "../test_model_artifact_utils.hpp"
+#include "app/host_plugin_session_broker.hpp"
+#include "common/shared_memory_transport.hpp"
+
+using namespace corridorkey;
+using namespace corridorkey::app;
+
+namespace {
+
+//
+// Test-file tidy-suppression rationale.
+//
+// Test fixtures legitimately use single-letter loop locals, magic
+// numbers (resolution rungs, pixel coordinates, expected error counts),
+// std::vector::operator[] on indices the test itself just constructed,
+// and Catch2 / aggregate-init styles that pre-date the project's
+// tightened .clang-tidy ruleset. The test source is verified
+// behaviourally by ctest; converting every site to bounds-checked /
+// designated-init / ranges form would obscure intent without changing
+// what the tests prove. The same suppressions are documented and
+// applied on the src/ tree where the underlying APIs live.
+//
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+
+bool has_stage(const std::vector<StageTiming>& timings, const std::string& name) {
+    return std::any_of(timings.begin(), timings.end(),
+                       [&](const StageTiming& timing) { return timing.name == name; });
+}
+
+}  // namespace
+
+TEST_CASE("OFX session broker reuses sessions for the same executable model",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    HostPluginSessionBroker broker;
+
+    HostPluginRuntimePrepareSessionRequest first_request;
+    first_request.client_instance_id = "bootstrap";
+    first_request.model_path = model_path;
+    first_request.artifact_name = "requested_alias.onnx";
+    first_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    first_request.requested_quality_mode = 1;
+    first_request.requested_resolution = 512;
+    first_request.effective_resolution = 512;
+    first_request.engine_options.allow_cpu_fallback = false;
+    first_request.engine_options.disable_cpu_ep_fallback = true;
+
+    auto first_prepare = broker.prepare_session(first_request);
+    REQUIRE(first_prepare.has_value());
+    CHECK_FALSE(first_prepare->session.reused_existing_session);
+    CHECK(first_prepare->session.artifact_name == model_path.filename().string());
+    CHECK(has_stage(first_prepare->timings, "ort_env_acquire"));
+    CHECK(has_stage(first_prepare->timings, "ort_session_create"));
+    CHECK(broker.session_count() == 1);
+    CHECK(broker.active_session_count() == 1);
+
+    auto second_request = first_request;
+    second_request.client_instance_id = "quality_switch";
+    second_request.artifact_name = model_path.filename().string();
+    second_request.requested_quality_mode = 2;
+    second_request.requested_resolution = 1024;
+    second_request.effective_resolution = 512;
+
+    auto second_prepare = broker.prepare_session(second_request);
+    REQUIRE(second_prepare.has_value());
+    CHECK(second_prepare->session.reused_existing_session);
+    CHECK(second_prepare->session.session_id == first_prepare->session.session_id);
+    CHECK(second_prepare->session.artifact_name == model_path.filename().string());
+    CHECK(second_prepare->session.requested_quality_mode == first_request.requested_quality_mode);
+    CHECK(second_prepare->session.requested_resolution == first_request.requested_resolution);
+    CHECK(second_prepare->session.effective_resolution == first_request.effective_resolution);
+    CHECK(second_prepare->session.ref_count == 2);
+    CHECK(second_prepare->timings.empty());
+    CHECK(broker.session_count() == 1);
+    CHECK(broker.active_session_count() == 1);
+
+    auto first_release = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{first_prepare->session.session_id});
+    REQUIRE(first_release.has_value());
+    CHECK(broker.session_count() == 1);
+    CHECK(broker.active_session_count() == 1);
+
+    auto second_release = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{second_prepare->session.session_id});
+    REQUIRE(second_release.has_value());
+    CHECK(broker.session_count() == 1);
+    CHECK(broker.active_session_count() == 0);
+}
+
+TEST_CASE("OFX session broker records broker writeback timing on render",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    HostPluginSessionBroker broker;
+
+    HostPluginRuntimePrepareSessionRequest prepare_request;
+    prepare_request.client_instance_id = "render_test";
+    prepare_request.model_path = model_path;
+    prepare_request.artifact_name = model_path.filename().string();
+    prepare_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    prepare_request.requested_quality_mode = 1;
+    prepare_request.requested_resolution = 512;
+    prepare_request.effective_resolution = 512;
+    prepare_request.engine_options.allow_cpu_fallback = false;
+    prepare_request.engine_options.disable_cpu_ep_fallback = true;
+
+    auto prepare_res = broker.prepare_session(prepare_request);
+    REQUIRE(prepare_res.has_value());
+
+    const auto transport_path =
+        std::filesystem::temp_directory_path() / "corridorkey_host_plugin_broker_render_test.ckfx";
+    std::error_code error;
+    std::filesystem::remove(transport_path, error);
+
+    auto transport_res = common::SharedFrameTransport::create(transport_path, 96, 64);
+    REQUIRE(transport_res.has_value());
+    auto transport = std::move(*transport_res);
+    std::fill(transport.rgb_view().data.begin(), transport.rgb_view().data.end(), 0.0F);
+    std::fill(transport.hint_view().data.begin(), transport.hint_view().data.end(), 0.0F);
+
+    HostPluginRuntimeRenderFrameRequest render_request;
+    render_request.session_id = prepare_res->session.session_id;
+    render_request.shared_frame_path = transport_path;
+    render_request.width = 96;
+    render_request.height = 64;
+    render_request.render_index = 0;
+    render_request.params.target_resolution = 512;
+
+    auto render_res = broker.render_frame(render_request);
+    std::filesystem::remove(transport_path, error);
+
+    REQUIRE(render_res.has_value());
+    CHECK(has_stage(render_res->timings, "frame_prepare_inputs"));
+    CHECK(has_stage(render_res->timings, "host_plugin_broker_writeback"));
+
+    auto release_res = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{prepare_res->session.session_id});
+    REQUIRE(release_res.has_value());
+}
+
+TEST_CASE("OFX session broker keys sessions by node identity",
+          "[integration][ofx][runtime][regression]") {
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    HostPluginSessionBroker broker;
+
+    HostPluginRuntimePrepareSessionRequest green_request;
+    green_request.client_instance_id = "green_instance";
+    green_request.model_path = model_path;
+    green_request.artifact_name = model_path.filename().string();
+    green_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU};
+    green_request.requested_quality_mode = 1;
+    green_request.requested_resolution = 512;
+    green_request.effective_resolution = 512;
+    green_request.engine_options.allow_cpu_fallback = false;
+    green_request.engine_options.disable_cpu_ep_fallback = true;
+    green_request.node_identity = "com.corridorkey.resolve";
+
+    auto green_prepare = broker.prepare_session(green_request);
+    REQUIRE(green_prepare.has_value());
+    CHECK_FALSE(green_prepare->session.reused_existing_session);
+
+    // Same artifact path + same backend, different node identity ⇒ different
+    // cache key, so the broker MUST allocate a separate session even though
+    // the request is otherwise identical. Spec 0002 FR-9 / task 0010.
+    auto blue_request = green_request;
+    blue_request.client_instance_id = "blue_instance";
+    blue_request.node_identity = "com.corridorkey.resolve.blue";
+
+    auto blue_prepare = broker.prepare_session(blue_request);
+    REQUIRE(blue_prepare.has_value());
+    CHECK_FALSE(blue_prepare->session.reused_existing_session);
+    CHECK(blue_prepare->session.session_id != green_prepare->session.session_id);
+    CHECK(broker.session_count() == 2);
+
+    // Re-issuing the Green request reuses the Green session, not the Blue
+    // one — confirms the cache lookup is identity-aware in both directions.
+    auto green_again = broker.prepare_session(green_request);
+    REQUIRE(green_again.has_value());
+    CHECK(green_again->session.reused_existing_session);
+    CHECK(green_again->session.session_id == green_prepare->session.session_id);
+    CHECK(green_again->session.session_id != blue_prepare->session.session_id);
+
+    auto release_green = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{green_prepare->session.session_id});
+    REQUIRE(release_green.has_value());
+    auto release_green_again = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{green_again->session.session_id});
+    REQUIRE(release_green_again.has_value());
+    auto release_blue = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{blue_prepare->session.session_id});
+    REQUIRE(release_blue.has_value());
+}
+
+TEST_CASE("host plugin session broker keys sessions by requested device index",
+          "[integration][runtime][regression]") {
+    const std::filesystem::path model_path =
+        std::filesystem::path(PROJECT_ROOT) / "models" / "corridorkey_int8_512.onnx";
+    if (auto reason = corridorkey::tests::unusable_model_artifact_reason(model_path);
+        reason.has_value()) {
+        SKIP(*reason);
+    }
+
+    HostPluginSessionBroker broker;
+
+    HostPluginRuntimePrepareSessionRequest first_device_request;
+    first_device_request.client_instance_id = "device_index_0";
+    first_device_request.model_path = model_path;
+    first_device_request.artifact_name = model_path.filename().string();
+    first_device_request.requested_device = DeviceInfo{"Generic CPU", 0, Backend::CPU, 0};
+    first_device_request.requested_quality_mode = 1;
+    first_device_request.requested_resolution = 512;
+    first_device_request.effective_resolution = 512;
+    first_device_request.engine_options.allow_cpu_fallback = false;
+    first_device_request.engine_options.disable_cpu_ep_fallback = true;
+    first_device_request.node_identity = "com.corridorkey.host_plugin";
+
+    auto first_prepare = broker.prepare_session(first_device_request);
+    REQUIRE(first_prepare.has_value());
+    CHECK_FALSE(first_prepare->session.reused_existing_session);
+
+    auto second_device_request = first_device_request;
+    second_device_request.client_instance_id = "device_index_1";
+    second_device_request.requested_device.device_index = 1;
+
+    auto second_prepare = broker.prepare_session(second_device_request);
+    REQUIRE(second_prepare.has_value());
+    CHECK_FALSE(second_prepare->session.reused_existing_session);
+    CHECK(second_prepare->session.session_id != first_prepare->session.session_id);
+    CHECK(broker.session_count() == 2);
+
+    auto first_again = broker.prepare_session(first_device_request);
+    REQUIRE(first_again.has_value());
+    CHECK(first_again->session.reused_existing_session);
+    CHECK(first_again->session.session_id == first_prepare->session.session_id);
+    CHECK(first_again->session.session_id != second_prepare->session.session_id);
+
+    auto release_first = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{first_prepare->session.session_id});
+    REQUIRE(release_first.has_value());
+    auto release_first_again = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{first_again->session.session_id});
+    REQUIRE(release_first_again.has_value());
+    auto release_second = broker.release_session(
+        HostPluginRuntimeReleaseSessionRequest{second_prepare->session.session_id});
+    REQUIRE(release_second.has_value());
+}
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
