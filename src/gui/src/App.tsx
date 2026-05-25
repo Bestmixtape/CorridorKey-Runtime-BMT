@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Sidebar } from "./components/layout/sidebar";
 import { TopBar } from "./components/layout/topbar";
 import { ProcessFlow } from "./components/workflow/ProcessFlow";
@@ -13,12 +13,22 @@ import {
   Clock,
   Box,
   CheckCircle2,
-  HelpCircle
+  HelpCircle,
+  RefreshCw
 } from "lucide-react";
 import { Button } from "./components/ui/button";
 
 function App() {
-  const { refreshInfo, error: engineError, info } = useEngineStore();
+  const {
+    refreshInfo,
+    error: engineError,
+    info,
+    readiness,
+    isLoading: engineLoading,
+    getMissingModels,
+    getSupportedTracks,
+    getDoctorSummary
+  } = useEngineStore();
   const { history, loadHistory, clearHistory, videoEncodeMode, setVideoEncodeMode, initDefaults } = useJobStore();
   const [activeTab, setActiveTab] = useState("Workflow");
 
@@ -90,32 +100,137 @@ function App() {
           </div>
         );
       case "Hardware":
+        const missingModels = getMissingModels();
+        const supportedTracks = getSupportedTracks();
+        const doctorSummary = getDoctorSummary();
+        const commandResults = readiness
+          ? [readiness.info, readiness.doctor, readiness.models, readiness.presets]
+          : [];
+        const backendSupported = (backend: string, legacyValue?: boolean): boolean | undefined => {
+          if (legacyValue !== undefined) {
+            return legacyValue;
+          }
+          const supportedBackends = info?.capabilities?.supported_backends;
+          return Array.isArray(supportedBackends)
+            ? supportedBackends.includes(backend)
+            : undefined;
+        };
+
         return (
-          <div className="max-w-4xl mx-auto space-y-6">
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              <Cpu className="w-6 h-6 text-brand" /> Hardware Diagnostics
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {info?.devices.map((d, i) => (
-                <div key={i} className="p-6 rounded-2xl border bg-gradient-to-br from-card to-zinc-900/50 space-y-4 shadow-apple">
-                  <div className="flex items-center justify-between">
-                    <div className="px-2 py-1 rounded bg-brand/20 text-brand text-[10px] font-bold uppercase tracking-widest">
-                      {d.backend}
-                    </div>
-                    {i === 0 && <span className="text-[10px] font-bold text-green-500 uppercase">Primary</span>}
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Cpu className="w-6 h-6 text-brand" /> Runtime Diagnostics
+              </h2>
+              <Button variant="ghost" size="sm" onClick={refreshInfo} disabled={engineLoading}>
+                <RefreshCw className={`w-4 h-4 mr-2 ${engineLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-5 shadow-apple">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                    Readiness
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-xl font-bold tracking-tight">{d.name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {d.memory_mb > 0 ? `${d.memory_mb} MB Dedicated VRAM` : "Integrated Graphics / System RAM"}
-                    </div>
+                  <div className="text-xl font-bold text-zinc-50">
+                    {readiness ? readinessLabel(readiness.status) : "Runtime probe pending"}
                   </div>
-                  <div className="pt-4 flex items-center gap-4 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                    <span>Precision: FP16</span>
-                    <span>Tiling: Supported</span>
+                  <div className="text-sm text-zinc-400">
+                    {doctorSummary || engineError || "Waiting for runtime diagnostics."}
                   </div>
                 </div>
-              ))}
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">
+                  {readiness?.runtime_path || "Runtime path not resolved"}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <DiagnosticPanel title="Missing Model Packs">
+                {missingModels.length > 0 ? (
+                  <div className="space-y-2">
+                    {missingModels.map((model) => (
+                      <div key={model} className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200">
+                        {model}
+                      </div>
+                    ))}
+                    <p className="text-xs text-zinc-400">
+                      Repair or reinstall the desktop runtime package. Maintainers should regenerate the package-runtime payload through the canonical Windows wrapper.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-400">No missing model packs reported.</p>
+                )}
+              </DiagnosticPanel>
+
+              <DiagnosticPanel title="Supported Tracks">
+                {supportedTracks.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {supportedTracks.map((track) => (
+                      <span key={track} className="rounded-lg border border-brand/30 bg-brand/10 px-2 py-1 text-xs font-bold uppercase tracking-wider text-brand">
+                        {track}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-400">No track catalog reported.</p>
+                )}
+              </DiagnosticPanel>
+
+              <DiagnosticPanel title="Backend Support">
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <CapabilityRow label="TensorRT RTX" value={backendSupported("tensorrt", info?.capabilities?.tensorrt_rtx_available)} />
+                  <CapabilityRow label="DirectML" value={backendSupported("dml")} />
+                  <CapabilityRow label="CPU fallback" value={backendSupported("cpu", info?.capabilities?.cpu_fallback_available)} />
+                </div>
+              </DiagnosticPanel>
+
+              <DiagnosticPanel title="Runtime Commands">
+                <div className="space-y-2">
+                  {commandResults.length === 0 ? (
+                    <p className="text-sm text-zinc-400">No command results yet.</p>
+                  ) : (
+                    commandResults.map((result) => (
+                      <div key={result.command} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+                        <span className="text-sm font-medium text-zinc-100">{result.command}</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${result.ok ? "text-brand" : "text-destructive"}`}>
+                          {result.ok ? "ok" : result.error?.kind || "error"}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </DiagnosticPanel>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Devices</h3>
+              {(info?.devices?.length ?? 0) > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {info?.devices?.map((device, index) => (
+                    <div key={`${device.name}-${index}`} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-5 shadow-apple">
+                      <div className="flex items-center justify-between">
+                        <div className="rounded-lg bg-brand/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-brand">
+                          {device.backend}
+                        </div>
+                        {index === 0 && <span className="text-[10px] font-bold uppercase tracking-wider text-brand">Primary</span>}
+                      </div>
+                      <div className="mt-4 space-y-1">
+                        <div className="text-lg font-bold tracking-tight text-zinc-50">{device.name}</div>
+                        <div className="text-sm text-zinc-400">
+                          {device.memory_mb > 0 ? `${device.memory_mb} MB dedicated VRAM` : "No dedicated VRAM reported"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-6 text-sm text-zinc-400">
+                  Runtime did not report a usable device.
+                </div>
+              )}
             </div>
           </div>
         );
@@ -164,7 +279,7 @@ function App() {
                     Automatically split high-resolution inputs (4K+) to fit available VRAM.
                   </div>
                 </div>
-                <div className="px-3 py-1 rounded-full bg-green-500/10 text-green-500 text-[10px] font-bold border border-green-500/20 uppercase tracking-widest">
+                <div className="px-3 py-1 rounded-full bg-brand/10 text-brand text-[10px] font-bold border border-brand/20 uppercase tracking-widest">
                   Auto-Enabled
                 </div>
               </div>
@@ -227,7 +342,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-transparent text-foreground selection:bg-brand/20">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <main className="flex flex-col flex-1 min-w-0 bg-background/30 backdrop-blur-sm">
+      <main className="flex flex-col flex-1 min-w-0 bg-zinc-950/30 backdrop-blur-sm">
         <TopBar />
 
         <div className="flex-1 overflow-y-auto p-8 lg:p-12">
@@ -242,6 +357,40 @@ function App() {
       </main>
     </div>
   );
+}
+
+interface DiagnosticPanelProps {
+  title: string;
+  children: ReactNode;
+}
+
+function DiagnosticPanel({ title, children }: DiagnosticPanelProps) {
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-5 shadow-apple">
+      <h3 className="mb-4 text-[10px] font-bold uppercase tracking-wider text-zinc-500">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function CapabilityRow({ label, value }: { label: string; value?: boolean }) {
+  const valueText = value === undefined ? "not reported" : value ? "available" : "unsupported";
+  const valueClass = value === undefined ? "text-zinc-500" : value ? "text-brand" : "text-destructive";
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+      <span className="text-zinc-300">{label}</span>
+      <span className={`text-[10px] font-bold uppercase tracking-wider ${valueClass}`}>
+        {valueText}
+      </span>
+    </div>
+  );
+}
+
+function readinessLabel(status: string) {
+  if (status === "ready") return "Runtime ready";
+  if (status === "degraded") return "Runtime usable with diagnostics";
+  return "Runtime error";
 }
 
 export default App;

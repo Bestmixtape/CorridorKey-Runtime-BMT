@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { downloadDir } from "@tauri-apps/api/path";
+import { formatRuntimeError } from "@/lib/engine";
 
 export interface JobProgress {
   type: "job_started" | "backend_selected" | "progress" | "warning" | "artifact_written" | "completed" | "failed" | "cancelled";
@@ -26,6 +27,8 @@ interface JobState {
   inputPath: string | null;
   outputPath: string | null;
   hintPath: string | null;
+  selectedPresetId: string | null;
+  selectedModelId: string | null;
   videoEncodeMode: "lossless" | "balanced";
   defaultOutputDir: string | null;
   isProcessing: boolean;
@@ -40,6 +43,8 @@ interface JobState {
   setInput: (path: string | null) => void;
   setOutput: (path: string | null) => void;
   setHint: (path: string | null) => void;
+  setSelectedPresetId: (presetId: string | null) => void;
+  setSelectedModelId: (modelId: string | null) => void;
   setVideoEncodeMode: (mode: "lossless" | "balanced") => void;
   initDefaults: () => Promise<void>;
   startJob: () => Promise<void>;
@@ -52,6 +57,8 @@ export const useJobStore = create<JobState>((set, get) => ({
   inputPath: null,
   outputPath: null,
   hintPath: null,
+  selectedPresetId: null,
+  selectedModelId: null,
   videoEncodeMode: "lossless",
   defaultOutputDir: null,
   isProcessing: false,
@@ -65,6 +72,8 @@ export const useJobStore = create<JobState>((set, get) => ({
   setInput: (path) => set({ inputPath: path, error: null }),
   setOutput: (path) => set({ outputPath: path, error: null }),
   setHint: (path) => set({ hintPath: path }),
+  setSelectedPresetId: (presetId) => set({ selectedPresetId: presetId }),
+  setSelectedModelId: (modelId) => set({ selectedModelId: modelId }),
   setVideoEncodeMode: (mode) => set({ videoEncodeMode: mode }),
   initDefaults: async () => {
     try {
@@ -98,7 +107,15 @@ export const useJobStore = create<JobState>((set, get) => ({
   }),
 
   startJob: async () => {
-    const { inputPath, outputPath, hintPath, history, videoEncodeMode } = get();
+    const {
+      inputPath,
+      outputPath,
+      hintPath,
+      history,
+      selectedPresetId,
+      selectedModelId,
+      videoEncodeMode
+    } = get();
     if (!inputPath || !outputPath) return;
 
     const startTime = Date.now();
@@ -181,11 +198,13 @@ export const useJobStore = create<JobState>((set, get) => ({
         input: inputPath,
         output: outputPath,
         hint: hintPath,
+        preset: selectedPresetId,
+        model: selectedModelId,
         video_encode: videoEncodeMode
       });
 
-    } catch (err: any) {
-      set({ isProcessing: false, error: err.toString() });
+    } catch (err: unknown) {
+      set({ isProcessing: false, error: formatRuntimeError(err) });
     }
   }
 }));

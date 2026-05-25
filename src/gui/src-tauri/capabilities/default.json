@@ -6,16 +6,6 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "dialog:default",
-    "fs:allow-read",
-    "fs:allow-write",
-    {
-      "identifier": "fs:allow-read",
-      "allow": [{ "path": "**" }]
-    },
-    {
-      "identifier": "fs:allow-write",
-      "allow": [{ "path": "**" }]
-    }
+    "dialog:default"
   ]
 }

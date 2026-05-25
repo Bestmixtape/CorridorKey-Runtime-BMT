@@ -1,5 +1,6 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useJobStore } from "@/lib/job";
+import { useEngineStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
   FileVideo,
@@ -11,8 +12,9 @@ import {
   Terminal,
   Layers
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { RuntimeCatalogEntry } from "@/lib/engine";
 
 interface JobMetrics {
   ram_usage_mb?: number;
@@ -24,13 +26,29 @@ export function ProcessFlow() {
     inputPath, setInput,
     outputPath, setOutput,
     hintPath, setHint,
+    selectedModelId, setSelectedModelId,
+    selectedPresetId, setSelectedPresetId,
     startJob, isProcessing,
     currentProgress, statusMessage,
     error, activeBackend,
     logs
   } = useJobStore();
+  const { readiness, getModelChoices, getPresetChoices } = useEngineStore();
+  const modelChoices = getModelChoices();
+  const presetChoices = getPresetChoices();
+  const runtimeUsable = Boolean(readiness && readiness.status !== "error");
 
   const [showLogs, setShowLogs] = useState(false);
+
+  useEffect(() => {
+    if (!selectedPresetId && presetChoices.length > 0) {
+      setSelectedPresetId(presetOptionValue(presetChoices[0]));
+    }
+  }, [
+    presetChoices,
+    selectedPresetId,
+    setSelectedPresetId
+  ]);
 
   // Extract metrics from the last log entry if possible
   const lastLog = logs[logs.length - 1];
@@ -91,14 +109,14 @@ export function ProcessFlow() {
         <div
           onClick={!isProcessing ? handleSelectInput : undefined}
           className={cn(
-            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
+            "p-6 rounded-xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
             inputPath
               ? "border-brand/40 bg-brand/5"
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
         >
-          <div className="p-3 rounded-full bg-background shadow-sm">
+          <div className="p-3 rounded-lg bg-background">
             <FileVideo className={cn("w-6 h-6", inputPath ? "text-brand" : "text-muted-foreground")} />
           </div>
           <div className="space-y-1">
@@ -113,7 +131,7 @@ export function ProcessFlow() {
         <div
           onClick={!isProcessing ? handleSelectHint : undefined}
           className={cn(
-            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4 relative",
+            "p-6 rounded-xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4 relative",
             hintPath
               ? "border-brand/40 bg-brand/5"
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
@@ -121,7 +139,7 @@ export function ProcessFlow() {
           )}
         >
           <div className="absolute top-2 right-3 text-[8px] font-bold text-muted-foreground/50 uppercase tracking-tighter">Optional</div>
-          <div className="p-3 rounded-full bg-background shadow-sm">
+          <div className="p-3 rounded-lg bg-background">
             <Layers className={cn("w-6 h-6", hintPath ? "text-brand" : "text-muted-foreground")} />
           </div>
           <div className="space-y-1">
@@ -136,14 +154,14 @@ export function ProcessFlow() {
         <div
           onClick={!isProcessing ? handleSelectOutput : undefined}
           className={cn(
-            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
+            "p-6 rounded-xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
             outputPath
               ? "border-brand/40 bg-brand/5"
               : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
             isProcessing && "opacity-50 cursor-not-allowed"
           )}
         >
-          <div className="p-3 rounded-full bg-background shadow-sm">
+          <div className="p-3 rounded-lg bg-background">
             <FolderDown className={cn("w-6 h-6", outputPath ? "text-brand" : "text-muted-foreground")} />
           </div>
           <div className="space-y-1">
@@ -156,15 +174,58 @@ export function ProcessFlow() {
 
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label className="space-y-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Preset</span>
+          <select
+            value={selectedPresetId ?? ""}
+            disabled={isProcessing || !runtimeUsable || presetChoices.length === 0}
+            onChange={(event) => setSelectedPresetId(event.target.value || null)}
+            className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-50 outline-none transition-colors focus:border-brand disabled:opacity-50"
+          >
+            {presetChoices.length === 0 ? (
+              <option value="">Runtime catalog unavailable</option>
+            ) : (
+              presetChoices.map((preset) => (
+                <option key={presetOptionValue(preset)} value={presetOptionValue(preset)}>
+                  {presetOptionLabel(preset)}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+
+        <label className="space-y-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Model</span>
+          <select
+            value={selectedModelId ?? ""}
+            disabled={isProcessing || !runtimeUsable}
+            onChange={(event) => setSelectedModelId(event.target.value || null)}
+            className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-50 outline-none transition-colors focus:border-brand disabled:opacity-50"
+          >
+            <option value="">Runtime preset default</option>
+            {modelChoices.length === 0 ? (
+              <option value="" disabled>Runtime model catalog unavailable</option>
+            ) : (
+              modelChoices.map((model) => (
+                <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
+                  {modelOptionLabel(model)}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+      </div>
+
       {/* Progress Section */}
       {(isProcessing || currentProgress > 0 || error) && (
-        <div className="p-8 rounded-2xl bg-card border border-zinc-800 shadow-apple space-y-6">
+        <div className="p-8 rounded-xl bg-card border border-zinc-800 shadow-apple space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {error ? (
                 <AlertCircle className="w-5 h-5 text-destructive" />
               ) : currentProgress === 100 ? (
-                <CheckCircle2 className="w-5 h-5 text-green-500" />
+                <CheckCircle2 className="w-5 h-5 text-brand" />
               ) : (
                 <Zap className="w-5 h-5 text-brand animate-pulse" />
               )}
@@ -197,9 +258,9 @@ export function ProcessFlow() {
 
           {!error && (
             <div className="space-y-2">
-              <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden">
+              <div className="h-2 w-full bg-zinc-900 rounded-md overflow-hidden">
                 <div
-                  className="h-full bg-brand transition-all duration-500 ease-out shadow-[0_0_10px_rgba(14,165,233,0.5)]"
+                  className="h-full bg-brand transition-all duration-500 ease-out"
                   style={{ width: `${currentProgress}%` }}
                 />
               </div>
@@ -225,7 +286,7 @@ export function ProcessFlow() {
           </button>
 
           {showLogs && (
-            <div className="mt-4 p-4 rounded-lg bg-black/90 text-[10px] font-mono text-green-400/80 overflow-auto max-h-48 whitespace-pre-wrap">
+            <div className="mt-4 p-4 rounded-lg bg-black/90 text-[10px] font-mono text-brand/80 overflow-auto max-h-48 whitespace-pre-wrap">
               {logs.length > 0 ? logs.join('\n') : "Waiting for engine output..."}
             </div>
           )}
@@ -256,4 +317,24 @@ export function ProcessFlow() {
 
     </div>
   );
+}
+
+function presetOptionValue(entry: RuntimeCatalogEntry): string {
+  return stringField(entry.id) || stringField(entry.name) || "";
+}
+
+function presetOptionLabel(entry: RuntimeCatalogEntry): string {
+  return stringField(entry.name) || stringField(entry.id) || "Runtime preset";
+}
+
+function modelOptionValue(entry: RuntimeCatalogEntry): string {
+  return stringField(entry.path) || stringField(entry.filename) || stringField(entry.id) || stringField(entry.name) || "";
+}
+
+function modelOptionLabel(entry: RuntimeCatalogEntry): string {
+  return stringField(entry.filename) || stringField(entry.name) || "Runtime model";
+}
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
