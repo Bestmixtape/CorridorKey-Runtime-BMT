@@ -3,7 +3,7 @@
 **Status:** in_progress
 **Created:** 2026-05-22
 **Owner:** Runtime maintainers
-**Spec ref:**
+**Spec ref:** doc/specs/0004-add-adobe-host-plugins.md
 **ADR ref:** doc/adr/0007-add-adobe-host-plugins.md
 **Board ref:**
 **Depends on:** doc/tasks/0018-implement-after-effects-effect.md, doc/tasks/0019-validate-premiere-compatibility.md
