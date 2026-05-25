@@ -2,7 +2,7 @@
 
 **Status:** proposed
 **Created:** 2026-05-25
-**Owner:** `<TODO>`
+**Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0003-useful-tauri-gui.md
 **Board ref:**
 

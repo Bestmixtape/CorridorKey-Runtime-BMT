@@ -1,8 +1,8 @@
 # Spec `0003`: Make The Tauri GUI Useful
 
-**Status:** draft
+**Status:** accepted
 **Created:** 2026-05-25
-**Owner:** `<TODO>`
+**Owner:** Runtime maintainers
 
 ## Context
 
@@ -206,6 +206,28 @@ EZ-CorridorKey's visual identity, palette, typography, or component styling.
 - Should missing design-system categories such as spacing, type scale, and
   motion be defined before implementation, or should the first pass stay inside
   existing Tailwind defaults plus the current token set?
+
+### Resolved Decisions
+
+- Owner: Runtime maintainers.
+- Model-pack installation: the first useful GUI reports missing packs and
+  points to the canonical installer or package recovery path. It does not
+  download or install model packs itself.
+- Queue scope: the first useful GUI has one active runtime job. Additional
+  work may exist only as visible pending UI state; it must not spawn a
+  background queue of runtime processes.
+- Preview artifact: the first runtime contract must provide a preview PNG or
+  generated thumbnail that the GUI can show after completion. Proxy video
+  preview is optional.
+- Cancellation: cancellation is process-level in the Tauri bridge for the first
+  useful version, with a terminal cancelled event surfaced to React. A
+  first-class runtime cancellation command requires a later ADR.
+- Runtime bridge: the first useful GUI shells out to the packaged runtime
+  command contract. A direct App-layer Rust/C++ bridge is outside this accepted
+  scope and requires a later ADR.
+- Design-system gaps: implementation stays inside the current `DESIGN.md` and
+  Tailwind token set. New reusable spacing, type-scale, or motion values must
+  be added to `DESIGN.md` and `src/gui/src/index.css` before use.
 
 ## Related
 
