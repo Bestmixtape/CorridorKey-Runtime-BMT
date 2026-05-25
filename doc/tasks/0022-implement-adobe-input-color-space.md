@@ -1,6 +1,6 @@
 # Task `0022`: Implement Adobe Input Color Space
 
-**Status:** in-progress
+**Status:** done
 **Created:** 2026-05-24
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0004-add-adobe-host-plugins.md
@@ -68,11 +68,25 @@ Append-only log. Date each entry. Never rewrite past entries.
   `ctest --test-dir build\debug -R "regression_adobe_(pipl_metadata|cmake_scaffold|package_scaffold)" --output-on-failure`,
   `scripts\verify_ci.ps1 -Mode Format`, and `git diff --check`.
 
+### 2026-05-25
+
+- Closure review recorded at
+  `.agentic/reviews/20260525T134322-task-0022-adobe-input-color-space.md`.
+  Standards and Spec axes found no blocker or concern for the manual sRGB /
+  Linear input color-space slice.
+- Verification passed:
+  `build\release\tests\unit\test_unit.exe "[unit][adobe]"`,
+  `ctest --test-dir build\debug -R "regression_adobe_pipl_metadata" --output-on-failure`,
+  `ctest --test-dir build\debug -R "regression_adobe_package_scaffold" --output-on-failure`,
+  `ctest --test-dir build\debug -R "regression_adobe_host_smoke_scaffold" --output-on-failure`,
+  `ctest --test-dir build\debug -R "regression_adobe_cmake_scaffold" --output-on-failure`,
+  `scripts\verify_ci.ps1 -Mode Format`, and `git diff --check`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
 - [x] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
 - [x] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Status updated to `done` and Notes log closes the task

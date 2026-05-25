@@ -12,6 +12,9 @@ CorridorKey-Runtime provides three product surfaces:
 
 The OFX plugin and the CLI ship in the same installer: the OFX bundle places `corridorkey.exe` next to `CorridorKey.ofx` and registers it on the system `PATH`, so the CLI is available after the OFX install. The GUI is distributed as a separate desktop installer that embeds its own copy of the runtime payload.
 
+Adobe After Effects and Premiere plugins are packaged implementation targets,
+but they are not supported public surfaces until host validation passes.
+
 Current public builds support:
 
 - **Windows (NVIDIA RTX)**

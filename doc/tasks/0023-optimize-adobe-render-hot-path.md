@@ -1,6 +1,6 @@
 # Task `0023`: Optimize Adobe Render Hot Path
 
-**Status:** in-progress
+**Status:** done
 **Created:** 2026-05-24
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0004-add-adobe-host-plugins.md
@@ -120,11 +120,23 @@ Append-only log. Date each entry. Never rewrite past entries.
   `scripts\windows.ps1 -Task package-adobe -Preset release -Track rtx -Flavor online`:
   `dist\CorridorKey_Adobe_v0.8.5-win.0-69-gf1a49ae-dirty-b20260525T020856211Z_Windows_RTX_online_Setup.exe`.
 
+- Closure review recorded at
+  `.agentic/reviews/20260525T134322-task-0023-adobe-render-hot-path.md`.
+  Standards and Spec axes found no blocker or concern for the Adobe host render
+  hot-path slice.
+- Verification passed:
+  `build\release\tests\unit\test_unit.exe "[unit][adobe]"`,
+  `ctest --test-dir build\debug -R "regression_adobe_pipl_metadata" --output-on-failure`,
+  `ctest --test-dir build\debug -R "regression_adobe_package_scaffold" --output-on-failure`,
+  `ctest --test-dir build\debug -R "regression_adobe_host_smoke_scaffold" --output-on-failure`,
+  `ctest --test-dir build\debug -R "regression_adobe_cmake_scaffold" --output-on-failure`,
+  `scripts\verify_ci.ps1 -Mode Format`, and `git diff --check`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
 - [x] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
 - [x] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Status updated to `done` and Notes log closes the task

@@ -69,8 +69,8 @@ has accumulated a clean run history.
 
 | Adobe Host | Plugin Support |
 |------------|----------------|
-| After Effects 2025 or newer | Unsupported - accepted implementation target, not packaged or validated |
-| Premiere Pro 2025 or newer | Unsupported - accepted implementation target, not packaged or validated |
+| After Effects 2025 or newer | Unsupported - packaged implementation target; host render validation is not complete |
+| Premiere Pro 2025 or newer | Unsupported - packaged implementation target; host render validation is not complete |
 | Earlier After Effects versions | Unsupported |
 | Earlier Premiere Pro versions | Unsupported |
 
@@ -81,8 +81,8 @@ designation can be raised.
 
 Designation escalates only after the Adobe plugin builds through the canonical
 pipeline, installs into a MediaCore scan path, renders through the
-out-of-process runtime service in both After Effects and Premiere, and closes
-both hosts without a crash.
+out-of-process runtime service in both After Effects and Premiere, reopens
+saved projects with stable parameters, and closes both hosts without a crash.
 
 ---
 
@@ -242,9 +242,9 @@ remain experimental in the GUI.
 ## Host Application Coverage
 
 The current officially supported host applications are DaVinci Resolve and
-Foundry Nuke through the OFX plugin. After Effects and Premiere are accepted
+Foundry Nuke through the OFX plugin. After Effects and Premiere are packaged
 Adobe plugin implementation targets, but their support designation remains
-Unsupported until the Adobe validation and packaging gates pass. The CLI is a
+Unsupported until the Adobe host validation gates pass. The CLI is a
 host-independent surface. The Tauri GUI is an additional host-independent
 surface.
 

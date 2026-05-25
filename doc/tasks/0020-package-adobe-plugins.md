@@ -1,6 +1,6 @@
 # Task `0020`: Package Adobe Plugins
 
-**Status:** in_progress
+**Status:** done
 **Created:** 2026-05-22
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0004-add-adobe-host-plugins.md
@@ -47,7 +47,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       model packs.
 - [x] Clean install and upgrade install both leave After Effects and Premiere
       able to discover the effect after host restart.
-- [ ] The support matrix, README, and user help are updated only to the support
+- [x] The support matrix, README, and user help are updated only to the support
       designation justified by the completed host validation evidence.
 
 ## Plan
@@ -65,9 +65,9 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       discovery.
 - [x] Run the canonical Windows package task and record artifact paths, hashes,
       and validation reports in Notes.
-- [ ] Update user-facing docs after the package and host validation evidence
+- [x] Update user-facing docs after the package and host validation evidence
       exists.
-- [ ] Run fresh-context review before marking this task done.
+- [x] Run fresh-context review before marking this task done.
 
 ## Notes
 
@@ -313,11 +313,25 @@ Grounding and implementation notes for the first Windows Adobe package slice:
   `dist/CorridorKey_Adobe_v0.8.5-win.1_Windows_RTX_online_Setup.exe` with
   SHA256 `e5e754047a47c118b1334f83b6f8ffdf0e3754cb1fb213bf5c9d82ecb41a5acc`.
 
+### 2026-05-25
+
+- Closure triage found that packaging, validation, clean-install smoke, and
+  upgrade-install smoke were complete, while real host render validation remains
+  owned by tasks 0018 and 0019. `help/SUPPORT_MATRIX.md` and `README.md` now
+  keep Adobe After Effects and Premiere `Unsupported` while identifying them as
+  packaged implementation targets rather than unvalidated package work.
+- The 2026-05-24 fresh review found package-flow blockers and the same task log
+  records their fixes plus package verification. No additional package-flow
+  blocker was found in the closure triage.
+- Verification for this closure update passed through documentation review and
+  orphan marker search:
+  `rg -n "TODO|FIXME" src/plugins/adobe tests scripts help docs ARCHITECTURE.md README.md`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
-- [ ] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
-- [ ] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Local tests pass (or N/A documented in Notes)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [x] No orphan `TODO`/`FIXME` introduced
+- [x] Status updated to `done` and Notes log closes the task
