@@ -70,6 +70,14 @@ const scenarios = [
       await waitForBody(page, "success");
       await waitForBody(page, "tensorrt");
       await waitForBody(page, "preview");
+      await waitForBody(page, artifactPath);
+      await assertHistoryActions(page, {
+        expectedStatus: "Status: success",
+        expectedDiagnostic: "Finished",
+        expectedOutput: artifactPath,
+        expectedRevealCount: 2
+      });
+      await assertClearHistory(page);
     }
   },
   {
@@ -83,6 +91,12 @@ const scenarios = [
       await page.getByRole("button", { name: "History" }).click();
       await waitForBody(page, "failed");
       await waitForBody(page, "Runtime fixture failed");
+      await assertHistoryActions(page, {
+        expectedStatus: "Status: failed",
+        expectedDiagnostic: "Runtime fixture failed",
+        expectedOutput: "C:\\Users\\Smoke\\Downloads\\input_corridorkey.mov",
+        expectedRevealCount: 1
+      });
     }
   },
   {
@@ -667,6 +681,37 @@ async function assertCopyDiagnostics(page, expectedText) {
   assert(copied.includes("Model Auto"), `Copied diagnostics missing model selection:\n${copied}`);
   assert(copied.includes("Artifact metadata:"), `Copied diagnostics missing artifact metadata:\n${copied}`);
   assert(copied.includes("output_recipe: Movie"), `Copied diagnostics missing output recipe:\n${copied}`);
+}
+
+async function assertHistoryActions(page, {
+  expectedStatus,
+  expectedDiagnostic,
+  expectedOutput,
+  expectedRevealCount
+}) {
+  await page.getByRole("button", { name: /Copy History Diagnostics/i }).first().click();
+  await page.waitForFunction(
+    ([status, diagnostic]) => {
+      const clipboard = window.__corridorkeyClipboard || "";
+      return clipboard.includes("CorridorKey Job History") &&
+        clipboard.includes(status) &&
+        clipboard.includes(diagnostic);
+    },
+    [expectedStatus, expectedDiagnostic],
+    { timeout: 15000 }
+  );
+  const copied = await page.evaluate(() => window.__corridorkeyClipboard);
+  assert(copied.includes(`Output: ${expectedOutput}`), `History diagnostics missing output path:\n${copied}`);
+
+  await page.getByRole("button", { name: /Reveal History Output/i }).first().click();
+  assert.equal(await page.evaluate(() => window.__corridorkeyRevealCalls || 0), expectedRevealCount);
+}
+
+async function assertClearHistory(page) {
+  await page.getByRole("button", { name: /Clear All/i }).click();
+  await waitForBody(page, "No recent jobs found");
+  await expectBodyMissing(page, artifactPath);
+  await expectBodyMissing(page, "Status: success");
 }
 
 async function assertPreviewProxyFallback(page) {

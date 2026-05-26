@@ -64,12 +64,29 @@ const scenarios = [
       assertContains(copied, "Runtime ready", "copied doctor JSON");
     },
     settings: async (page, body) => {
-      assertContains(body, "Engine Preferences", "settings title");
+      assertContains(body, "Workflow Defaults", "settings title");
+      assertContains(body, "Output Encoding", "settings encoding section");
+      assertContains(body, "Output Recipe", "settings output recipe section");
       assertContains(body, "Workflow advanced controls", "settings advanced pointer");
+      assertContains(body, "GUI default", "settings GUI default status");
       assert(
         !body.includes("Auto-Enabled"),
         `settings should not render stale tiling copy. Body was:\n${body}`
       );
+      assert(
+        !body.includes("professional VFX-grade"),
+        `settings should not render marketing placeholder copy. Body was:\n${body}`
+      );
+      assert(
+        !body.includes("Runtime-backed"),
+        `settings should not label local defaults as runtime-backed. Body was:\n${body}`
+      );
+    },
+    support: async (_page, body) => {
+      assertContains(body, "Runtime recovery", "support recovery title");
+      assertContains(body, "Runtime ready", "support ready state");
+      assertContains(body, "No missing model packs reported", "support model state");
+      assertMissing(body, "Community & Support", "support placeholder title");
     }
   },
   {
@@ -78,6 +95,18 @@ const scenarios = [
     diagnostics: async (_page, body) => {
       assertContains(body, "Runtime path not resolved", "missing runtime path");
       assertContains(body, "missing_runtime", "missing runtime command status");
+    },
+    settings: async (_page, body) => {
+      assertContains(body, "Workflow Defaults", "missing runtime settings title");
+      assertContains(body, "GUI default", "missing runtime settings default label");
+      assertMissing(body, "Runtime-backed", "missing runtime settings runtime-backed label");
+    },
+    support: async (_page, body) => {
+      assertContains(body, "Runtime package repair", "missing runtime support title");
+      assertContains(body, "Runtime binary is missing", "missing runtime support error");
+      assertContains(body, "Repair or reinstall", "missing runtime support action");
+      assertContains(body, "Model pack state not reported", "missing runtime model state");
+      assertMissing(body, "installed", "missing runtime model installed claim");
     }
   },
   {
@@ -95,6 +124,11 @@ const scenarios = [
       assertMissing(body, referenceFp32ModelName, "fp32 reference artifact");
       assertContains(body, "Repair or reinstall the desktop runtime package", "missing model recovery");
       assertContains(body, "unsupported", "unsupported backend capability");
+    },
+    support: async (_page, body) => {
+      assertContains(body, "Missing model packs", "missing model support title");
+      assertContains(body, blueModelName, "missing model support filename");
+      assertContains(body, "package-runtime payload", "missing model support repair");
     }
   },
   {
@@ -103,6 +137,11 @@ const scenarios = [
     diagnostics: async (_page, body) => {
       assertContains(body, "invalid_json", "invalid JSON command status");
       assertContains(body, "Runtime command `models` returned invalid JSON", "invalid JSON error");
+    },
+    support: async (_page, body) => {
+      assertContains(body, "Runtime command failed", "invalid JSON support title");
+      assertContains(body, "models", "invalid JSON support command");
+      assertContains(body, "invalid_json", "invalid JSON support kind");
     }
   },
   {
@@ -111,6 +150,11 @@ const scenarios = [
     diagnostics: async (_page, body) => {
       assertContains(body, "non_zero_exit", "non-zero doctor command status");
       assertContains(body, "CUDA Toolkit 12.8 not found", "non-zero doctor stderr");
+    },
+    support: async (_page, body) => {
+      assertContains(body, "Runtime command failed", "non-zero support title");
+      assertContains(body, "doctor", "non-zero support command");
+      assertContains(body, "CUDA Toolkit 12.8 not found", "non-zero support stderr");
     }
   }
 ];
@@ -218,10 +262,17 @@ async function runScenario(context, baseUrl, scenario, runtime) {
     await scenario.diagnostics(page, diagnosticsBody);
     if (scenario.settings) {
       await page.getByRole("button", { name: "Settings" }).click();
-      await waitForBody(page, "engine preferences");
+      await waitForBody(page, "workflow defaults");
       const settingsBody = await bodyText(page);
       assertNoFallback(settingsBody, scenario.name);
       await scenario.settings(page, settingsBody);
+    }
+    if (scenario.support) {
+      await page.getByRole("button", { name: "Support" }).click();
+      await waitForBody(page, "runtime recovery");
+      const supportBody = await bodyText(page);
+      assertNoFallback(supportBody, scenario.name);
+      await scenario.support(page, supportBody);
     }
     assert.deepEqual(pageErrors, [], `${scenario.name} emitted page errors`);
     assert.deepEqual(consoleErrors, [], `${scenario.name} emitted console errors`);
