@@ -3,7 +3,7 @@
 **Status:** todo
 **Created:** 2026-05-26
 **Owner:** Runtime maintainers
-**Spec ref:**
+**Spec ref:** doc/specs/0005-unified-windows-installer.md
 **Board ref:**
 
 ## Context
