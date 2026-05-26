@@ -1,6 +1,6 @@
 # Task `0026`: Evolve GUI Workbench UX
 
-**Status:** in-progress
+**Status:** done
 **Created:** 2026-05-25
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0003-useful-tauri-gui.md
@@ -44,10 +44,10 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] The default workflow remains simple enough to run a clip with source,
       optional hint, destination, preset/model, encoding, start, cancel, retry,
       and reveal/copy actions visible without opening advanced controls.
-- [ ] Advanced controls expose the plugin/runtime contract in grouped panels:
+- [x] Advanced controls expose the plugin/runtime contract in grouped panels:
       screen color, quality, alpha hint, matte cleanup, despill, output mode,
       tiling/refinement, and runtime diagnostics.
-- [ ] Output recipe controls let the user choose final artifact family
+- [x] Output recipe controls let the user choose final artifact family
       (movie, image sequence, EXR-capable sequence, or preview-only where the
       runtime supports it), alpha/composite behavior, preview background
       (checkerboard, solid color, transparent preview, replacement media), and
@@ -65,7 +65,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       throughput when reported or derivable, ETA when derivable, active backend,
       selected model/preset, output recipe, stage timings, warnings, and final
       artifact metadata.
-- [ ] In-progress telemetry distinguishes render FPS, decode/encode/proxy
+- [x] In-progress telemetry distinguishes render FPS, decode/encode/proxy
       work, active stage, processed frame count, total frame count when known,
       parallelism or worker count when reported by the runtime, and any
       preview-frame generation mode that can be enabled without hurting the
@@ -91,16 +91,16 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       freeze interaction. Any native runtime parallel-frame processing work is
       gated behind App/Core contracts and benchmark evidence before touching
       the render hot path.
-- [ ] Advanced-control parity is audited against OFX, Adobe, EZ-CorridorKey,
+- [x] Advanced-control parity is audited against OFX, Adobe, EZ-CorridorKey,
       and CorridorKey Engine so the GUI exposes the relevant controls users
       expect without copying another product's visual identity.
-- [ ] A dedicated performance spike records whether native parallel frame
+- [x] A dedicated performance spike records whether native parallel frame
       processing, pipelined decode/inference/encode, or preview-frame streaming
       is safe and worthwhile before any render hot path change lands.
 - [x] Unit, integration, and e2e coverage exercise the workbench viewer states,
       preview fallback, advanced-control availability, telemetry rendering,
       diagnostics tabs, and fake-runtime success/failure/cancellation flows.
-- [ ] Changed visual surfaces pass a design-system audit: sky-blue brand accent
+- [x] Changed visual surfaces pass a design-system audit: sky-blue brand accent
       on zinc-near-black surfaces, Apple-system typography, declared radius
       tokens, declared elevation token, no second accent palette, and no copied
       EZ-CorridorKey visual identity.
@@ -113,27 +113,27 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       `src/gui/src-tauri/src/lib.rs`, `src/gui/src/lib/preview.ts`, and
       `src/gui/scripts/smoke-job-lifecycle.mjs` covered by Rust, TypeScript,
       and fake-job smoke tests.
-- [ ] Extract a workbench viewer model from
+- [x] Extract a workbench viewer model from
       `src/gui/src/components/workflow/ProcessFlow.tsx` into focused React
       components and testable state helpers under `src/gui/src/components/`
       and `src/gui/src/lib/`.
 - [x] Replace duplicated Source/Alpha/Result surfaces with a single viewer mode
       control and a single setup rail, preserving file selection affordances
       when no media is loaded.
-- [ ] Implement A/B comparison controls with draggable split geometry,
+- [x] Implement A/B comparison controls with draggable split geometry,
       orientation presets, diagonal angle, overlay opacity, and disabled states
       when a requested buffer has no media.
 - [x] Build progressive workflow panels: default controls first, then advanced
       Matte, Despill, Output, Runtime, and Diagnostics groups that mirror the
       OFX/Adobe parameter vocabulary.
-- [ ] Build the output recipe slice: final format selection, alpha/composite
+- [x] Build the output recipe slice: final format selection, alpha/composite
       behavior, preview background controls, replacement-media selection, and
       color-management labels backed by runtime-supported options.
 - [x] Add tested output recipe foundation for artifact family availability,
       alpha behavior labels, preview background controls, color-intent labels,
       destination readiness, and suggested output paths without inventing
       unsupported runtime process arguments.
-- [ ] Fix synchronized preview playback and comparison geometry regressions:
+- [x] Fix synchronized preview playback and comparison geometry regressions:
       shared playhead, Result-vs-Source sync, full-height vertical split,
       non-inverted split line, diagonal wipe without crossed overlays, and
       regression coverage for each mode.
@@ -146,7 +146,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Extend job event normalization in `src/gui/src/lib/job.ts` so telemetry
       derives elapsed time, throughput, ETA, timings, warnings, final artifact
       metadata, and copyable diagnostic summaries from runtime events and logs.
-- [ ] Extend telemetry only through runtime events or cheaply derived values:
+- [x] Extend telemetry only through runtime events or cheaply derived values:
       render FPS, processed/total frames, current stage, encode/decode/proxy
       stages, active backend, model, worker or parallelism count when reported,
       and optional preview-frame status.
@@ -154,7 +154,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       current stage, processed/total frames, render FPS, decode FPS, encode
       FPS, worker count, RAM, CPU, and copied diagnostic metrics, while keeping
       absent metrics hidden instead of fabricated.
-- [ ] Rework Hardware, Settings, Support, and History surfaces in
+- [x] Rework Hardware, Settings, Support, and History surfaces in
       `src/gui/src/App.tsx` so each tab shows only trustworthy runtime-backed
       state and no stale placeholder content.
 - [x] Add a Runtime Commands surface that runs or refreshes the safe runtime
@@ -165,10 +165,10 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       thumbnail work. Defer native parallel frame processing to a separate
       App/Core spike with `scripts/run_corpus.sh` and
       `scripts/compare_benchmarks.py` evidence if the render hot path changes.
-- [ ] Audit the GUI advanced controls against OFX/Adobe parameters and the
+- [x] Audit the GUI advanced controls against OFX/Adobe parameters and the
       Python reference applications, then either wire missing supported options
       or record the missing runtime/App contract as a follow-up task.
-- [ ] Run a performance grounding spike before parallel frame processing:
+- [x] Run a performance grounding spike before parallel frame processing:
       identify current decode/inference/encode serialization, compare against
       existing plugin/runtime behavior, and require benchmark evidence before
       changing Core/App execution.
@@ -524,11 +524,22 @@ Comparison UX, `0035` Runtime Performance spike, and `0036` Design System
 audit. `0027` remains the completed model-pack contract task and `0028`
 continues to own the unified Windows installer plan.
 
+Closed the umbrella after child tasks `0029` through `0036` reached `done`.
+The completed child tasks now own the implementation evidence for output
+recipes, advanced-control parity, telemetry, secondary tabs, viewer extraction,
+comparison UX, performance grounding, and design-system audit. Current closeout
+verification for the last GUI child was `pnpm test`, covering 13 unit files
+with 60 tests, Vite build, runtime readiness smoke, and job lifecycle E2E smoke
+with desktop, narrow, and mobile visual captures. The real-runtime smoke was
+not rerun during this closeout because this checkout still needs a staged
+preview `ffmpeg.exe` or explicit `CORRIDORKEY_FFMPEG_PATH`; earlier notes keep
+the accepted Jordan 2048 real-runtime evidence.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
 - [x] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW §10)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW §10)
 - [x] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Status updated to `done` and Notes log closes the task
