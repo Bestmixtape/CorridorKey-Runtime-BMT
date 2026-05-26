@@ -581,6 +581,11 @@ async function assertAlphaHintSelectionAndClear(page) {
   await waitForBody(page, "alpha_hint.mov");
   await waitForBody(page, "External hint");
   await page.waitForFunction(() => window.__corridorkeyHintSelections === 1);
+  assert.equal(await page.getByRole("button", { name: "Source / Alpha Hint" }).isDisabled(), false);
+  assert.equal(
+    await page.getByRole("button", { name: /Alpha Hint \/ Result.*Missing Result/i }).isDisabled(),
+    true
+  );
   await page.getByRole("button", { name: /Clear Alpha Hint/i }).click();
   await waitForBody(page, "Runtime fallback");
   await expectBodyMissing(page, "alpha_hint.mov");
@@ -740,11 +745,20 @@ async function assertPreviewProxyFallback(page) {
 }
 
 async function assertViewerComparisonControls(page) {
-  await page.getByRole("button", { name: "Result" }).click();
+  const missingHintPair = page.getByRole("button", { name: /Source \/ Alpha Hint.*Missing Alpha Hint/i });
+  assert.equal(await missingHintPair.isDisabled(), true);
+
+  await page.getByRole("button", { name: "Result", exact: true }).click();
   await page.getByRole("button", { name: "Vertical" }).click();
   await waitForBody(page, "Source vs Result");
+  await waitForBody(page, "Vertical wipe");
   await waitForBody(page, "Synced playback");
   await assertSynchronizedComparisonVideos(page);
+
+  await page.getByRole("button", { name: /Swap sides/i }).click();
+  await waitForBody(page, "Result vs Source");
+  await page.getByRole("button", { name: /Swap sides/i }).click();
+  await waitForBody(page, "Source vs Result");
 
   await page.getByLabel("Wipe position").fill("68");
   assert.equal(await page.getByLabel("Wipe position").inputValue(), "68");
@@ -757,12 +771,19 @@ async function assertViewerComparisonControls(page) {
   await page.mouse.up();
   assert.notEqual(await page.getByLabel("Wipe position").inputValue(), "68");
 
+  await forceComparisonDesync(page);
+  await waitForBody(page, "Desynced by");
+  await page.getByRole("button", { name: /Resync/i }).click();
+  await waitForBody(page, "Synced playback - Synced");
+
   await page.getByRole("button", { name: "Horizontal" }).click();
   await page.getByRole("button", { name: "Diagonal" }).click();
   await page.getByRole("button", { name: "Overlay" }).click();
+  await waitForBody(page, "Overlay blend");
   await page.getByLabel("Overlay opacity").fill("72");
   assert.equal(await page.getByLabel("Overlay opacity").inputValue(), "72");
   await page.getByRole("button", { name: "Difference" }).click();
+  await waitForBody(page, "Difference blend");
   await page.getByRole("button", { name: "Single" }).click();
   await waitForBody(page, "Complete");
 }
@@ -809,6 +830,18 @@ async function assertSynchronizedComparisonVideos(page) {
       cause: error
     });
   }
+}
+
+async function forceComparisonDesync(page) {
+  const primary = page.locator('video[data-preview-sync-role="primary"]').first();
+  const secondary = page.locator('video[data-preview-sync-role="secondary"]').first();
+  await secondary.evaluate((video) => {
+    video.currentTime = 0;
+  });
+  await primary.evaluate((video) => {
+    video.currentTime = 1.75;
+    video.dispatchEvent(new Event("timeupdate", { bubbles: true }));
+  });
 }
 
 async function assertResetWorkbench(page) {

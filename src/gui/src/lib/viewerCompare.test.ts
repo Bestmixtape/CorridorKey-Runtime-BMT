@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  comparisonPairOptions,
   comparisonClipStyle,
   comparisonDividerGeometry,
   comparisonPositionFromPoint,
@@ -42,6 +43,72 @@ describe("viewer comparison", () => {
     expect(state.mode).toBe("single");
     expect(state.canCompare).toBe(false);
     expect(state.title).toBe("Source");
+  });
+
+  test("describes comparison pair availability and swapped labels", () => {
+    const options = comparisonPairOptions(
+      [
+        { id: "source", label: "Source", path: "C:\\Shots\\input.mp4" },
+        { id: "hint", label: "Alpha Hint", path: null },
+        { id: "result", label: "Result", path: "C:\\Shots\\output.mov" }
+      ],
+      true
+    );
+
+    expect(options).toEqual([
+      {
+        id: "source-result",
+        label: "Result / Source",
+        primaryId: "result",
+        secondaryId: "source",
+        available: true,
+        unavailableReason: null
+      },
+      {
+        id: "source-hint",
+        label: "Alpha Hint / Source",
+        primaryId: "hint",
+        secondaryId: "source",
+        available: false,
+        unavailableReason: "Missing Alpha Hint"
+      },
+      {
+        id: "hint-result",
+        label: "Result / Alpha Hint",
+        primaryId: "result",
+        secondaryId: "hint",
+        available: false,
+        unavailableReason: "Missing Alpha Hint"
+      }
+    ]);
+  });
+
+  test("resolves explicit pair selection and side swapping", () => {
+    const buffers = [
+      { id: "source", label: "Source", path: "C:\\Shots\\input.mp4" },
+      { id: "hint", label: "Alpha Hint", path: "C:\\Shots\\hint.mp4" },
+      { id: "result", label: "Result", path: "C:\\Shots\\output.mov" }
+    ];
+
+    expect(resolveComparisonState(buffers, "source", "overlay", {
+      pairId: "hint-result",
+      swapped: false
+    })).toMatchObject({
+      mode: "overlay",
+      canCompare: true,
+      primary: buffers[1],
+      secondary: buffers[2],
+      title: "Alpha Hint vs Result"
+    });
+
+    expect(resolveComparisonState(buffers, "source", "overlay", {
+      pairId: "hint-result",
+      swapped: true
+    })).toMatchObject({
+      primary: buffers[2],
+      secondary: buffers[1],
+      title: "Result vs Alpha Hint"
+    });
   });
 
   test("builds horizontal and full-bounds diagonal clip styles", () => {

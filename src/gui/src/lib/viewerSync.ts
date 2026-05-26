@@ -16,6 +16,13 @@ export interface MediaSyncOptions {
   playbackRateTolerance?: number;
 }
 
+export interface MediaSyncStatus {
+  state: "synced" | "desynced" | "unknown";
+  driftSeconds: number | null;
+  targetTime: number | null;
+  label: string;
+}
+
 const DEFAULT_TIME_TOLERANCE_SECONDS = 0.08;
 const DEFAULT_PLAYBACK_RATE_TOLERANCE = 0.01;
 
@@ -40,6 +47,40 @@ export function mediaSyncAction(
       Math.abs(follower.playbackRate - targetPlaybackRate) > playbackRateTolerance
       ? targetPlaybackRate
       : null
+  };
+}
+
+export function mediaSyncStatus(
+  anchor: MediaSyncSnapshot,
+  follower: MediaSyncSnapshot,
+  options: MediaSyncOptions = {}
+): MediaSyncStatus {
+  const timeToleranceSeconds = options.timeToleranceSeconds ?? DEFAULT_TIME_TOLERANCE_SECONDS;
+  const targetTime = synchronizedMediaTime(anchor, follower);
+  if (targetTime === null || !Number.isFinite(follower.currentTime)) {
+    return {
+      state: "unknown",
+      driftSeconds: null,
+      targetTime,
+      label: "Sync unknown"
+    };
+  }
+
+  const driftSeconds = Math.abs(follower.currentTime - targetTime);
+  if (driftSeconds <= timeToleranceSeconds) {
+    return {
+      state: "synced",
+      driftSeconds,
+      targetTime,
+      label: "Synced"
+    };
+  }
+
+  return {
+    state: "desynced",
+    driftSeconds,
+    targetTime,
+    label: `Desynced by ${driftSeconds.toFixed(2)}s`
   };
 }
 

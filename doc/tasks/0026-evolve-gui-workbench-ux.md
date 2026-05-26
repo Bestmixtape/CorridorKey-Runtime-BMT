@@ -182,18 +182,18 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 
 Executable follow-up slices split from this umbrella task.
 
-- [ ] `0029-complete-gui-output-recipe.md` closes final artifact family,
+- [x] `0029-complete-gui-output-recipe.md` closes final artifact family,
       alpha/composite behavior, preview background, replacement media, and
       color-management workflow.
-- [ ] `0030-audit-gui-advanced-controls.md` audits and wires plugin/runtime
+- [x] `0030-audit-gui-advanced-controls.md` audits and wires plugin/runtime
       advanced-control parity without inventing unsupported process arguments.
-- [ ] `0031-enrich-gui-telemetry.md` makes in-progress runtime telemetry richer
+- [x] `0031-enrich-gui-telemetry.md` makes in-progress runtime telemetry richer
       and more legible from real event data.
-- [ ] `0032-rework-gui-secondary-tabs.md` turns Hardware, Settings, Support,
+- [x] `0032-rework-gui-secondary-tabs.md` turns Hardware, Settings, Support,
       and History into trustworthy runtime-backed surfaces.
-- [ ] `0033-extract-gui-workbench-viewer.md` extracts the workbench viewer into
+- [x] `0033-extract-gui-workbench-viewer.md` extracts the workbench viewer into
       focused components and testable state helpers without behavior changes.
-- [ ] `0034-finish-gui-comparison-ux.md` finishes A/B review ergonomics,
+- [x] `0034-finish-gui-comparison-ux.md` finishes A/B review ergonomics,
       missing-buffer states, side swapping, and desync recovery.
 - [ ] `0035-spike-gui-runtime-performance.md` investigates safe runtime
       performance improvements before any render hot path change.

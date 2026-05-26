@@ -1,11 +1,11 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   comparisonClipStyle,
   comparisonDividerGeometry,
   comparisonPositionFromPoint,
   type ViewerComparisonMode
 } from "@/lib/viewerCompare";
-import { mediaSyncAction } from "@/lib/viewerSync";
+import { mediaSyncAction, mediaSyncStatus } from "@/lib/viewerSync";
 import type { OutputRecipeSettings } from "@/lib/outputRecipe";
 import { cn } from "@/lib/utils";
 import {
@@ -35,9 +35,24 @@ export function ComparisonSurface({
   const primaryVideoRef = useRef<HTMLVideoElement | null>(null);
   const secondaryVideoRef = useRef<HTMLVideoElement | null>(null);
   const isApplyingSyncRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const [syncStatusLabel, setSyncStatusLabel] = useState("Sync pending");
   const clipped = mode === "vertical" || mode === "horizontal" || mode === "diagonal";
   const adjustable = clipped || mode === "overlay";
-  const syncFrom = useCallback((role: PreviewSyncRole) => {
+  const updateSyncStatus = useCallback(() => {
+    const primaryVideo = primaryVideoRef.current;
+    const secondaryVideo = secondaryVideoRef.current;
+    if (!primaryVideo || !secondaryVideo) {
+      setSyncStatusLabel("Sync pending");
+      return;
+    }
+
+    setSyncStatusLabel(mediaSyncStatus(
+      readMediaSnapshot(primaryVideo),
+      readMediaSnapshot(secondaryVideo)
+    ).label);
+  }, []);
+  const syncFrom = useCallback((role: PreviewSyncRole, showRecoveredStatus = false) => {
     if (isApplyingSyncRef.current) {
       return;
     }
@@ -45,9 +60,14 @@ export function ComparisonSurface({
     const anchor = role === "primary" ? primaryVideoRef.current : secondaryVideoRef.current;
     const follower = role === "primary" ? secondaryVideoRef.current : primaryVideoRef.current;
     if (!anchor || !follower) {
+      updateSyncStatus();
       return;
     }
 
+    setSyncStatusLabel(mediaSyncStatus(
+      readMediaSnapshot(anchor),
+      readMediaSnapshot(follower)
+    ).label);
     const action = mediaSyncAction(
       readMediaSnapshot(anchor),
       readMediaSnapshot(follower)
@@ -76,8 +96,11 @@ export function ComparisonSurface({
     }
     window.setTimeout(() => {
       isApplyingSyncRef.current = false;
+      if (showRecoveredStatus) {
+        updateSyncStatus();
+      }
     }, 0);
-  }, []);
+  }, [updateSyncStatus]);
   const registerVideo = useCallback((
     role: PreviewSyncRole,
     element: HTMLVideoElement | null
@@ -115,12 +138,19 @@ export function ComparisonSurface({
       )}
       onPointerDown={(event) => {
         if (!clipped) return;
+        isDraggingRef.current = true;
         event.currentTarget.setPointerCapture(event.pointerId);
         updatePositionFromPointer(event.clientX, event.clientY);
       }}
       onPointerMove={(event) => {
-        if (!clipped || event.buttons !== 1) return;
+        if (!clipped || !isDraggingRef.current) return;
         updatePositionFromPointer(event.clientX, event.clientY);
+      }}
+      onPointerUp={() => {
+        isDraggingRef.current = false;
+      }}
+      onLostPointerCapture={() => {
+        isDraggingRef.current = false;
       }}
     >
       <div className="absolute inset-0">
@@ -141,7 +171,7 @@ export function ComparisonSurface({
       </div>
       {clipped && <ComparisonDivider mode={mode} position={position} />}
       <div className="pointer-events-none absolute left-4 top-4 rounded bg-zinc-950/85 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-300">
-        {title} - Synced playback
+        {title} - {comparisonModeLabel(mode)} - Synced playback - {syncStatusLabel}
       </div>
       <div
         className="absolute bottom-4 left-4 right-4 flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/85 px-3 py-2 backdrop-blur-xl"
@@ -158,6 +188,20 @@ export function ComparisonSurface({
           className="w-full accent-brand"
           disabled={!adjustable}
         />
+        <button
+          type="button"
+          onClick={updateSyncStatus}
+          className="rounded-md border border-zinc-800 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand"
+        >
+          Check sync
+        </button>
+        <button
+          type="button"
+          onClick={() => syncFrom("primary", true)}
+          className="rounded-md border border-zinc-800 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand"
+        >
+          Resync
+        </button>
       </div>
     </div>
   );
@@ -199,4 +243,13 @@ function readMediaSnapshot(video: HTMLVideoElement) {
     paused: video.paused,
     playbackRate: video.playbackRate
   };
+}
+
+function comparisonModeLabel(mode: ViewerComparisonMode): string {
+  if (mode === "vertical") return "Vertical wipe";
+  if (mode === "horizontal") return "Horizontal wipe";
+  if (mode === "diagonal") return "Diagonal wipe";
+  if (mode === "overlay") return "Overlay blend";
+  if (mode === "difference") return "Difference blend";
+  return "Single view";
 }

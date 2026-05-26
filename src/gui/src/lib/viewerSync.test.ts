@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { mediaSyncAction, synchronizedMediaTime } from "@/lib/viewerSync";
+import { mediaSyncAction, mediaSyncStatus, synchronizedMediaTime } from "@/lib/viewerSync";
 
 describe("viewer media sync", () => {
   test("aligns follower time to the anchor when durations match", () => {
@@ -46,5 +46,25 @@ describe("viewer media sync", () => {
     );
 
     expect(action.playbackRate).toBe(0.5);
+  });
+
+  test("reports desync status and recovery target", () => {
+    expect(mediaSyncStatus(
+      { currentTime: 2, duration: 4, paused: false, playbackRate: 1 },
+      { currentTime: 1, duration: 4, paused: false, playbackRate: 1 }
+    )).toEqual({
+      state: "desynced",
+      driftSeconds: 1,
+      targetTime: 2,
+      label: "Desynced by 1.00s"
+    });
+
+    expect(mediaSyncStatus(
+      { currentTime: 2, duration: 4, paused: false, playbackRate: 1 },
+      { currentTime: 2.02, duration: 4, paused: false, playbackRate: 1 }
+    )).toMatchObject({
+      state: "synced",
+      label: "Synced"
+    });
   });
 });

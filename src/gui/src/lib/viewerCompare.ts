@@ -6,6 +6,11 @@ export type ViewerComparisonMode =
   | "overlay"
   | "difference";
 
+export type ViewerComparisonPairId =
+  | "source-result"
+  | "source-hint"
+  | "hint-result";
+
 export interface ViewerBuffer {
   id: string;
   label: string;
@@ -20,6 +25,20 @@ export interface ViewerComparisonState {
   title: string;
 }
 
+export interface ViewerComparisonPairOption {
+  id: ViewerComparisonPairId;
+  label: string;
+  primaryId: string;
+  secondaryId: string;
+  available: boolean;
+  unavailableReason: string | null;
+}
+
+export interface ViewerComparisonResolveOptions {
+  pairId?: ViewerComparisonPairId | null;
+  swapped?: boolean;
+}
+
 export interface ComparisonDividerGeometry {
   kind: "vertical" | "horizontal" | "diagonal";
   x1: number;
@@ -31,27 +50,60 @@ export interface ComparisonDividerGeometry {
 export function resolveComparisonState(
   buffers: ViewerBuffer[],
   activeId: string,
-  mode: ViewerComparisonMode
+  mode: ViewerComparisonMode,
+  options: ViewerComparisonResolveOptions = {}
 ): ViewerComparisonState {
   const active = buffers.find((buffer) => buffer.id === activeId) ?? null;
   const source = buffers.find((buffer) => buffer.id === "source") ?? null;
-  const secondary = active && active.id !== "source"
-    ? active
-    : buffers.find((buffer) => buffer.id === "result" && buffer.path) ??
-      buffers.find((buffer) => buffer.id === "hint" && buffer.path) ??
-      null;
-  const canCompare = Boolean(source?.path && secondary?.path && source.id !== secondary.id);
+  const explicitPair = options.pairId
+    ? comparisonPairOptions(buffers, options.swapped).find((pair) => pair.id === options.pairId) ?? null
+    : null;
+  const explicitPrimary = explicitPair?.available ? bufferForId(buffers, explicitPair.primaryId) : null;
+  const explicitSecondary = explicitPair?.available ? bufferForId(buffers, explicitPair.secondaryId) : null;
+  const primary = explicitPrimary ?? source;
+  const secondary = explicitSecondary ?? (
+    active && active.id !== "source"
+      ? active
+      : buffers.find((buffer) => buffer.id === "result" && buffer.path) ??
+        buffers.find((buffer) => buffer.id === "hint" && buffer.path) ??
+        null
+  );
+  const canCompare = Boolean(primary?.path && secondary?.path && primary.id !== secondary.id);
   const resolvedMode = canCompare ? mode : "single";
 
   return {
     mode: resolvedMode,
     canCompare,
-    primary: source,
+    primary,
     secondary,
-    title: canCompare && source && secondary
-      ? `${source.label} vs ${secondary.label}`
+    title: canCompare && primary && secondary
+      ? `${primary.label} vs ${secondary.label}`
       : active?.label ?? "Viewer"
   };
+}
+
+export function comparisonPairOptions(
+  buffers: ViewerBuffer[],
+  swapped = false
+): ViewerComparisonPairOption[] {
+  return COMPARISON_PAIR_DEFS.map((definition) => {
+    const first = bufferForId(buffers, definition.firstId);
+    const second = bufferForId(buffers, definition.secondId);
+    const primary = swapped ? second : first;
+    const secondary = swapped ? first : second;
+    const missing = [primary, secondary].filter((buffer) => !buffer?.path);
+
+    return {
+      id: definition.id,
+      label: `${primary?.label ?? definition.firstLabel} / ${secondary?.label ?? definition.secondLabel}`,
+      primaryId: primary?.id ?? (swapped ? definition.secondId : definition.firstId),
+      secondaryId: secondary?.id ?? (swapped ? definition.firstId : definition.secondId),
+      available: missing.length === 0,
+      unavailableReason: missing.length === 0
+        ? null
+        : `Missing ${missing.map((buffer) => buffer?.label ?? "buffer").join(" and ")}`
+    };
+  });
 }
 
 export function comparisonClipStyle(
@@ -137,3 +189,37 @@ function clampPercent(value: number): number {
 function formatPercent(value: number): string {
   return `${Number.isInteger(value) ? value.toFixed(0) : Number(value.toFixed(3))}%`;
 }
+
+function bufferForId(buffers: ViewerBuffer[], id: string): ViewerBuffer | null {
+  return buffers.find((buffer) => buffer.id === id) ?? null;
+}
+
+const COMPARISON_PAIR_DEFS: Array<{
+  id: ViewerComparisonPairId;
+  firstId: string;
+  secondId: string;
+  firstLabel: string;
+  secondLabel: string;
+}> = [
+  {
+    id: "source-result",
+    firstId: "source",
+    secondId: "result",
+    firstLabel: "Source",
+    secondLabel: "Result"
+  },
+  {
+    id: "source-hint",
+    firstId: "source",
+    secondId: "hint",
+    firstLabel: "Source",
+    secondLabel: "Alpha Hint"
+  },
+  {
+    id: "hint-result",
+    firstId: "hint",
+    secondId: "result",
+    firstLabel: "Alpha Hint",
+    secondLabel: "Result"
+  }
+];

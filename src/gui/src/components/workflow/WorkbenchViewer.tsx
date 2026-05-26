@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowLeftRight,
   FileVideo,
   FolderDown,
   Layers
@@ -8,7 +9,9 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/media";
 import {
+  comparisonPairOptions,
   resolveComparisonState,
+  type ViewerComparisonPairId,
   type ViewerComparisonMode
 } from "@/lib/viewerCompare";
 import type { OutputRecipeSettings } from "@/lib/outputRecipe";
@@ -40,7 +43,9 @@ export function WorkbenchViewer({
 }) {
   const [activePreview, setActivePreview] = useState<PreviewMode>("source");
   const [comparisonMode, setComparisonMode] = useState<ViewerComparisonMode>("single");
+  const [comparisonPairId, setComparisonPairId] = useState<ViewerComparisonPairId>("source-result");
   const [comparisonPosition, setComparisonPosition] = useState(50);
+  const [comparisonSwapped, setComparisonSwapped] = useState(false);
   const previewItems: PreviewItem[] = [
     {
       id: "source",
@@ -72,7 +77,12 @@ export function WorkbenchViewer({
     }
   ];
   const activeItem = previewItems.find((item) => item.id === activePreview) ?? previewItems[0];
-  const comparisonState = resolveComparisonState(previewItems, activePreview, comparisonMode);
+  const pairOptions = comparisonPairOptions(previewItems, comparisonSwapped);
+  const activePair = pairOptions.find((pair) => pair.id === comparisonPairId) ?? pairOptions[0];
+  const comparisonState = resolveComparisonState(previewItems, activePreview, comparisonMode, {
+    pairId: comparisonPairId,
+    swapped: comparisonSwapped
+  });
   const primaryItem = previewItems.find((item) => item.id === comparisonState.primary?.id) ?? previewItems[0];
   const secondaryItem = previewItems.find((item) => item.id === comparisonState.secondary?.id) ?? activeItem;
 
@@ -85,7 +95,9 @@ export function WorkbenchViewer({
   useEffect(() => {
     setActivePreview("source");
     setComparisonMode("single");
+    setComparisonPairId("source-result");
     setComparisonPosition(50);
+    setComparisonSwapped(false);
   }, [resetCount]);
 
   return (
@@ -121,6 +133,41 @@ export function WorkbenchViewer({
               </button>
             ))}
           </div>
+
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+            {pairOptions.map((pair) => (
+              <button
+                key={pair.id}
+                type="button"
+                disabled={!pair.available}
+                title={pair.unavailableReason ?? pair.label}
+                onClick={() => setComparisonPairId(pair.id)}
+                className={cn(
+                  "min-h-10 rounded-md px-2 py-1 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+                  comparisonPairId === pair.id
+                    ? "bg-brand text-white"
+                    : "text-zinc-400 hover:text-zinc-100"
+                )}
+              >
+                <span className="block truncate">{pair.label}</span>
+                {!pair.available && (
+                  <span className="block truncate text-[9px] font-medium uppercase tracking-wider text-zinc-500">
+                    {pair.unavailableReason}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            disabled={!activePair?.available}
+            onClick={() => setComparisonSwapped((value) => !value)}
+            className="flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs font-bold text-zinc-400 transition-colors hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowLeftRight className="h-4 w-4" />
+            Swap sides
+          </button>
 
           <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 xl:grid-cols-6">
             {COMPARISON_MODES.map((mode) => (
