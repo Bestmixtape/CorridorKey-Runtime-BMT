@@ -178,6 +178,28 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Run `pnpm test`, `cargo test`, `pnpm smoke:real-runtime`, and
       `git diff --check`; append exact results to Notes before review.
 
+## Child Tasks
+
+Executable follow-up slices split from this umbrella task.
+
+- [ ] `0029-complete-gui-output-recipe.md` closes final artifact family,
+      alpha/composite behavior, preview background, replacement media, and
+      color-management workflow.
+- [ ] `0030-audit-gui-advanced-controls.md` audits and wires plugin/runtime
+      advanced-control parity without inventing unsupported process arguments.
+- [ ] `0031-enrich-gui-telemetry.md` makes in-progress runtime telemetry richer
+      and more legible from real event data.
+- [ ] `0032-rework-gui-secondary-tabs.md` turns Hardware, Settings, Support,
+      and History into trustworthy runtime-backed surfaces.
+- [ ] `0033-extract-gui-workbench-viewer.md` extracts the workbench viewer into
+      focused components and testable state helpers without behavior changes.
+- [ ] `0034-finish-gui-comparison-ux.md` finishes A/B review ergonomics,
+      missing-buffer states, side swapping, and desync recovery.
+- [ ] `0035-spike-gui-runtime-performance.md` investigates safe runtime
+      performance improvements before any render hot path change.
+- [ ] `0036-audit-gui-design-system.md` audits visual polish and token usage
+      against the CorridorKey design system.
+
 ## Notes
 
 Append-only log. Date each entry. Never rewrite past entries.
@@ -491,6 +513,16 @@ Both were fixed before the acceptance criterion was kept checked. A follow-up
 Standards rereview also removed the non-canonical `CK_REAL_PREVIEW_FFMPEG`
 override and hardened the local media server's HTTP byte-range handling for
 suffix and invalid ranges.
+
+### 2026-05-26
+
+The remaining work was split into executable child tasks so this umbrella stays
+a product map instead of a monolithic implementation queue. The split is:
+`0029` Output Recipe, `0030` Advanced Controls parity, `0031` Runtime
+Telemetry, `0032` Secondary Tabs, `0033` Workbench Viewer extraction, `0034`
+Comparison UX, `0035` Runtime Performance spike, and `0036` Design System
+audit. `0027` remains the completed model-pack contract task and `0028`
+continues to own the unified Windows installer plan.
 
 ## Definition of Done
 
