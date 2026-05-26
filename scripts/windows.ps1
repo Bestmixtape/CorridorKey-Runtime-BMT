@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "package-suite", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -15,6 +15,8 @@ param(
     # Inno Setup installer from the same staged OFX bundle.
     [ValidateSet("", "online", "offline")]
     [string]$Flavor = "",
+    [switch]$RenderOnly,
+    [string]$OutputManifestPath = "",
     [switch]$EnableAdobePlugin,
     [string]$AdobeSdkRoot = "",
     [string[]]$ForwardArguments = @()
@@ -28,6 +30,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ($Task -ne "build" -and ($EnableAdobePlugin -or -not [string]::IsNullOrWhiteSpace($AdobeSdkRoot))) {
     throw "-EnableAdobePlugin and -AdobeSdkRoot are supported only with -Task build."
+}
+if ($Task -ne "package-suite" -and ($RenderOnly -or -not [string]::IsNullOrWhiteSpace($OutputManifestPath))) {
+    throw "-RenderOnly and -OutputManifestPath are supported only with -Task package-suite."
 }
 
 function Assert-CorridorKeyWindowsReleaseLabelFormat {
@@ -87,8 +92,11 @@ function Invoke-CorridorKeyScript {
 }
 
 $resolvedTrack = $Track
-if ($Task -eq "release" -and -not $PSBoundParameters.ContainsKey("Track")) {
+if ($Task -in @("package-suite", "release") -and -not $PSBoundParameters.ContainsKey("Track")) {
     $resolvedTrack = "rtx"
+}
+if ($Task -eq "package-suite" -and $resolvedTrack -ne "rtx") {
+    throw "Task 'package-suite' currently supports only -Track rtx because the suite manifest is bound to the Windows RTX Green/Blue model-pack contract."
 }
 
 $syncGuiMetadata = $Task -in @("package-runtime", "release", "sync-version")
@@ -124,10 +132,14 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
 # Stable GitHub releases are the only clean-label path: when publishing
 # with no prerelease label, the release pipeline keeps X.Y.Z as the tag,
 # installer name, and panel version.
+if ($Task -eq "package-suite" -and [string]::IsNullOrWhiteSpace($Flavor)) {
+    $Flavor = "online"
+}
+
 if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     if ($stableGithubReleaseRequested) {
         Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
-    } elseif ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host")) {
+    } elseif ($Task -in @("package-ofx", "package-adobe", "package-suite", "smoke-adobe-host")) {
         $buildDir = Join-Path $repoRoot ("build\" + $Preset)
         $builtLabel = Get-CorridorKeyBuiltCliDisplayLabel -BuildDir $buildDir
         if ([string]::IsNullOrWhiteSpace($builtLabel)) {
@@ -163,7 +175,7 @@ Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
 if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     Write-Host "[windows] Display version label: $DisplayVersionLabel" -ForegroundColor Cyan
 }
-if ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release")) {
+if ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "package-suite", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
 }
 
@@ -342,6 +354,25 @@ switch ($Task) {
             $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
+        break
+    }
+    "package-suite" {
+        $arguments = @(
+            "-Version", $resolvedVersion,
+            "-Track", $resolvedTrack
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        $arguments += @("-Flavor", $Flavor)
+        if ($RenderOnly) {
+            $arguments += @("-RenderOnly")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($OutputManifestPath)) {
+            $arguments += @("-OutputManifestPath", $OutputManifestPath)
+        }
+        $arguments += $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "package_suite_installer_windows.ps1" -Arguments $arguments
         break
     }
     "release" {
