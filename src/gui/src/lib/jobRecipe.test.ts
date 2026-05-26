@@ -28,7 +28,7 @@ describe("job recipe chips", () => {
       "Model Green Matting",
       "Encode balanced",
       "Output Movie",
-      "Alpha Transparent",
+      "Alpha Composited preview",
       "Preview Checkerboard",
       "Color Runtime default",
       "Format MOV",

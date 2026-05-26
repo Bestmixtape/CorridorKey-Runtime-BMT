@@ -18,20 +18,63 @@ export interface OutputArtifactOption {
   value: OutputArtifactFamily;
   label: string;
   enabled: boolean;
-  status: "supported" | "needs_image_source" | "needs_video_source" | "planned";
+  status: "supported" | "needs_image_source" | "needs_video_source" | "awaiting_runtime_contract";
+}
+
+export type OutputRecipeControlStatus =
+  | "supported"
+  | "preview_only"
+  | "awaiting_runtime_contract";
+
+export interface OutputRecipeControlOption<TValue extends string = string> {
+  value: TValue;
+  label: string;
+  enabled: boolean;
+  status: OutputRecipeControlStatus;
+}
+
+export interface OutputRecipeControlOptions {
+  alphaModes: OutputRecipeControlOption<OutputAlphaMode>[];
+  previewBackgrounds: OutputRecipeControlOption<PreviewBackgroundMode>[];
+  colorIntents: OutputRecipeControlOption<OutputColorIntent>[];
 }
 
 export interface OutputRecipeSourceContext {
   selectedAsFolder?: boolean;
 }
 
+export interface RuntimeOutputRecipeCapabilities {
+  artifact_families?: OutputArtifactFamily[];
+  movie_alpha_modes?: OutputAlphaMode[];
+  sequence_alpha_modes?: OutputAlphaMode[];
+  exr_sequence_outputs?: string[];
+  replacement_media_output?: boolean;
+  color_intents?: OutputColorIntent[];
+}
+
+interface NormalizedOutputRecipeCapabilities {
+  artifactFamilies: OutputArtifactFamily[];
+  movieAlphaModes: OutputAlphaMode[];
+  sequenceAlphaModes: OutputAlphaMode[];
+  colorIntents: OutputColorIntent[];
+}
+
 export const DEFAULT_OUTPUT_RECIPE: OutputRecipeSettings = {
   artifactFamily: "movie",
-  alphaMode: "transparent",
+  alphaMode: "composited_preview",
   previewBackground: "checkerboard",
   previewSolidColor: "#111827",
   replacementMediaPath: null,
   colorIntent: "runtime_default"
+};
+
+export const CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES: RuntimeOutputRecipeCapabilities = {
+  artifact_families: ["movie", "exr_sequence"],
+  movie_alpha_modes: ["composited_preview"],
+  sequence_alpha_modes: [],
+  exr_sequence_outputs: ["matte_exr", "foreground_exr", "processed_exr", "comp_png"],
+  replacement_media_output: false,
+  color_intents: ["runtime_default"]
 };
 
 export const OUTPUT_ALPHA_OPTIONS: Array<{ value: OutputAlphaMode; label: string }> = [
@@ -84,36 +127,33 @@ export function normalizeOutputRecipe(
 
 export function outputArtifactOptions(
   inputPath: string | null,
-  sourceContext: OutputRecipeSourceContext = {}
+  sourceContext: OutputRecipeSourceContext = {},
+  capabilities?: RuntimeOutputRecipeCapabilities
 ): OutputArtifactOption[] {
+  const runtimeCapabilities = normalizeOutputRecipeCapabilities(capabilities);
   const sourceKind = inputSourceKind(inputPath, sourceContext);
   const sequenceCapable = sourceKind === "image" || sourceKind === "folder";
   return [
-    {
-      value: "movie",
-      label: "Movie",
-      enabled: sourceKind === "video" || sourceKind === "unknown",
-      status: sequenceCapable ? "needs_video_source" : "supported"
-    },
-    {
-      value: "exr_sequence",
-      label: "EXR sequence",
-      enabled: sequenceCapable,
-      status: sequenceCapable ? "supported" : "needs_image_source"
-    },
-    {
-      value: "png_sequence",
-      label: "PNG sequence",
-      enabled: sequenceCapable,
-      status: sequenceCapable ? "supported" : "needs_image_source"
-    },
-    {
-      value: "preview_only",
-      label: "Preview only",
-      enabled: false,
-      status: "planned"
-    }
+    artifactOption("movie", "Movie", sourceKind === "video" || sourceKind === "unknown", "needs_video_source", runtimeCapabilities),
+    artifactOption("exr_sequence", "EXR sequence", sequenceCapable, "needs_image_source", runtimeCapabilities),
+    artifactOption("png_sequence", "PNG sequence", sequenceCapable, "needs_image_source", runtimeCapabilities),
+    artifactOption("preview_only", "Preview only", true, "needs_image_source", runtimeCapabilities)
   ];
+}
+
+export function preferredOutputArtifactFamily(
+  inputPath: string | null,
+  recipe: OutputRecipeSettings,
+  sourceContext: OutputRecipeSourceContext = {},
+  capabilities?: RuntimeOutputRecipeCapabilities
+): OutputArtifactFamily {
+  const normalized = normalizeOutputRecipe(recipe);
+  const options = outputArtifactOptions(inputPath, sourceContext, capabilities);
+  const current = options.find((option) => option.value === normalized.artifactFamily);
+  if (current?.enabled) {
+    return current.value;
+  }
+  return options.find((option) => option.enabled)?.value ?? normalized.artifactFamily;
 }
 
 export function outputRecipeLabel(recipe: OutputRecipeSettings): string {
@@ -132,10 +172,36 @@ export function outputRecipeLabel(recipe: OutputRecipeSettings): string {
 export function outputRecipeChips(recipe: OutputRecipeSettings): string[] {
   return [
     `Output ${outputRecipeLabel(recipe)}`,
-    `Alpha ${formatMode(recipe.alphaMode)}`,
+    `Alpha ${recipe.artifactFamily === "exr_sequence" ? "EXR bundle" : formatMode(recipe.alphaMode)}`,
     `Preview ${previewBackgroundLabel(recipe)}`,
     `Color ${formatMode(recipe.colorIntent)}`
   ];
+}
+
+export function outputRecipeControlOptions(
+  recipe: OutputRecipeSettings,
+  capabilities?: RuntimeOutputRecipeCapabilities
+): OutputRecipeControlOptions {
+  const normalized = normalizeOutputRecipe(recipe);
+  const runtimeCapabilities = normalizeOutputRecipeCapabilities(capabilities);
+  return {
+    alphaModes: OUTPUT_ALPHA_OPTIONS.map((option) => ({
+      ...option,
+      ...alphaModeSupport(normalized.artifactFamily, option.value, runtimeCapabilities)
+    })),
+    previewBackgrounds: PREVIEW_BACKGROUND_OPTIONS.map((option) => ({
+      ...option,
+      enabled: true,
+      status: "preview_only" as const
+    })),
+    colorIntents: OUTPUT_COLOR_OPTIONS.map((option) => ({
+      ...option,
+      enabled: runtimeCapabilities.colorIntents.includes(option.value),
+      status: runtimeCapabilities.colorIntents.includes(option.value)
+        ? "supported" as const
+        : "awaiting_runtime_contract" as const
+    }))
+  };
 }
 
 export function isOutputPathReady(
@@ -159,9 +225,15 @@ export function suggestOutputPathForRecipe(
   currentOutputPath: string | null,
   defaultOutputDir: string | null,
   recipe: OutputRecipeSettings,
-  sourceContext: OutputRecipeSourceContext = {}
+  sourceContext: OutputRecipeSourceContext = {},
+  capabilities?: RuntimeOutputRecipeCapabilities
 ): string | null {
-  const normalized = effectiveRecipeForSource(inputPath, normalizeOutputRecipe(recipe), sourceContext);
+  const normalized = effectiveRecipeForSource(
+    inputPath,
+    normalizeOutputRecipe(recipe),
+    sourceContext,
+    capabilities
+  );
   if (!inputPath || isOutputPathReady(currentOutputPath, normalized)) {
     return null;
   }
@@ -198,6 +270,48 @@ export function previewBackgroundStyle(
   };
 }
 
+function alphaModeSupport(
+  artifactFamily: OutputArtifactFamily,
+  alphaMode: OutputAlphaMode,
+  capabilities: NormalizedOutputRecipeCapabilities
+): Pick<OutputRecipeControlOption<OutputAlphaMode>, "enabled" | "status"> {
+  if (artifactFamily === "movie") {
+    return capabilities.movieAlphaModes.includes(alphaMode)
+      ? { enabled: true, status: "supported" }
+      : { enabled: false, status: "awaiting_runtime_contract" };
+  }
+
+  if (artifactFamily === "exr_sequence" || artifactFamily === "png_sequence") {
+    return capabilities.sequenceAlphaModes.includes(alphaMode)
+      ? { enabled: true, status: "supported" }
+      : { enabled: false, status: "awaiting_runtime_contract" };
+  }
+
+  if (artifactFamily === "preview_only") {
+    return { enabled: false, status: "awaiting_runtime_contract" };
+  }
+
+  return { enabled: true, status: "supported" };
+}
+
+function artifactOption(
+  value: OutputArtifactFamily,
+  label: string,
+  sourceCompatible: boolean,
+  sourceBlockedStatus: OutputArtifactOption["status"],
+  capabilities: NormalizedOutputRecipeCapabilities
+): OutputArtifactOption {
+  const runtimeSupported = capabilities.artifactFamilies.includes(value);
+  return {
+    value,
+    label,
+    enabled: runtimeSupported && sourceCompatible,
+    status: runtimeSupported
+      ? sourceCompatible ? "supported" : sourceBlockedStatus
+      : "awaiting_runtime_contract"
+  };
+}
+
 function inputSourceKind(
   inputPath: string | null,
   sourceContext: OutputRecipeSourceContext = {}
@@ -214,11 +328,12 @@ function inputSourceKind(
 function effectiveRecipeForSource(
   inputPath: string | null,
   recipe: OutputRecipeSettings,
-  sourceContext: OutputRecipeSourceContext = {}
+  sourceContext: OutputRecipeSourceContext = {},
+  capabilities?: RuntimeOutputRecipeCapabilities
 ): OutputRecipeSettings {
-  const sourceKind = inputSourceKind(inputPath, sourceContext);
-  if ((sourceKind === "image" || sourceKind === "folder") && recipe.artifactFamily === "movie") {
-    return { ...recipe, artifactFamily: "png_sequence" };
+  const artifactFamily = preferredOutputArtifactFamily(inputPath, recipe, sourceContext, capabilities);
+  if (artifactFamily !== recipe.artifactFamily) {
+    return { ...recipe, artifactFamily };
   }
   return recipe;
 }
@@ -270,6 +385,45 @@ function oneOf<T extends string>(
   fallback: T
 ): T {
   return value !== undefined && choices.includes(value) ? value : fallback;
+}
+
+function normalizeOutputRecipeCapabilities(
+  capabilities: RuntimeOutputRecipeCapabilities = CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES
+): NormalizedOutputRecipeCapabilities {
+  const usingDefaultCapabilities = capabilities === CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES;
+  return {
+    artifactFamilies: runtimeList(
+      capabilities.artifact_families,
+      ARTIFACT_FAMILIES,
+      usingDefaultCapabilities ? CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES.artifact_families : undefined
+    ),
+    movieAlphaModes: runtimeList(
+      capabilities.movie_alpha_modes,
+      ALPHA_MODES,
+      usingDefaultCapabilities ? CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES.movie_alpha_modes : undefined
+    ),
+    sequenceAlphaModes: runtimeList(
+      capabilities.sequence_alpha_modes,
+      ALPHA_MODES,
+      usingDefaultCapabilities ? CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES.sequence_alpha_modes : undefined
+    ),
+    colorIntents: runtimeList(
+      capabilities.color_intents,
+      COLOR_INTENTS,
+      usingDefaultCapabilities ? CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES.color_intents : undefined
+    )
+  };
+}
+
+function runtimeList<T extends string>(
+  values: T[] | undefined,
+  allowed: readonly T[],
+  fallback: T[] | undefined
+): T[] {
+  const source = Array.isArray(values) ? values : fallback;
+  return Array.isArray(source)
+    ? source.filter((value) => allowed.includes(value))
+    : [];
 }
 
 function joinLocalPath(directory: string, file: string): string {

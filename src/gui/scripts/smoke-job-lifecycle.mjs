@@ -19,6 +19,13 @@ const sourceFolderPath = "C:\\Smoke\\sequence";
 const hintPath = "C:\\Smoke\\alpha_hint.mov";
 const outputPath = "C:\\Smoke\\output.mov";
 const artifactPath = "C:\\Smoke\\output_keyed.mov";
+const outputRecipeCapabilities = {
+  artifact_families: ["movie", "exr_sequence"],
+  movie_alpha_modes: ["composited_preview"],
+  exr_sequence_outputs: ["matte_exr", "foreground_exr", "processed_exr", "comp_png"],
+  replacement_media_output: false,
+  color_intents: ["runtime_default"]
+};
 
 const scenarios = [
   {
@@ -44,9 +51,9 @@ const scenarios = [
       await waitForBody(page, "2 stages");
       await waitForBody(page, "Encode balanced");
       await waitForBody(page, "Output Movie");
-      await waitForBody(page, "Alpha Matte only");
+      await waitForBody(page, "Alpha Composited preview");
       await waitForBody(page, "Preview Solid #111827");
-      await waitForBody(page, "Color Linear sRGB");
+      await waitForBody(page, "Color Runtime default");
       await waitForBody(page, "Resolution 2048");
       await waitForBody(page, "Tiling forced");
       await assertCopyDiagnostics(page, "Status: completed");
@@ -150,7 +157,16 @@ async function runScenario(context, baseUrl, scenario) {
   });
 
   await page.addInitScript(
-    ({ scenarioName, downloadsPath, inputPath, sourceFolderPath, hintPath, outputPath, artifactPath }) => {
+    ({
+      scenarioName,
+      downloadsPath,
+      inputPath,
+      sourceFolderPath,
+      hintPath,
+      outputPath,
+      artifactPath,
+      outputRecipeCapabilities
+    }) => {
       const callbacks = new Map();
       const listeners = new Map();
       const timers = [];
@@ -425,7 +441,8 @@ async function runScenario(context, baseUrl, scenario) {
           capabilities: {
             platform: "windows",
             supported_backends: ["tensorrt"],
-            cpu_fallback_available: false
+            cpu_fallback_available: false,
+            output_recipe: outputRecipeCapabilities
           },
           supported_tracks: ["green"]
         });
@@ -493,7 +510,16 @@ async function runScenario(context, baseUrl, scenario) {
         };
       }
     },
-    { scenarioName: scenario.name, downloadsPath, inputPath, sourceFolderPath, hintPath, outputPath, artifactPath }
+    {
+      scenarioName: scenario.name,
+      downloadsPath,
+      inputPath,
+      sourceFolderPath,
+      hintPath,
+      outputPath,
+      artifactPath,
+      outputRecipeCapabilities
+    }
   );
 
   try {
@@ -526,7 +552,7 @@ async function selectInput(page) {
 async function selectSourceFolder(page) {
   await page.getByRole("button", { name: /Select sequence or project folder/i }).click();
   await waitForBody(page, "sequence");
-  await waitForBody(page, "sequence_corridorkey_png");
+  await waitForBody(page, "sequence_corridorkey_exr");
   await page.waitForFunction(() => window.__corridorkeySourceSelectionModes.includes("folder"));
 }
 
@@ -545,13 +571,14 @@ async function configureOutputRecipe(page) {
   await waitForBody(page, "Output Recipe");
   await waitForBody(page, "Movie");
   await waitForBody(page, "EXR sequence");
-  await page.getByLabel("Alpha").selectOption("matte_only");
+  await waitForBody(page, "Matte only (needs runtime support)");
+  await waitForBody(page, "Composite preview");
   await page.getByLabel("Preview background").selectOption("replacement_media");
   await waitForBody(page, "No replacement media selected");
   await page.getByRole("button", { name: /Select replacement media/i }).click();
   await waitForBody(page, "Replacement media selected");
   await page.getByLabel("Preview background").selectOption("solid");
-  await page.getByLabel("Color intent").selectOption("linear_srgb");
+  await waitForBody(page, "Linear sRGB (needs runtime support)");
   await waitForBody(page, "Preview color");
 }
 

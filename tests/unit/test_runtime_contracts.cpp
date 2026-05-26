@@ -95,6 +95,17 @@ TEST_CASE("runtime capabilities expose stable diagnostics", "[unit][runtime]") {
     REQUIRE(json.contains("mlx_probe_available"));
     REQUIRE(json.contains("default_video_mode"));
     REQUIRE(json.contains("lossless_video_available"));
+    REQUIRE(json.contains("output_recipe"));
+    REQUIRE(json["output_recipe"]["artifact_families"] ==
+            nlohmann::json::array({"movie", "exr_sequence"}));
+    REQUIRE(json["output_recipe"]["movie_alpha_modes"] ==
+            nlohmann::json::array({"composited_preview"}));
+    REQUIRE(json["output_recipe"]["exr_sequence_outputs"] ==
+            nlohmann::json::array(
+                {"matte_exr", "foreground_exr", "processed_exr", "comp_png"}));
+    REQUIRE_FALSE(json["output_recipe"].contains("preview_backgrounds"));
+    REQUIRE_FALSE(json["output_recipe"]["replacement_media_output"].get<bool>());
+    REQUIRE(json["output_recipe"]["color_intents"] == nlohmann::json::array({"runtime_default"}));
 }
 
 TEST_CASE("preferred runtime device and optimization profile stay product-aligned",

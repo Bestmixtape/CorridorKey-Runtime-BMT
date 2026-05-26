@@ -25,6 +25,13 @@ const greenModelName = "corridorkey_fp16_1024.onnx";
 const blueModelName = "corridorkey_dynamic_blue_fp16.ts";
 const reference768ModelName = "corridorkey_fp16_768.onnx";
 const referenceFp32ModelName = "corridorkey_fp32_1024.onnx";
+const outputRecipeCapabilities = {
+  artifact_families: ["movie", "exr_sequence"],
+  movie_alpha_modes: ["composited_preview"],
+  exr_sequence_outputs: ["matte_exr", "foreground_exr", "processed_exr", "comp_png"],
+  replacement_media_output: false,
+  color_intents: ["runtime_default"]
+};
 
 let runtimePath = "";
 
@@ -441,6 +448,7 @@ const greenModelName = ${JSON.stringify(greenModelName)};
 const blueModelName = ${JSON.stringify(blueModelName)};
 const reference768ModelName = ${JSON.stringify(reference768ModelName)};
 const referenceFp32ModelName = ${JSON.stringify(referenceFp32ModelName)};
+const outputRecipeCapabilities = ${JSON.stringify(outputRecipeCapabilities)};
 
 const modelPath = (filename) => path.join(root, "models", filename);
 const greenCatalog = () => ({
@@ -514,7 +522,8 @@ const baseInfo = (supportedBackends) => ({
   capabilities: {
     platform: "windows",
     supported_backends: supportedBackends,
-    cpu_fallback_available: supportedBackends.includes("cpu")
+    cpu_fallback_available: supportedBackends.includes("cpu"),
+    output_recipe: outputRecipeCapabilities
   },
   supported_tracks: ["green", "blue"]
 });

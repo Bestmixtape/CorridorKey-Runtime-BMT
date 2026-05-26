@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { RuntimeOutputRecipeCapabilities } from "@/lib/outputRecipe";
 
 export interface DeviceInfo {
   name: string;
@@ -17,6 +18,7 @@ export interface SystemInfo {
     multi_gpu_available?: boolean;
     cpu_fallback_available?: boolean;
     supported_backends?: string[];
+    output_recipe?: RuntimeOutputRecipeCapabilities;
   };
   supported_tracks?: string[];
 }

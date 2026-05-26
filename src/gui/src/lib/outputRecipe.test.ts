@@ -1,12 +1,15 @@
 import { describe, expect, test } from "vitest";
 import {
+  CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES,
   DEFAULT_OUTPUT_RECIPE,
   isOutputPathReady,
   normalizeOutputRecipe,
   outputArtifactOptions,
+  outputRecipeControlOptions,
   outputRecipeChips,
   outputRecipeLabel,
-  suggestOutputPathForRecipe
+  suggestOutputPathForRecipe,
+  type RuntimeOutputRecipeCapabilities
 } from "@/lib/outputRecipe";
 
 describe("output recipe", () => {
@@ -30,7 +33,7 @@ describe("output recipe", () => {
     ).toBe("D:\\Renders\\plate_corridorkey_exr");
     expect(
       suggestOutputPathForRecipe("C:\\Shots\\plate.png", null, "D:\\Renders", pngRecipe)
-    ).toBe("D:\\Renders\\plate_corridorkey_png");
+    ).toBe("D:\\Renders\\plate_corridorkey_exr");
   });
 
   test("treats selected source folders as sequence-capable inputs", () => {
@@ -40,7 +43,7 @@ describe("output recipe", () => {
     ])).toEqual([
       ["movie", false],
       ["exr_sequence", true],
-      ["png_sequence", true],
+      ["png_sequence", false],
       ["preview_only", false]
     ]);
 
@@ -51,7 +54,7 @@ describe("output recipe", () => {
         "D:\\Renders",
         DEFAULT_OUTPUT_RECIPE
       )
-    ).toBe("D:\\Renders\\JordanSequence_corridorkey_png");
+    ).toBe("D:\\Renders\\JordanSequence_corridorkey_exr");
   });
 
   test("uses native folder selection context for dotted project folder names", () => {
@@ -64,7 +67,7 @@ describe("output recipe", () => {
     ])).toEqual([
       ["movie", false],
       ["exr_sequence", true],
-      ["png_sequence", true],
+      ["png_sequence", false],
       ["preview_only", false]
     ]);
     expect(
@@ -75,7 +78,7 @@ describe("output recipe", () => {
         DEFAULT_OUTPUT_RECIPE,
         selectedAsFolder
       )
-    ).toBe("D:\\Renders\\Project.v001_corridorkey_png");
+    ).toBe("D:\\Renders\\Project.v001_corridorkey_exr");
   });
 
   test("reports artifact availability from the selected source", () => {
@@ -95,9 +98,55 @@ describe("output recipe", () => {
     ])).toEqual([
       ["movie", false],
       ["exr_sequence", true],
-      ["png_sequence", true],
+      ["png_sequence", false],
       ["preview_only", false]
     ]);
+  });
+
+  test("uses runtime capabilities to reopen future output families", () => {
+    const expandedCapabilities: RuntimeOutputRecipeCapabilities = {
+      ...CURRENT_RUNTIME_OUTPUT_RECIPE_CAPABILITIES,
+      artifact_families: ["movie", "exr_sequence", "png_sequence", "preview_only"],
+      movie_alpha_modes: ["transparent", "composited_preview"],
+      replacement_media_output: true,
+      color_intents: ["runtime_default", "linear_srgb"]
+    };
+
+    expect(outputArtifactOptions("C:\\Shots\\plate.exr", {}, expandedCapabilities).map((option) => [
+      option.value,
+      option.enabled,
+      option.status
+    ])).toEqual([
+      ["movie", false, "needs_video_source"],
+      ["exr_sequence", true, "supported"],
+      ["png_sequence", true, "supported"],
+      ["preview_only", true, "supported"]
+    ]);
+
+    const controls = outputRecipeControlOptions(DEFAULT_OUTPUT_RECIPE, expandedCapabilities);
+
+    expect(controls.alphaModes.find((option) => option.value === "transparent")).toMatchObject({
+      enabled: true,
+      status: "supported"
+    });
+    expect(controls.previewBackgrounds.find((option) => option.value === "replacement_media")).toMatchObject({
+      enabled: true,
+      status: "preview_only"
+    });
+    expect(controls.colorIntents.find((option) => option.value === "linear_srgb")).toMatchObject({
+      enabled: true,
+      status: "supported"
+    });
+    expect(
+      suggestOutputPathForRecipe(
+        "C:\\Shots\\plate.png",
+        null,
+        "D:\\Renders",
+        normalizeOutputRecipe({ artifactFamily: "png_sequence" }),
+        {},
+        expandedCapabilities
+      )
+    ).toBe("D:\\Renders\\plate_corridorkey_png");
   });
 
   test("checks output path readiness per artifact family", () => {
@@ -120,7 +169,7 @@ describe("output recipe", () => {
     expect(outputRecipeLabel(recipe)).toBe("EXR sequence");
     expect(outputRecipeChips(recipe)).toEqual([
       "Output EXR sequence",
-      "Alpha Transparent",
+      "Alpha EXR bundle",
       "Preview Solid #111827",
       "Color Linear sRGB"
     ]);
@@ -134,5 +183,63 @@ describe("output recipe", () => {
 
     expect(recipe.replacementMediaPath).toBe("C:\\Shots\\clean_plate.mov");
     expect(outputRecipeChips(recipe)).toContain("Preview Replacement clean_plate.mov");
+  });
+
+  test("classifies recipe controls by the current runtime output contract", () => {
+    const controls = outputRecipeControlOptions(DEFAULT_OUTPUT_RECIPE);
+
+    expect(controls.alphaModes.map((option) => [
+      option.value,
+      option.enabled,
+      option.status
+    ])).toEqual([
+      ["transparent", false, "awaiting_runtime_contract"],
+      ["matte_only", false, "awaiting_runtime_contract"],
+      ["composited_preview", true, "supported"]
+    ]);
+    expect(controls.previewBackgrounds.find((option) => option.value === "replacement_media")).toMatchObject({
+      enabled: true,
+      status: "preview_only"
+    });
+    expect(controls.colorIntents.map((option) => [
+      option.value,
+      option.enabled,
+      option.status
+    ])).toEqual([
+      ["runtime_default", true, "supported"],
+      ["linear_srgb", false, "awaiting_runtime_contract"]
+    ]);
+  });
+
+  test("fails closed for partial runtime output contracts", () => {
+    const partialCapabilities: RuntimeOutputRecipeCapabilities = {
+      artifact_families: ["movie"]
+    };
+
+    expect(outputArtifactOptions("C:\\Shots\\plate.mov", {}, partialCapabilities).map((option) => [
+      option.value,
+      option.enabled,
+      option.status
+    ])).toEqual([
+      ["movie", true, "supported"],
+      ["exr_sequence", false, "awaiting_runtime_contract"],
+      ["png_sequence", false, "awaiting_runtime_contract"],
+      ["preview_only", false, "awaiting_runtime_contract"]
+    ]);
+
+    const controls = outputRecipeControlOptions(DEFAULT_OUTPUT_RECIPE, partialCapabilities);
+
+    expect(controls.alphaModes.every((option) => !option.enabled)).toBe(true);
+    expect(controls.previewBackgrounds.map((option) => [
+      option.value,
+      option.enabled,
+      option.status
+    ])).toEqual([
+      ["checkerboard", true, "preview_only"],
+      ["solid", true, "preview_only"],
+      ["transparent", true, "preview_only"],
+      ["replacement_media", true, "preview_only"]
+    ]);
+    expect(controls.colorIntents.every((option) => !option.enabled)).toBe(true);
   });
 });

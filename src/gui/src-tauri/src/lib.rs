@@ -2324,7 +2324,7 @@ mod tests {
             r#"@echo off
 set mode={mode}
 if "%1"=="info" (
-  echo {{"version":"test-runtime","devices":[{{"name":"RTX Test","memory_mb":8192,"backend":"tensorrt"}}],"capabilities":{{"tensorrt_rtx_available":true,"multi_gpu_available":false,"cpu_fallback_available":false}},"supported_tracks":["green","blue"]}}
+  echo {{"version":"test-runtime","devices":[{{"name":"RTX Test","memory_mb":8192,"backend":"tensorrt"}}],"capabilities":{{"tensorrt_rtx_available":true,"multi_gpu_available":false,"cpu_fallback_available":false,"output_recipe":{{"artifact_families":["movie","exr_sequence"],"movie_alpha_modes":["composited_preview"],"exr_sequence_outputs":["matte_exr","foreground_exr","processed_exr","comp_png"],"replacement_media_output":false,"color_intents":["runtime_default"]}}}},"supported_tracks":["green","blue"]}}
   exit /b 0
 )
 if "%1"=="doctor" if "%mode%"=="nonzero_doctor" (
@@ -2368,7 +2368,7 @@ exit /b 2
 mode="{mode}"
 case "$1" in
   info)
-    printf '%s\n' '{{"version":"test-runtime","devices":[{{"name":"RTX Test","memory_mb":8192,"backend":"tensorrt"}}],"capabilities":{{"tensorrt_rtx_available":true,"multi_gpu_available":false,"cpu_fallback_available":false}},"supported_tracks":["green","blue"]}}'
+    printf '%s\n' '{{"version":"test-runtime","devices":[{{"name":"RTX Test","memory_mb":8192,"backend":"tensorrt"}}],"capabilities":{{"tensorrt_rtx_available":true,"multi_gpu_available":false,"cpu_fallback_available":false,"output_recipe":{{"artifact_families":["movie","exr_sequence"],"movie_alpha_modes":["composited_preview"],"exr_sequence_outputs":["matte_exr","foreground_exr","processed_exr","comp_png"],"replacement_media_output":false,"color_intents":["runtime_default"]}}}},"supported_tracks":["green","blue"]}}'
     ;;
   doctor)
     if [ "$mode" = "nonzero_doctor" ]; then

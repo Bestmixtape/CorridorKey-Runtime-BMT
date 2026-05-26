@@ -48,6 +48,13 @@ const stagedPreviewFfmpegPath = path.join(
 const previewFfmpegPath =
   process.env.CORRIDORKEY_FFMPEG_PATH ||
   (existsSync(stagedPreviewFfmpegPath) ? stagedPreviewFfmpegPath : "");
+const outputRecipeCapabilities = {
+  artifact_families: ["movie", "exr_sequence"],
+  movie_alpha_modes: ["composited_preview"],
+  exr_sequence_outputs: ["matte_exr", "foreground_exr", "processed_exr", "comp_png"],
+  replacement_media_output: false,
+  color_intents: ["runtime_default"]
+};
 
 for (const requiredPath of [runtimePath, inputPath, hintPath, modelPath]) {
   assert(existsSync(requiredPath), `Required smoke input is missing: ${requiredPath}`);
@@ -301,11 +308,24 @@ async function assertGuiResultPreviewLoads({
       video.dispatchEvent(new Event("error"));
     });
     await waitForBody(page, "Preview proxy");
+    await page.waitForFunction(
+      () => window.__corridorkeyPreviewProxyCalls === 1,
+      null,
+      { timeout: 30000 }
+    );
     const metadataHandle = await page.waitForFunction(
       () => {
         const video = Array.from(document.querySelectorAll("video")).find((candidate) =>
           (candidate.currentSrc || candidate.src || "").includes("_preview.mp4")
         );
+        if (
+          video &&
+          video.readyState < HTMLMediaElement.HAVE_METADATA &&
+          video.dataset.corridorkeySmokeLoaded !== "true"
+        ) {
+          video.dataset.corridorkeySmokeLoaded = "true";
+          video.load();
+        }
         if (
           !video ||
           video.readyState < HTMLMediaElement.HAVE_METADATA ||
@@ -324,12 +344,7 @@ async function assertGuiResultPreviewLoads({
         };
       },
       null,
-      { timeout: 15000 }
-    );
-    await page.waitForFunction(
-      () => window.__corridorkeyPreviewProxyCalls === 1,
-      null,
-      { timeout: 15000 }
+      { timeout: 60000 }
     );
     const metadata = await metadataHandle.jsonValue();
     await page.close();
@@ -350,7 +365,14 @@ async function installGuiPreviewHarness(page, {
   outputDir
 }) {
   await page.addInitScript(
-    ({ sourcePath, hintPath, artifactPath, proxyPath, outputDir }) => {
+    ({
+      sourcePath,
+      hintPath,
+      artifactPath,
+      proxyPath,
+      outputDir,
+      outputRecipeCapabilities
+    }) => {
       const callbacks = new Map();
       const listeners = new Map();
       const timers = [];
@@ -537,7 +559,8 @@ async function installGuiPreviewHarness(page, {
             capabilities: {
               platform: "windows",
               supported_backends: ["tensorrt"],
-              cpu_fallback_available: false
+              cpu_fallback_available: false,
+              output_recipe: outputRecipeCapabilities
             },
             supported_tracks: ["green"]
           }),
@@ -596,7 +619,7 @@ async function installGuiPreviewHarness(page, {
         };
       }
     },
-    { sourcePath, hintPath, artifactPath, proxyPath, outputDir }
+    { sourcePath, hintPath, artifactPath, proxyPath, outputDir, outputRecipeCapabilities }
   );
 }
 

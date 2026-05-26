@@ -50,11 +50,10 @@ import {
   type RuntimeResolution
 } from "@/lib/advancedSettings";
 import {
-  OUTPUT_ALPHA_OPTIONS,
-  OUTPUT_COLOR_OPTIONS,
-  PREVIEW_BACKGROUND_OPTIONS,
   isOutputPathReady,
   outputArtifactOptions,
+  preferredOutputArtifactFamily,
+  outputRecipeControlOptions,
   outputRecipeLabel,
   previewBackgroundStyle,
   suggestOutputPathForRecipe,
@@ -112,11 +111,22 @@ export function ProcessFlow() {
   const presetChoiceValues = presetChoices.map(presetOptionValue).filter(Boolean);
   const modelChoiceValues = modelChoices.map(modelOptionValue).filter(Boolean);
   const runtimeUsable = Boolean(readiness && readiness.status !== "error");
+  const runtimeOutputRecipeCapabilities = readiness?.info.ok
+    ? readiness.info.value?.capabilities?.output_recipe
+    : undefined;
   const sourceContext = useMemo(() => ({
     selectedAsFolder: inputSourceMode === "folder"
   }), [inputSourceMode]);
-  const artifactOptions = outputArtifactOptions(inputPath, sourceContext);
+  const artifactOptions = outputArtifactOptions(
+    inputPath,
+    sourceContext,
+    runtimeOutputRecipeCapabilities
+  );
   const artifactOption = artifactOptions.find((option) => option.value === outputRecipe.artifactFamily) ?? artifactOptions[0];
+  const recipeControls = useMemo(
+    () => outputRecipeControlOptions(outputRecipe, runtimeOutputRecipeCapabilities),
+    [outputRecipe, runtimeOutputRecipeCapabilities]
+  );
   const outputReady = isOutputPathReady(outputPath, outputRecipe);
   const hasRunnableSelection = Boolean(selectedPresetId || selectedModelId);
   const canStart = Boolean(inputPath && outputReady && runtimeUsable && hasRunnableSelection && artifactOption.enabled);
@@ -169,6 +179,36 @@ export function ProcessFlow() {
   ]);
 
   useEffect(() => {
+    const selectedAlpha = recipeControls.alphaModes.find((option) => option.value === outputRecipe.alphaMode);
+    if (selectedAlpha?.enabled) {
+      return;
+    }
+    const fallback = recipeControls.alphaModes.find((option) => option.enabled);
+    if (fallback) {
+      setOutputRecipeSetting("alphaMode", fallback.value);
+    }
+  }, [
+    outputRecipe.alphaMode,
+    recipeControls.alphaModes.map((option) => `${option.value}:${option.enabled}`).join("|"),
+    setOutputRecipeSetting
+  ]);
+
+  useEffect(() => {
+    const selectedColor = recipeControls.colorIntents.find((option) => option.value === outputRecipe.colorIntent);
+    if (selectedColor?.enabled) {
+      return;
+    }
+    const fallback = recipeControls.colorIntents.find((option) => option.enabled);
+    if (fallback) {
+      setOutputRecipeSetting("colorIntent", fallback.value);
+    }
+  }, [
+    outputRecipe.colorIntent,
+    recipeControls.colorIntents.map((option) => `${option.value}:${option.enabled}`).join("|"),
+    setOutputRecipeSetting
+  ]);
+
+  useEffect(() => {
     if (!inputPath || outputPath) {
       return;
     }
@@ -177,7 +217,8 @@ export function ProcessFlow() {
       null,
       defaultOutputDir,
       outputRecipe,
-      sourceContext
+      sourceContext,
+      runtimeOutputRecipeCapabilities
     );
     if (suggestedOutput) {
       setOutput(suggestedOutput);
@@ -188,6 +229,7 @@ export function ProcessFlow() {
     defaultOutputDir,
     outputRecipe,
     sourceContext,
+    runtimeOutputRecipeCapabilities,
     setOutput
   ]);
 
@@ -244,26 +286,25 @@ export function ProcessFlow() {
   const applySelectedInput = async (selected: string | null, mode: "file" | "folder") => {
     if (!selected) return;
 
-    const shouldUseMovie = mode === "file" && previewKindForPath(selected) === "video";
-    const nextRecipe = mode === "folder"
-      ? { ...outputRecipe, artifactFamily: "png_sequence" as const }
-      : shouldUseMovie
-        ? { ...outputRecipe, artifactFamily: "movie" as const }
-        : outputRecipe;
     const nextSourceContext = { selectedAsFolder: mode === "folder" };
+    const preferredArtifactFamily = preferredOutputArtifactFamily(
+      selected,
+      outputRecipe,
+      nextSourceContext,
+      runtimeOutputRecipeCapabilities
+    );
+    const nextRecipe = { ...outputRecipe, artifactFamily: preferredArtifactFamily };
     setInput(selected, mode);
-    if (mode === "folder" && outputRecipe.artifactFamily === "movie") {
-      setOutputRecipeSetting("artifactFamily", "png_sequence");
-    }
-    if (shouldUseMovie && outputRecipe.artifactFamily !== "movie") {
-      setOutputRecipeSetting("artifactFamily", "movie");
+    if (nextRecipe.artifactFamily !== outputRecipe.artifactFamily) {
+      setOutputRecipeSetting("artifactFamily", nextRecipe.artifactFamily);
     }
     const suggestedOutput = suggestOutputPathForRecipe(
       selected,
       null,
       defaultOutputDir,
       nextRecipe,
-      nextSourceContext
+      nextSourceContext,
+      runtimeOutputRecipeCapabilities
     );
     if (suggestedOutput) {
       setOutput(suggestedOutput);
@@ -295,7 +336,14 @@ export function ProcessFlow() {
   const handleSelectOutput = async () => {
     const defaultPath = outputReady
       ? outputPath || undefined
-      : suggestOutputPathForRecipe(inputPath, null, defaultOutputDir, outputRecipe, sourceContext) || undefined;
+      : suggestOutputPathForRecipe(
+          inputPath,
+          null,
+          defaultOutputDir,
+          outputRecipe,
+          sourceContext,
+          runtimeOutputRecipeCapabilities
+        ) || undefined;
     const selected = outputRecipe.artifactFamily === "movie"
       ? await save({
           defaultPath,
@@ -450,7 +498,7 @@ export function ProcessFlow() {
             <AdvancedSelect
               label="Alpha"
               value={outputRecipe.alphaMode}
-              options={OUTPUT_ALPHA_OPTIONS}
+              options={recipeControls.alphaModes}
               disabled={isProcessing}
               onChange={(value) => setOutputRecipeSetting("alphaMode", value as OutputAlphaMode)}
             />
@@ -458,7 +506,7 @@ export function ProcessFlow() {
             <AdvancedSelect
               label="Preview background"
               value={outputRecipe.previewBackground}
-              options={PREVIEW_BACKGROUND_OPTIONS}
+              options={recipeControls.previewBackgrounds}
               disabled={isProcessing}
               onChange={(value) => setOutputRecipeSetting("previewBackground", value as PreviewBackgroundMode)}
             />
@@ -511,7 +559,7 @@ export function ProcessFlow() {
             <AdvancedSelect
               label="Color intent"
               value={outputRecipe.colorIntent}
-              options={OUTPUT_COLOR_OPTIONS}
+              options={recipeControls.colorIntents}
               disabled={isProcessing}
               onChange={(value) => setOutputRecipeSetting("colorIntent", value as OutputColorIntent)}
             />
@@ -1593,7 +1641,7 @@ function AdvancedSelect({
 }: {
   label: string;
   value: string | number;
-  options: Array<{ value: string | number; label: string }>;
+  options: Array<{ value: string | number; label: string; enabled?: boolean; status?: string }>;
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
@@ -1607,13 +1655,23 @@ function AdvancedSelect({
         className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-100 outline-none transition-colors focus:border-brand disabled:opacity-50"
       >
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
+          <option key={option.value} value={option.value} disabled={option.enabled === false}>
+            {controlOptionLabel(option)}
           </option>
         ))}
       </select>
     </label>
   );
+}
+
+function controlOptionLabel(option: { label: string; status?: string }) {
+  if (option.status === "awaiting_runtime_contract") {
+    return `${option.label} (needs runtime support)`;
+  }
+  if (option.status === "preview_only") {
+    return `${option.label} (preview only)`;
+  }
+  return option.label;
 }
 
 function AdvancedNumber({
@@ -1725,7 +1783,7 @@ function modelOptionLabel(entry: RuntimeCatalogEntry): string {
 function artifactOptionStatusLabel(status: string): string {
   if (status === "needs_image_source") return "Image source";
   if (status === "needs_video_source") return "Video source";
-  if (status === "planned") return "Planned";
+  if (status === "awaiting_runtime_contract") return "Needs runtime support";
   return "Supported";
 }
 

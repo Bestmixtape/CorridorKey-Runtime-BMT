@@ -1337,6 +1337,14 @@ nlohmann::json to_json(const RuntimeCapabilities& capabilities) {
     json["default_video_encoder"] = capabilities.default_video_encoder;
     json["lossless_video_available"] = capabilities.lossless_video_available;
     json["lossless_video_unavailable_reason"] = capabilities.lossless_video_unavailable_reason;
+    json["output_recipe"] = {
+        {"artifact_families", nlohmann::json::array({"movie", "exr_sequence"})},
+        {"movie_alpha_modes", nlohmann::json::array({"composited_preview"})},
+        {"exr_sequence_outputs",
+         nlohmann::json::array({"matte_exr", "foreground_exr", "processed_exr", "comp_png"})},
+        {"replacement_media_output", false},
+        {"color_intents", nlohmann::json::array({"runtime_default"})},
+    };
 
     nlohmann::json backends = nlohmann::json::array();
     for (Backend backend : capabilities.supported_backends) {
