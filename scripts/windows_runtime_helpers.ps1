@@ -1339,6 +1339,10 @@ function Get-CorridorKeyWindowsRtxPromotedModelList {
     return @(Get-CorridorKeyPreparedModelList -Variant $Variant)
 }
 
+function Get-CorridorKeyWindowsRtxInstallableModelList {
+    return @(Get-CorridorKeyPreparedModelList -Variant all)
+}
+
 function Get-CorridorKeyIntermediateModelList {
     return @(
         "corridorkey_fp32_512.onnx",
@@ -1468,10 +1472,7 @@ function Get-CorridorKeyWindowsOfxReleaseVariants {
 }
 
 function Get-CorridorKeyPortableRuntimeTargetModels {
-    return @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_1024.onnx"
-    )
+    return @(Get-CorridorKeyWindowsRtxInstallableModelList)
 }
 
 function Get-CorridorKeyModelInventory {

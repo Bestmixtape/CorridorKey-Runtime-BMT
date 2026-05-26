@@ -54,7 +54,19 @@ foreach ($file in $rootFiles) {
     Copy-Item $file.FullName (Join-Path $tauriRuntimeDir $file.Name) -Force
 }
 
-foreach ($directoryName in @("models")) {
+$ffmpegCommand = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+if ($null -eq $ffmpegCommand) {
+    throw "ffmpeg.exe was not found on PATH. It is required for Tauri result preview proxies."
+}
+$ffmpegItem = Get-Item -LiteralPath $ffmpegCommand.Source -ErrorAction Stop
+$ffmpegSource = if ($ffmpegItem.LinkType -and $ffmpegItem.Target.Count -gt 0) {
+    $ffmpegItem.Target[0]
+} else {
+    $ffmpegItem.FullName
+}
+Copy-Item -LiteralPath $ffmpegSource (Join-Path $tauriRuntimeDir "ffmpeg.exe") -Force
+
+foreach ($directoryName in @("models", "torchtrt-runtime")) {
     $sourceDir = Join-Path $portableBundleDir $directoryName
     if (Test-Path $sourceDir) {
         Copy-Item $sourceDir (Join-Path $tauriRuntimeDir $directoryName) -Recurse -Force

@@ -792,6 +792,33 @@ std::vector<std::string> expected_packaged_models_for_platform(
     return expected_models;
 }
 
+bool includes_dynamic_blue_pack(const std::vector<std::string>& expected_models) {
+    return std::find(expected_models.begin(), expected_models.end(),
+                     "corridorkey_dynamic_blue_fp16.ts") != expected_models.end();
+}
+
+nlohmann::json inspect_blue_torchtrt_runtime(const std::filesystem::path& models_dir,
+                                             bool required) {
+    const auto runtime_bin = models_dir.parent_path() / "torchtrt-runtime" / "bin";
+    std::error_code error;
+    const bool directory_found = std::filesystem::exists(runtime_bin, error) && !error;
+    error.clear();
+    const bool torchtrt_found = std::filesystem::exists(runtime_bin / "torchtrt.dll", error) &&
+                                !error;
+    error.clear();
+    const bool wrapper_found =
+        std::filesystem::exists(runtime_bin / "corridorkey_torchtrt.dll", error) && !error;
+
+    nlohmann::json json;
+    json["required"] = required;
+    json["path"] = runtime_bin.string();
+    json["directory_found"] = directory_found;
+    json["torchtrt_dll_found"] = torchtrt_found;
+    json["corridorkey_torchtrt_dll_found"] = wrapper_found;
+    json["ready"] = !required || (torchtrt_found && wrapper_found);
+    return json;
+}
+
 BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_dir) {
     BundleLayoutInfo layout;
     if (executable_dir.filename() == "Win64" &&
@@ -998,6 +1025,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                                             layout.kind == "linux_ofx";
     const auto expected_packaged_models =
         expected_packaged_models_for_platform(models_dir, uses_windows_model_catalog);
+    const auto blue_runtime =
+        inspect_blue_torchtrt_runtime(models_dir, includes_dynamic_blue_pack(expected_packaged_models));
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_ready = !expected_packaged_models.empty();
@@ -1184,6 +1213,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["dependency_references"] = references;
     json["core_dependency_references"] = core_references;
     json["packaged_models"] = packaged_models;
+    json["blue_runtime"] = blue_runtime;
     json["signature"] = inspect_signature(executable_path);
     if (windows_plugin_layout) {
         const bool compiled_contexts_ready =
@@ -1192,7 +1222,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                 : !windows_rtx_bundle;
         json["healthy"] = packaged_layout_detected && packaged_models_ready &&
                           json["model_inventory_contract_complete"].get<bool>() &&
-                          compiled_contexts_ready && runtime_backend_bundle_ready;
+                          compiled_contexts_ready && runtime_backend_bundle_ready &&
+                          blue_runtime["ready"].get<bool>();
     } else if (linux_ofx_layout) {
         // Linux RTX bundle uses ONNX Runtime CUDA EP loading .onnx models
         // directly. There are no precompiled TensorRT contexts to validate
@@ -1569,6 +1600,8 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
     const auto expected_windows_models = expected_packaged_models_for_platform(models_dir, true);
+    const auto blue_runtime =
+        inspect_blue_torchtrt_runtime(models_dir, includes_dynamic_blue_pack(expected_windows_models));
     bool packaged_models_ready = !expected_windows_models.empty();
     bool any_packaged_model_found = false;
     std::error_code error;
@@ -1635,6 +1668,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
             : false;
     json["model_inventory_contract_complete"] = inventory_contract_complete;
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
+    json["blue_runtime"] = blue_runtime;
 
     auto preferred_probe = preferred_windows_probe(probes);
     if (preferred_probe.has_value()) {
@@ -1668,7 +1702,8 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     bool inventory_contract_ok = json.value("model_inventory_contract_complete", true);
     bool compiled_contexts_ok = compiled_contexts_ready;
 
-    json["healthy"] = backend_ok && models_ok && inventory_contract_ok && compiled_contexts_ok;
+    json["healthy"] = backend_ok && models_ok && inventory_contract_ok && compiled_contexts_ok &&
+                      blue_runtime["ready"].get<bool>();
 #endif
 
     return json;

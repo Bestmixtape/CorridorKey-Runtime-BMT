@@ -182,6 +182,21 @@ TEST_CASE("model catalog marks validated macOS entries", "[unit][runtime]") {
     REQUIRE(fp16_768 != models.end());
     REQUIRE_FALSE(fp16_768->packaged_for_windows);
     REQUIRE(fp16_768->intended_use == "reference_validation");
+
+    auto blue_dynamic = find_model("corridorkey_dynamic_blue_fp16.ts");
+    REQUIRE(blue_dynamic != models.end());
+
+    auto fp32_1024 = find_model("corridorkey_fp32_1024.onnx");
+    REQUIRE(fp32_1024 != models.end());
+
+    REQUIRE(to_json(*fp16_1024)["installable_model_pack"].get<bool>());
+    REQUIRE(to_json(*blue_dynamic)["installable_model_pack"].get<bool>());
+    REQUIRE_FALSE(to_json(*fp16_768)["installable_model_pack"].get<bool>());
+    REQUIRE_FALSE(to_json(*fp32_1024)["installable_model_pack"].get<bool>());
+    REQUIRE(to_json(*fp16_1024)["download_url"].get<std::string>().find("/onnx/fp16/") !=
+            std::string::npos);
+    REQUIRE(to_json(*blue_dynamic)["download_url"].get<std::string>().find(
+                "/torchtrt/dynamic-blue/") != std::string::npos);
 }
 
 TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
@@ -193,6 +208,8 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     event.message = "Generic CPU";
     event.fallback = BackendFallbackInfo{Backend::CoreML, Backend::CPU, "CoreML session failed"};
     event.timings.push_back(StageTiming{"ort_run", 12.5, 1, 3});
+    event.metrics["render_fps"] = 18.5;
+    event.metrics["processed_frames"] = 12;
 
     auto json = to_json(event);
 
@@ -205,6 +222,8 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     REQUIRE(json["timings"][0]["total_ms"] == Catch::Approx(12.5));
     REQUIRE(json["timings"][0]["avg_ms"] == Catch::Approx(12.5));
     REQUIRE(json["timings"][0]["ms_per_unit"] == Catch::Approx(12.5 / 3.0));
+    REQUIRE(json["metrics"]["render_fps"] == Catch::Approx(18.5));
+    REQUIRE(json["metrics"]["processed_frames"] == 12);
 }
 
 TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {

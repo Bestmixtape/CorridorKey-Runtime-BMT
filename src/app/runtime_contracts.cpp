@@ -307,6 +307,21 @@ Result<std::pair<int, bool>> search_resolution_for_request(
     return std::pair<int, bool>{*coarse_resolution, true};
 }
 
+std::string model_download_url(const std::string& variant, const std::string& filename,
+                               const std::string& artifact_family) {
+    const std::string base_url =
+        "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/";
+
+    if (artifact_family == "onnx" && variant == "fp16") {
+        return base_url + "onnx/fp16/" + filename;
+    }
+    if (artifact_family == "torchscript" && variant == "dynamic-blue") {
+        return base_url + "torchtrt/dynamic-blue/" + filename;
+    }
+
+    return "https://huggingface.co/corridorkey/models/resolve/main/" + filename;
+}
+
 ModelCatalogEntry make_model_entry(
     const std::string& variant, int resolution, const std::string& filename,
     const std::string& artifact_family, const std::string& recommended_backend,
@@ -321,7 +336,7 @@ ModelCatalogEntry make_model_entry(
     entry.artifact_family = artifact_family;
     entry.recommended_backend = recommended_backend;
     entry.description = description;
-    entry.download_url = "https://huggingface.co/corridorkey/models/resolve/main/" + entry.filename;
+    entry.download_url = model_download_url(variant, filename, artifact_family);
     entry.intended_use = intended_use;
     entry.validated_for_macos = validated_for_macos;
     entry.packaged_for_macos = packaged_for_macos;
@@ -1373,6 +1388,9 @@ nlohmann::json to_json(const JobEvent& event) {
         }
         json["timings"] = timings;
     }
+    if (!event.metrics.empty()) {
+        json["metrics"] = event.metrics;
+    }
     return json;
 }
 
@@ -1389,6 +1407,7 @@ nlohmann::json to_json(const ModelCatalogEntry& model) {
     json["validated_for_macos"] = model.validated_for_macos;
     json["packaged_for_macos"] = model.packaged_for_macos;
     json["packaged_for_windows"] = model.packaged_for_windows;
+    json["installable_model_pack"] = model.packaged_for_macos || model.packaged_for_windows;
     json["validated_platforms"] = model.validated_platforms;
     json["intended_platforms"] = model.intended_platforms;
     json["validated_hardware_tiers"] = model.validated_hardware_tiers;

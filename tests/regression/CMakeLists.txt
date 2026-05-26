@@ -120,4 +120,11 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_build_label_reference.ps1
     )
     set_tests_properties(regression_windows_build_label_reference PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_runtime_product_contract
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_runtime_product_contract.ps1
+    )
+    set_tests_properties(regression_windows_runtime_product_contract PROPERTIES LABELS "regression")
 endif()
