@@ -1,6 +1,6 @@
 # Spec `0005`: Build Unified Windows Installer
 
-**Status:** draft
+**Status:** accepted
 **Created:** 2026-05-26
 **Owner:** Runtime maintainers
 
@@ -119,17 +119,43 @@ the better fit for multi-surface component selection.
 
 ## Open Questions
 
-- Should the suite installer be a new `scripts/windows.ps1` task or an
-  extension of an existing package task?
-- What exact shared runtime/model root should be canonical for suite installs?
-- Which payloads are embedded in the offline installer and which remain
-  downloaded by the online flavor?
-- How should component deselection handle host plugins that depend on a shared
-  runtime root still used by another selected surface?
-- Which install smoke tests are required before a suite installer can ship?
+- None for the first suite-installer implementation slice.
+
+### Resolved Decisions
+
+- Wrapper shape: the suite installer is a new `scripts/windows.ps1` task. It
+  does not overload `package-ofx`, `package-adobe`, or `package-runtime`,
+  because those remain standalone support and release surfaces.
+- Installer shell: the suite installer uses the existing Inno Setup packaging
+  family. Tauri/NSIS remains the standalone GUI app installer.
+- Shared runtime root: suite installs use one shared product root under
+  `{autopf}\CorridorKey\Runtime` for CLI/runtime binaries and
+  `Contents\Resources`. Host destinations receive only the surface payload
+  needed for host discovery plus configuration that points to that shared root.
+- Shared model/runtime payloads: Green installs the manifest `green-models`
+  pack into `Contents\Resources\models`; Blue installs `blue-models` into
+  `Contents\Resources\models` and `blue-runtime` into
+  `Contents\Resources\torchtrt-runtime\bin`. The suite model list is the
+  Windows RTX product contract, not the maintainer reference catalog.
+- Online payloads: online suite installers embed the thin host and GUI payloads
+  and download selected model/runtime packs from the distribution manifest with
+  checksum verification.
+- Offline payloads: offline suite installers bundle every distribution-manifest
+  pack and expose the same Green, Blue, and Green plus Blue component choices
+  as the online flavor. The bundled bytes stay in the installer; the selected
+  components decide what is installed.
+- Deselection: removing a host surface removes that host payload only. Removing
+  a model pack removes shared pack files and pack markers only when no selected
+  remaining surface requires the pack. The suite must write an installed
+  inventory for repair, diagnostics, and clean reinstall decisions.
+- Release smoke scope: a suite installer cannot ship until generated installer
+  regression tests, package validation, CLI/runtime smoke, GUI launch smoke,
+  OFX discovery smoke, Nuke discovery smoke, and Adobe MediaCore smoke cover
+  the selected surfaces.
 
 ## Related
 
 - ADRs: none yet
-- Tasks: `doc/tasks/0028-plan-unified-windows-installer.md`
+- Tasks: `doc/tasks/0028-plan-unified-windows-installer.md`,
+  `doc/tasks/0037-implement-windows-suite-installer-scaffold.md`
 - Supersedes / Depends on: depends on `doc/specs/0003-useful-tauri-gui.md`
