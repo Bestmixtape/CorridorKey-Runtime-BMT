@@ -6,12 +6,20 @@ export interface PreviewProxy {
   reused: boolean;
 }
 
-export async function createPreviewProxy(source: string): Promise<PreviewProxy> {
-  return await invoke<PreviewProxy>("create_preview_proxy", { source });
+export type SourceAssetSelectionMode = "file" | "folder";
+
+export async function selectSourceAsset(
+  mode: SourceAssetSelectionMode
+): Promise<string | null> {
+  return await invoke<string | null>("select_source_asset", { mode });
 }
 
-export async function allowPreviewAsset(path: string): Promise<void> {
-  await invoke("allow_preview_asset", { path });
+export async function selectAlphaHintAsset(): Promise<string | null> {
+  return await invoke<string | null>("select_alpha_hint_asset");
+}
+
+export async function createPreviewProxy(source: string): Promise<PreviewProxy> {
+  return await invoke<PreviewProxy>("create_preview_proxy", { source });
 }
 
 export function formatPreviewError(error: unknown): string {

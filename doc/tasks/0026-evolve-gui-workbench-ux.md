@@ -52,7 +52,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       runtime supports it), alpha/composite behavior, preview background
       (checkerboard, solid color, transparent preview, replacement media), and
       color-management intent without hiding the simple default path.
-- [ ] Source, Alpha Hint, and Result previews stay synchronized by shared
+- [x] Source, Alpha Hint, and Result previews stay synchronized by shared
       timeline state whenever their media durations or frame rates allow it;
       desynchronization is visible and recoverable instead of silent.
 - [x] Comparison split geometry is correct for vertical, horizontal, and
@@ -76,7 +76,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] Hardware and diagnostics tabs report actionable runtime state from
       `info`, `doctor`, `models`, and `presets` without misleading empty or
       platform-incompatible model-pack messages.
-- [ ] A Runtime Commands or diagnostics command center exposes GUI-backed
+- [x] A Runtime Commands or diagnostics command center exposes GUI-backed
       equivalents for user-safe runtime commands: `info`, `doctor`, `models`,
       `presets`, `check-update`, the active `process` request summary, and
       any supported benchmark/dry-run diagnostics. Maintainer-only or
@@ -123,7 +123,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [ ] Implement A/B comparison controls with draggable split geometry,
       orientation presets, diagonal angle, overlay opacity, and disabled states
       when a requested buffer has no media.
-- [ ] Build progressive workflow panels: default controls first, then advanced
+- [x] Build progressive workflow panels: default controls first, then advanced
       Matte, Despill, Output, Runtime, and Diagnostics groups that mirror the
       OFX/Adobe parameter vocabulary.
 - [ ] Build the output recipe slice: final format selection, alpha/composite
@@ -157,7 +157,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [ ] Rework Hardware, Settings, Support, and History surfaces in
       `src/gui/src/App.tsx` so each tab shows only trustworthy runtime-backed
       state and no stale placeholder content.
-- [ ] Add a Runtime Commands surface that runs or refreshes the safe runtime
+- [x] Add a Runtime Commands surface that runs or refreshes the safe runtime
       command contract through Tauri commands, renders structured results,
       copies JSON/user summaries, and explains disabled/gated commands without
       exposing arbitrary shell execution.
@@ -409,6 +409,58 @@ and verifies the visible telemetry chips and copied metrics. Verification
 passed: `pnpm test` with 10 unit files and 36 tests plus build, readiness smoke,
 and fake-job E2E; `.\scripts\windows.ps1 -Task build -Preset debug`; and
 `.\build\debug\tests\unit\test_unit.exe "job events serialize to stable NDJSON payloads"`.
+
+### 2026-05-26
+
+Continued TDD from the fresh-context review findings. RED added
+`preview.test.ts` to prove the frontend can only request previewable assets
+through native source, folder, alpha-hint, and proxy interfaces; GREEN removed
+the public arbitrary `allow_preview_asset` invoke path and moved asset-scope
+permissioning behind selected Source, selected Alpha Hint, runtime artifacts,
+and generated preview proxies. Rust regression coverage now rejects preview
+assets that were not registered through those native flows.
+
+The same slice added source-folder selection, alpha-hint clear/status, grouped
+advanced panels, replacement-media preview recipe selection, an executable
+GUI `check-update` action, a copyable active `process` request summary, and
+explicitly disabled benchmark/download/compile-context rows where product
+policy or safety does not allow GUI execution yet. Windows runtime staging now
+uses packaged `ffmpeg.exe` or explicit `CORRIDORKEY_FFMPEG_PATH` only, so the
+Tauri preview pipeline no longer silently depends on whatever `ffmpeg` happens
+to be first on PATH. Preview proxy cache keys now hash bounded source samples
+instead of reading entire large media files.
+
+Verification passed: `pnpm test:unit`, `pnpm build`, `pnpm test:e2e`,
+`pnpm test`, `cargo test preview_`, full `cargo test` in
+`src/gui/src-tauri`, `tests/regression/test_tauri_runtime_staging_ffmpeg_source.ps1`,
+`scripts/windows.ps1 -Task build -Preset debug`, and
+`ctest --test-dir build\debug -R regression_tauri_runtime_staging_ffmpeg_source --output-on-failure`.
+
+### 2026-05-26
+
+Fresh-context agent review of the GUI workbench TDD slice found two blockers:
+`create_preview_proxy` still accepted a renderer-supplied source path before
+checking the preview asset scope, and source folders were still being treated
+as movie-capable paths in the output recipe. TDD fixes added Rust coverage for
+unregistered preview proxy sources, removed the runtime preview fallback to a
+bare PATH `ffmpeg.exe`, validated/probed staged `ffmpeg.exe`, made selected
+folders sequence-capable, and persisted the native `file` or `folder` source
+selection mode so dotted project folders such as `Project.v001` remain folder
+workflows instead of being inferred as files.
+
+The review concerns for process summaries and FFmpeg staging were also fixed:
+the Runtime Commands `process` summary now includes input source mode, alpha
+hint, output recipe, and advanced process settings; Tauri runtime staging now
+accepts only a probed `ffmpeg.exe` from the portable bundle or
+`CORRIDORKEY_FFMPEG_PATH`. Agent rereview reported no Standards findings and
+no remaining Spec finding for the source-folder fix. Remaining product notes
+stay tracked in the task for later slices, including visible desync recovery
+and replacement-media preview rendering.
+
+Verification passed after review fixes: `pnpm test` with 44 unit tests plus
+build, readiness smoke, and fake-job E2E; full `cargo test` with 28 tests in
+`src/gui/src-tauri`; `tests/regression/test_tauri_runtime_staging_ffmpeg_source.ps1`;
+and `git diff --check` with CRLF normalization warnings only.
 
 ## Definition of Done
 

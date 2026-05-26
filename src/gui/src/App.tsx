@@ -4,6 +4,7 @@ import { TopBar } from "./components/layout/topbar";
 import { ProcessFlow } from "./components/workflow/ProcessFlow";
 import { useEngineStore } from "./lib/store";
 import { useJobStore } from "./lib/job";
+import { checkRuntimeUpdate, type RuntimeCommandResult } from "./lib/engine";
 import {
   runtimeCommandCenterRows,
   runtimeCommandCopyText,
@@ -43,10 +44,19 @@ function App() {
     videoEncodeMode,
     setVideoEncodeMode,
     advancedSettings,
+    outputRecipe,
+    inputPath,
+    inputSourceMode,
+    outputPath,
+    hintPath,
+    selectedPresetId,
+    selectedModelId,
     initDefaults
   } = useJobStore();
   const [activeTab, setActiveTab] = useState("Workflow");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [updateResult, setUpdateResult] = useState<RuntimeCommandResult | undefined>();
+  const [updateChecking, setUpdateChecking] = useState(false);
 
   useEffect(() => {
     refreshInfo();
@@ -132,7 +142,20 @@ function App() {
         const missingModels = getMissingModels();
         const supportedTracks = getSupportedTracks();
         const doctorSummary = getDoctorSummary();
-        const commandRows = runtimeCommandCenterRows(readiness);
+        const commandRows = runtimeCommandCenterRows(readiness, {
+          updateResult,
+          processRequest: {
+            input: inputPath,
+            inputSourceMode,
+            output: outputPath,
+            hint: hintPath,
+            preset: selectedPresetId,
+            model: selectedModelId,
+            videoEncode: videoEncodeMode,
+            outputRecipe,
+            advancedSettings
+          }
+        });
         const backendSupported = (backend: string, legacyValue?: boolean): boolean | undefined => {
           if (legacyValue !== undefined) {
             return legacyValue;
@@ -217,7 +240,19 @@ function App() {
               <DiagnosticPanel title="Runtime Commands">
                 <div className="space-y-2">
                   {commandRows.map((row) => (
-                    <RuntimeCommandRow key={row.command} row={row} />
+                    <RuntimeCommandRow
+                      key={row.command}
+                      row={row}
+                      busy={row.command === "check-update" && updateChecking}
+                      onRun={row.command === "check-update" && readiness?.runtime_path ? async () => {
+                        setUpdateChecking(true);
+                        try {
+                          setUpdateResult(await checkRuntimeUpdate());
+                        } finally {
+                          setUpdateChecking(false);
+                        }
+                      } : undefined}
+                    />
                   ))}
                 </div>
               </DiagnosticPanel>
@@ -408,7 +443,15 @@ function DiagnosticPanel({ title, children }: DiagnosticPanelProps) {
   );
 }
 
-function RuntimeCommandRow({ row }: { row: RuntimeCommandCenterRow }) {
+function RuntimeCommandRow({
+  row,
+  busy = false,
+  onRun
+}: {
+  row: RuntimeCommandCenterRow;
+  busy?: boolean;
+  onRun?: () => Promise<void>;
+}) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const stateClass = row.state === "ok"
     ? "text-brand"
@@ -452,16 +495,29 @@ function RuntimeCommandRow({ row }: { row: RuntimeCommandCenterRow }) {
       <div className="mt-2 text-xs leading-relaxed text-zinc-500">
         {row.description}
       </div>
-      {canCopy && (
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="mt-2 flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand"
-        >
-          <Copy className="h-3 w-3" />
-          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy Failed" : `Copy ${row.label} JSON`}
-        </button>
-      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {onRun && (
+          <button
+            type="button"
+            onClick={() => void onRun()}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-wait disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${busy ? "animate-spin" : ""}`} />
+            {busy ? "Checking" : "Run"}
+          </button>
+        )}
+        {canCopy && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand"
+          >
+            <Copy className="h-3 w-3" />
+            {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy Failed" : `Copy ${row.label} JSON`}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

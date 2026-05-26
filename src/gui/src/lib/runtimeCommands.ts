@@ -1,7 +1,9 @@
 import type { RuntimeCommandResult, RuntimeReadiness } from "@/lib/engine";
+import type { AdvancedProcessingSettings } from "@/lib/advancedSettings";
+import type { OutputRecipeSettings } from "@/lib/outputRecipe";
 
 export type RuntimeCommandPolicy = "safe" | "gated";
-export type RuntimeCommandState = "ok" | "error" | "planned" | "disabled";
+export type RuntimeCommandState = "ok" | "error" | "disabled";
 
 export interface RuntimeCommandCenterRow {
   command: string;
@@ -12,8 +14,26 @@ export interface RuntimeCommandCenterRow {
   result?: RuntimeCommandResult;
 }
 
+export interface RuntimeProcessRequestSummary {
+  input: string | null;
+  inputSourceMode: "file" | "folder" | null;
+  output: string | null;
+  hint: string | null;
+  preset: string | null;
+  model: string | null;
+  videoEncode: "lossless" | "balanced";
+  outputRecipe: OutputRecipeSettings;
+  advancedSettings: AdvancedProcessingSettings;
+}
+
+export interface RuntimeCommandCenterContext {
+  updateResult?: RuntimeCommandResult;
+  processRequest?: RuntimeProcessRequestSummary;
+}
+
 export function runtimeCommandCenterRows(
-  readiness: RuntimeReadiness | null
+  readiness: RuntimeReadiness | null,
+  context: RuntimeCommandCenterContext = {}
 ): RuntimeCommandCenterRow[] {
   const probedCommands: Array<[string, string, string, RuntimeCommandResult | undefined]> = [
     ["info", "System Info", "Runtime version, devices, platform, and backend capabilities.", readiness?.info],
@@ -34,23 +54,29 @@ export function runtimeCommandCenterRows(
     {
       command: "check-update",
       label: "Check Update",
-      description: "Release availability check is planned for a future GUI action.",
+      description: context.updateResult
+        ? "Latest release check returned by the packaged runtime."
+        : "Release availability check is available from the GUI action when explicitly requested.",
       policy: "safe",
-      state: "planned"
+      state: context.updateResult
+        ? commandState(context.updateResult)
+        : readiness?.runtime_path ? "ok" : "disabled",
+      result: context.updateResult
     },
     {
       command: "process",
       label: "Process",
-      description: "Current job state is shown in Workflow; command-center request replay is planned.",
+      description: "Current Workflow request summary; execution remains owned by the Workflow run controls.",
       policy: "safe",
-      state: readiness?.status === "error" ? "disabled" : "planned"
+      state: readiness?.status === "error" ? "disabled" : "ok",
+      result: processSummaryResult(readiness, context.processRequest)
     },
     {
       command: "benchmark",
       label: "Benchmark",
-      description: "Diagnostics-only throughput action is planned once product policy defines limits.",
+      description: "Runtime benchmark can execute heavy media/model work, so it stays disabled until a bounded dry-run policy is selected.",
       policy: "safe",
-      state: readiness?.runtime_path ? "planned" : "disabled"
+      state: "disabled"
     },
     {
       command: "download",
@@ -67,6 +93,26 @@ export function runtimeCommandCenterRows(
       state: "disabled"
     }
   ];
+}
+
+function processSummaryResult(
+  readiness: RuntimeReadiness | null,
+  processRequest: RuntimeProcessRequestSummary | undefined
+): RuntimeCommandResult | undefined {
+  if (!readiness || readiness.status === "error") {
+    return undefined;
+  }
+
+  return {
+    command: "process",
+    ok: true,
+    value: {
+      runtime_path: readiness.runtime_path,
+      request: processRequest ?? null,
+      owner: "Workflow"
+    },
+    error: null
+  };
 }
 
 export function runtimeCommandCopyText(row: RuntimeCommandCenterRow | undefined): string {

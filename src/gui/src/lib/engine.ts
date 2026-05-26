@@ -109,6 +109,10 @@ export async function getRuntimeReadiness(): Promise<RuntimeReadiness> {
   return await invoke<RuntimeReadiness>("get_runtime_readiness");
 }
 
+export async function checkRuntimeUpdate(): Promise<RuntimeCommandResult> {
+  return await invoke<RuntimeCommandResult>("check_runtime_update");
+}
+
 export async function getEngineInfo(): Promise<SystemInfo> {
   const readiness = await getRuntimeReadiness();
   if (readiness.info.ok && readiness.info.value) {

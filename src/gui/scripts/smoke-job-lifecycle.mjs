@@ -15,6 +15,8 @@ const guiRoot = path.resolve(scriptDir, "..");
 const distRoot = path.join(guiRoot, "dist");
 const downloadsPath = "C:\\Users\\Smoke\\Downloads";
 const inputPath = "C:\\Smoke\\input.mov";
+const sourceFolderPath = "C:\\Smoke\\sequence";
+const hintPath = "C:\\Smoke\\alpha_hint.mov";
 const outputPath = "C:\\Smoke\\output.mov";
 const artifactPath = "C:\\Smoke\\output_keyed.mov";
 
@@ -22,7 +24,9 @@ const scenarios = [
   {
     name: "success",
     run: async (page) => {
+      await selectSourceFolder(page);
       await selectInput(page);
+      await assertAlphaHintSelectionAndClear(page);
       await configureOutputRecipe(page);
       await configureAdvancedControls(page);
       await page.getByRole("button", { name: /Run Neural Keyer/i }).click();
@@ -146,13 +150,15 @@ async function runScenario(context, baseUrl, scenario) {
   });
 
   await page.addInitScript(
-    ({ scenarioName, downloadsPath, inputPath, outputPath, artifactPath }) => {
+    ({ scenarioName, downloadsPath, inputPath, sourceFolderPath, hintPath, outputPath, artifactPath }) => {
       const callbacks = new Map();
       const listeners = new Map();
       const timers = [];
       let nextCallbackId = 1;
       window.__corridorkeyPreviewProxyCalls = 0;
       window.__corridorkeyLastProcessArgs = null;
+      window.__corridorkeySourceSelectionModes = [];
+      window.__corridorkeyHintSelections = 0;
       window.__corridorkeyClipboard = "";
       window.__corridorkeyRevealCalls = 0;
 
@@ -371,8 +377,14 @@ async function runScenario(context, baseUrl, scenario) {
             });
           }
 
-          if (command === "allow_preview_asset") {
-            return Promise.resolve(null);
+          if (command === "select_source_asset") {
+            window.__corridorkeySourceSelectionModes.push(args.mode);
+            return Promise.resolve(args.mode === "folder" ? sourceFolderPath : inputPath);
+          }
+
+          if (command === "select_alpha_hint_asset") {
+            window.__corridorkeyHintSelections += 1;
+            return Promise.resolve(hintPath);
           }
 
           if (command === "reveal_in_folder") {
@@ -481,7 +493,7 @@ async function runScenario(context, baseUrl, scenario) {
         };
       }
     },
-    { scenarioName: scenario.name, downloadsPath, inputPath, outputPath, artifactPath }
+    { scenarioName: scenario.name, downloadsPath, inputPath, sourceFolderPath, hintPath, outputPath, artifactPath }
   );
 
   try {
@@ -505,10 +517,28 @@ async function runScenario(context, baseUrl, scenario) {
 }
 
 async function selectInput(page) {
-  await waitForBody(page, "Select footage");
-  await page.getByRole("button", { name: /1\. Source.*Select footage/i }).click();
+  await page.getByRole("button", { name: /1\. Source/i }).click();
   await waitForBody(page, "input.mov");
   await waitForBody(page, "input_corridorkey.mov");
+  await page.waitForFunction(() => window.__corridorkeySourceSelectionModes.includes("file"));
+}
+
+async function selectSourceFolder(page) {
+  await page.getByRole("button", { name: /Select sequence or project folder/i }).click();
+  await waitForBody(page, "sequence");
+  await waitForBody(page, "sequence_corridorkey_png");
+  await page.waitForFunction(() => window.__corridorkeySourceSelectionModes.includes("folder"));
+}
+
+async function assertAlphaHintSelectionAndClear(page) {
+  await waitForBody(page, "Runtime fallback");
+  await page.getByRole("button", { name: /2\. Alpha Hint.*Select alpha hint/i }).click();
+  await waitForBody(page, "alpha_hint.mov");
+  await waitForBody(page, "External hint");
+  await page.waitForFunction(() => window.__corridorkeyHintSelections === 1);
+  await page.getByRole("button", { name: /Clear Alpha Hint/i }).click();
+  await waitForBody(page, "Runtime fallback");
+  await expectBodyMissing(page, "alpha_hint.mov");
 }
 
 async function configureOutputRecipe(page) {
@@ -516,6 +546,10 @@ async function configureOutputRecipe(page) {
   await waitForBody(page, "Movie");
   await waitForBody(page, "EXR sequence");
   await page.getByLabel("Alpha").selectOption("matte_only");
+  await page.getByLabel("Preview background").selectOption("replacement_media");
+  await waitForBody(page, "No replacement media selected");
+  await page.getByRole("button", { name: /Select replacement media/i }).click();
+  await waitForBody(page, "Replacement media selected");
   await page.getByLabel("Preview background").selectOption("solid");
   await page.getByLabel("Color intent").selectOption("linear_srgb");
   await waitForBody(page, "Preview color");
@@ -524,6 +558,13 @@ async function configureOutputRecipe(page) {
 async function configureAdvancedControls(page) {
   await page.getByRole("button", { name: /^balanced$/i }).click();
   await page.getByRole("button", { name: /Advanced controls/i }).click();
+  await waitForBody(page, "Screen color");
+  await waitForBody(page, "Quality");
+  await waitForBody(page, "Alpha hint");
+  await waitForBody(page, "Despill");
+  await waitForBody(page, "Output mode");
+  await waitForBody(page, "Tiling and refinement");
+  await waitForBody(page, "Runtime diagnostics");
   await page.getByLabel("Quality fallback").selectOption("coarse_to_fine");
   await page.getByLabel("Refinement mode").selectOption("tiled");
   await page.getByLabel("Precision").selectOption("fp16");

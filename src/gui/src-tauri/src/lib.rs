@@ -1,10 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashSet};
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{
@@ -14,6 +14,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_dialog::DialogExt;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -21,6 +22,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RUNTIME_PATH_ENV: &str = "CORRIDORKEY_GUI_RUNTIME_PATH";
+const PREVIEW_SOURCE_SAMPLE_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +78,13 @@ struct PreviewProxy {
     reused: bool,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SourceAssetSelectionMode {
+    File,
+    Folder,
+}
+
 struct EnginePathResolution {
     path: Option<PathBuf>,
     searched_roots: Vec<PathBuf>,
@@ -92,6 +101,11 @@ struct ActiveJob {
 #[derive(Default)]
 struct JobProcessState {
     inner: Mutex<JobProcessStateInner>,
+}
+
+#[derive(Default)]
+struct PreviewAssetScope {
+    allowed_paths: Mutex<HashSet<PathBuf>>,
 }
 
 impl Drop for JobProcessState {
@@ -141,6 +155,93 @@ fn path_to_string(path: &Path) -> String {
     path.display().to_string()
 }
 
+fn canonical_preview_path(path: &Path) -> Result<PathBuf, RuntimeCommandError> {
+    if !path.is_file() {
+        return Err(runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            "preview_asset_scope",
+            format!("Preview asset is missing: {}", path.display()),
+        ));
+    }
+
+    path.canonicalize().map_err(|error| {
+        runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            "preview_asset_scope",
+            format!(
+                "Could not resolve preview asset {}: {error}",
+                path.display()
+            ),
+        )
+    })
+}
+
+fn remember_preview_asset(
+    scope: &PreviewAssetScope,
+    path: &Path,
+) -> Result<PathBuf, RuntimeCommandError> {
+    let canonical = canonical_preview_path(path)?;
+    scope
+        .allowed_paths
+        .lock()
+        .expect("preview asset scope mutex poisoned")
+        .insert(canonical.clone());
+    Ok(canonical)
+}
+
+#[cfg(test)]
+fn is_preview_asset_allowed(scope: &PreviewAssetScope, path: &Path) -> bool {
+    registered_preview_asset_path(scope, path, "preview_asset_scope").is_ok()
+}
+
+fn registered_preview_asset_path(
+    scope: &PreviewAssetScope,
+    path: &Path,
+    command: &str,
+) -> Result<PathBuf, RuntimeCommandError> {
+    let canonical = canonical_preview_path(path)?;
+    let is_allowed = scope
+        .allowed_paths
+        .lock()
+        .expect("preview asset scope mutex poisoned")
+        .contains(&canonical);
+    if !is_allowed {
+        return Err(runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            command,
+            format!(
+                "Preview asset is outside the selected job scope: {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn canonical_existing_user_path(
+    path: &Path,
+    command: &str,
+) -> Result<PathBuf, RuntimeCommandError> {
+    if !path.exists() {
+        return Err(runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            command,
+            format!("Selected path is missing: {}", path.display()),
+        ));
+    }
+
+    path.canonicalize().map_err(|error| {
+        runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            command,
+            format!(
+                "Could not resolve selected path {}: {error}",
+                path.display()
+            ),
+        )
+    })
+}
+
 fn push_runtime_root(runtime_roots: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !runtime_roots.iter().any(|root| root == &candidate) {
         runtime_roots.push(candidate);
@@ -187,25 +288,52 @@ fn candidate_preview_ffmpeg_paths(exe_dir: &Path, resource_dir: Option<&Path>) -
 
     if let Some(resource_dir) = resource_dir {
         push_runtime_root(&mut candidates, resource_dir.join(binary_name));
-        push_runtime_root(&mut candidates, resource_dir.join("runtime").join(binary_name));
-        push_runtime_root(&mut candidates, resource_dir.join("resources").join(binary_name));
         push_runtime_root(
             &mut candidates,
-            resource_dir.join("resources").join("runtime").join(binary_name),
+            resource_dir.join("runtime").join(binary_name),
+        );
+        push_runtime_root(
+            &mut candidates,
+            resource_dir.join("resources").join(binary_name),
+        );
+        push_runtime_root(
+            &mut candidates,
+            resource_dir
+                .join("resources")
+                .join("runtime")
+                .join(binary_name),
         );
     }
 
     candidates
 }
 
-fn resolve_preview_ffmpeg_path(app: Option<&AppHandle>) -> PathBuf {
+fn resolve_preview_ffmpeg_candidate(
+    candidates: Vec<PathBuf>,
+) -> Result<PathBuf, RuntimeCommandError> {
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            runtime_command_error(
+                RuntimeCommandErrorKind::PrerequisiteFailed,
+                "create_preview_proxy",
+                format!(
+                    "{} was not found in packaged runtime resources.",
+                    preview_ffmpeg_binary_name()
+                ),
+            )
+        })
+}
+
+fn resolve_preview_ffmpeg_path(app: Option<&AppHandle>) -> Result<PathBuf, RuntimeCommandError> {
     let mut exe_dir = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     exe_dir.pop();
     let resource_dir = app.and_then(|app_handle| app_handle.path().resource_dir().ok());
-    candidate_preview_ffmpeg_paths(&exe_dir, resource_dir.as_deref())
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| PathBuf::from(preview_ffmpeg_binary_name()))
+    resolve_preview_ffmpeg_candidate(candidate_preview_ffmpeg_paths(
+        &exe_dir,
+        resource_dir.as_deref(),
+    ))
 }
 
 #[cfg(any(test, debug_assertions))]
@@ -395,19 +523,16 @@ fn runtime_binary_dir(
     engine_path: &Path,
     command_name: &str,
 ) -> Result<PathBuf, RuntimeCommandError> {
-    engine_path
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            runtime_command_error(
-                RuntimeCommandErrorKind::PrerequisiteFailed,
-                command_name,
-                format!(
-                    "Runtime binary has no parent directory: {}",
-                    engine_path.display()
-                ),
-            )
-        })
+    engine_path.parent().map(Path::to_path_buf).ok_or_else(|| {
+        runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            command_name,
+            format!(
+                "Runtime binary has no parent directory: {}",
+                engine_path.display()
+            ),
+        )
+    })
 }
 
 fn runtime_working_dir_for_engine(
@@ -430,6 +555,14 @@ fn runtime_working_dir_for_engine(
 }
 
 fn run_runtime_json(engine_path: &Path, command_name: &str) -> RuntimeCommandResult {
+    run_runtime_json_args(engine_path, command_name, &[command_name, "--json"])
+}
+
+fn run_runtime_json_args(
+    engine_path: &Path,
+    command_name: &str,
+    args: &[&str],
+) -> RuntimeCommandResult {
     if !engine_path.is_file() {
         return command_failure(
             command_name,
@@ -447,9 +580,7 @@ fn run_runtime_json(engine_path: &Path, command_name: &str) -> RuntimeCommandRes
     };
 
     let mut command = Command::new(engine_path);
-    command
-        .args([command_name, "--json"])
-        .current_dir(current_dir);
+    command.args(args).current_dir(current_dir);
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -887,6 +1018,7 @@ fn process_stdout_line(
             if is_terminal_job_event_type(&event_type) {
                 set_terminal_payload(terminal_payload, line);
             } else {
+                allow_artifact_from_job_event(app, &line);
                 let _ = app.emit("engine-event", line);
             }
         }
@@ -905,6 +1037,29 @@ fn process_stdout_line(
             );
         }
     }
+}
+
+fn allow_artifact_from_job_event(app: &AppHandle, line: &str) {
+    let Some(path) = preview_artifact_path_from_job_event(line) else {
+        return;
+    };
+
+    let scope = app.state::<PreviewAssetScope>();
+    if let Ok(canonical) = remember_preview_asset(&scope, &path) {
+        let _ = allow_registered_preview_asset_path(app, &scope, &canonical);
+    }
+}
+
+fn preview_artifact_path_from_job_event(line: &str) -> Option<PathBuf> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("artifact_written") {
+        return None;
+    }
+    let path = value.get("artifact_path").and_then(Value::as_str)?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(path))
 }
 
 fn supervise_runtime_process(
@@ -994,6 +1149,136 @@ fn supervise_runtime_process(
 #[tauri::command]
 async fn get_runtime_readiness(app: AppHandle) -> RuntimeReadiness {
     collect_runtime_readiness(Some(&app))
+}
+
+#[tauri::command]
+async fn check_runtime_update(app: AppHandle) -> RuntimeCommandResult {
+    match get_engine_path(Some(&app)) {
+        Ok(engine_path) => {
+            run_runtime_json_args(&engine_path, "check-update", &["--check-updates", "--json"])
+        }
+        Err(error) => missing_runtime_result("check-update", &error),
+    }
+}
+
+#[tauri::command]
+async fn select_source_asset(
+    app: AppHandle,
+    scope: State<'_, PreviewAssetScope>,
+    mode: SourceAssetSelectionMode,
+) -> Result<Option<String>, RuntimeCommandError> {
+    let dialog_app = app.clone();
+    let selected =
+        tauri::async_runtime::spawn_blocking(move || select_source_asset_path(&dialog_app, mode))
+            .await
+            .map_err(|error| {
+                runtime_command_error(
+                    RuntimeCommandErrorKind::SpawnFailed,
+                    "select_source_asset",
+                    format!("Source picker failed: {error}"),
+                )
+            })??;
+
+    let Some(path) = selected else {
+        return Ok(None);
+    };
+
+    if path.is_file() {
+        let canonical = remember_preview_asset(&scope, &path)?;
+        allow_registered_preview_asset_path(&app, &scope, &canonical)?;
+        return Ok(Some(path_to_string(&canonical)));
+    }
+
+    Ok(Some(path_to_string(&canonical_existing_user_path(
+        &path,
+        "select_source_asset",
+    )?)))
+}
+
+#[tauri::command]
+async fn select_alpha_hint_asset(
+    app: AppHandle,
+    scope: State<'_, PreviewAssetScope>,
+) -> Result<Option<String>, RuntimeCommandError> {
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        select_media_file_path(&dialog_app, "Select Alpha Hint", "select_alpha_hint_asset")
+    })
+    .await
+    .map_err(|error| {
+        runtime_command_error(
+            RuntimeCommandErrorKind::SpawnFailed,
+            "select_alpha_hint_asset",
+            format!("Alpha hint picker failed: {error}"),
+        )
+    })??;
+
+    let Some(path) = selected else {
+        return Ok(None);
+    };
+
+    let canonical = remember_preview_asset(&scope, &path)?;
+    allow_registered_preview_asset_path(&app, &scope, &canonical)?;
+    Ok(Some(path_to_string(&canonical)))
+}
+
+fn select_source_asset_path(
+    app: &AppHandle,
+    mode: SourceAssetSelectionMode,
+) -> Result<Option<PathBuf>, RuntimeCommandError> {
+    match mode {
+        SourceAssetSelectionMode::File => {
+            select_media_file_path(app, "Select Source Footage", "select_source_asset")
+        }
+        SourceAssetSelectionMode::Folder => {
+            let selected = app
+                .dialog()
+                .file()
+                .set_title("Select Image Sequence or Project Folder")
+                .blocking_pick_folder();
+            selected
+                .map(|path| {
+                    path.into_path().map_err(|error| {
+                        runtime_command_error(
+                            RuntimeCommandErrorKind::PrerequisiteFailed,
+                            "select_source_asset",
+                            format!("Selected source folder path was invalid: {error}"),
+                        )
+                    })
+                })
+                .transpose()
+        }
+    }
+}
+
+fn select_media_file_path(
+    app: &AppHandle,
+    title: &str,
+    command: &str,
+) -> Result<Option<PathBuf>, RuntimeCommandError> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title(title)
+        .add_filter(
+            "Video/Images",
+            &[
+                "mp4", "mov", "m4v", "webm", "mkv", "avi", "exr", "png", "jpg", "jpeg",
+            ],
+        )
+        .blocking_pick_file();
+
+    selected
+        .map(|path| {
+            path.into_path().map_err(|error| {
+                runtime_command_error(
+                    RuntimeCommandErrorKind::PrerequisiteFailed,
+                    command,
+                    format!("Selected media path was invalid: {error}"),
+                )
+            })
+        })
+        .transpose()
 }
 
 #[tauri::command]
@@ -1119,23 +1404,18 @@ async fn cancel_processing(state: State<'_, JobProcessState>) -> Result<bool, Ru
 #[tauri::command]
 async fn create_preview_proxy(
     app: AppHandle,
+    scope: State<'_, PreviewAssetScope>,
     source: String,
 ) -> Result<PreviewProxy, RuntimeCommandError> {
-    let source_path = PathBuf::from(&source);
-    if !source_path.is_file() {
-        return Err(runtime_command_error(
-            RuntimeCommandErrorKind::PrerequisiteFailed,
-            "create_preview_proxy",
-            format!("Preview source is missing: {}", source_path.display()),
-        ));
-    }
+    let source_path =
+        registered_preview_asset_path(&scope, Path::new(&source), "create_preview_proxy")?;
 
     let cache_root = app
         .path()
         .app_cache_dir()
         .unwrap_or_else(|_| env::temp_dir().join("CorridorKey"))
         .join("preview-proxies");
-    let ffmpeg_path = resolve_preview_ffmpeg_path(Some(&app));
+    let ffmpeg_path = resolve_preview_ffmpeg_path(Some(&app))?;
 
     let proxy = tauri::async_runtime::spawn_blocking(move || {
         create_preview_proxy_in_cache(&source_path, &cache_root, &ffmpeg_path)
@@ -1148,31 +1428,29 @@ async fn create_preview_proxy(
             format!("Preview proxy worker failed: {error}"),
         )
     })??;
-    allow_preview_asset_path(&app, Path::new(&proxy.path))?;
+    let canonical = remember_preview_asset(&scope, Path::new(&proxy.path))?;
+    allow_registered_preview_asset_path(&app, &scope, &canonical)?;
     Ok(proxy)
 }
 
-#[tauri::command]
-fn allow_preview_asset(app: AppHandle, path: String) -> Result<(), RuntimeCommandError> {
-    allow_preview_asset_path(&app, Path::new(&path))
-}
-
-fn allow_preview_asset_path(app: &AppHandle, path: &Path) -> Result<(), RuntimeCommandError> {
-    if !path.is_file() {
-        return Err(runtime_command_error(
-            RuntimeCommandErrorKind::PrerequisiteFailed,
-            "allow_preview_asset",
-            format!("Preview asset is missing: {}", path.display()),
-        ));
-    }
-
-    app.asset_protocol_scope().allow_file(path).map_err(|error| {
-        runtime_command_error(
-            RuntimeCommandErrorKind::PrerequisiteFailed,
-            "allow_preview_asset",
-            format!("Could not allow preview asset {}: {error}", path.display()),
-        )
-    })
+fn allow_registered_preview_asset_path(
+    app: &AppHandle,
+    scope: &PreviewAssetScope,
+    path: &Path,
+) -> Result<(), RuntimeCommandError> {
+    let canonical = registered_preview_asset_path(scope, path, "preview_asset_scope")?;
+    app.asset_protocol_scope()
+        .allow_file(&canonical)
+        .map_err(|error| {
+            runtime_command_error(
+                RuntimeCommandErrorKind::PrerequisiteFailed,
+                "preview_asset_scope",
+                format!(
+                    "Could not allow preview asset {}: {error}",
+                    canonical.display()
+                ),
+            )
+        })
 }
 
 fn create_preview_proxy_in_cache(
@@ -1192,7 +1470,11 @@ fn create_preview_proxy_in_cache(
     })?;
 
     let proxy_path = preview_proxy_path(source_path, cache_root)?;
-    if proxy_path.is_file() && proxy_path.metadata().is_ok_and(|metadata| metadata.len() > 0) {
+    if proxy_path.is_file()
+        && proxy_path
+            .metadata()
+            .is_ok_and(|metadata| metadata.len() > 0)
+    {
         return Ok(PreviewProxy {
             source_path: path_to_string(source_path),
             path: path_to_string(&proxy_path),
@@ -1243,7 +1525,10 @@ fn preview_proxy_path(
         runtime_command_error(
             RuntimeCommandErrorKind::PrerequisiteFailed,
             "create_preview_proxy",
-            format!("Could not inspect preview source {}: {error}", source_path.display()),
+            format!(
+                "Could not inspect preview source {}: {error}",
+                source_path.display()
+            ),
         )
     })?;
     let modified = metadata
@@ -1256,14 +1541,31 @@ fn preview_proxy_path(
     source_path.to_string_lossy().hash(&mut hasher);
     metadata.len().hash(&mut hasher);
     modified.hash(&mut hasher);
-    hash_preview_source_content(source_path, &mut hasher)?;
+    hash_preview_source_samples(source_path, metadata.len(), &mut hasher)?;
     let file_stem = format!("{:016x}.mp4", hasher.finish());
 
     Ok(cache_root.join(file_stem))
 }
 
-fn hash_preview_source_content(
+fn preview_source_sample_offsets(file_len: u64, sample_size: u64) -> Vec<u64> {
+    if file_len == 0 || sample_size == 0 {
+        return Vec::new();
+    }
+    if file_len <= sample_size {
+        return vec![0];
+    }
+
+    let middle = (file_len / 2).saturating_sub(sample_size / 2);
+    let end = file_len.saturating_sub(sample_size);
+    let mut offsets = vec![0, middle, end];
+    offsets.sort_unstable();
+    offsets.dedup();
+    offsets
+}
+
+fn hash_preview_source_samples(
     source_path: &Path,
+    file_len: u64,
     hasher: &mut DefaultHasher,
 ) -> Result<(), RuntimeCommandError> {
     let mut file = fs::File::open(source_path).map_err(|error| {
@@ -1276,8 +1578,18 @@ fn hash_preview_source_content(
             ),
         )
     })?;
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
+    let mut buffer = vec![0_u8; PREVIEW_SOURCE_SAMPLE_BYTES as usize];
+    for offset in preview_source_sample_offsets(file_len, PREVIEW_SOURCE_SAMPLE_BYTES) {
+        file.seek(SeekFrom::Start(offset)).map_err(|error| {
+            runtime_command_error(
+                RuntimeCommandErrorKind::PrerequisiteFailed,
+                "create_preview_proxy",
+                format!(
+                    "Could not seek preview source {} for hashing: {error}",
+                    source_path.display()
+                ),
+            )
+        })?;
         let bytes_read = file.read(&mut buffer).map_err(|error| {
             runtime_command_error(
                 RuntimeCommandErrorKind::PrerequisiteFailed,
@@ -1288,10 +1600,10 @@ fn hash_preview_source_content(
                 ),
             )
         })?;
-        if bytes_read == 0 {
-            break;
+        if bytes_read > 0 {
+            offset.hash(hasher);
+            hasher.write(&buffer[..bytes_read]);
         }
-        hasher.write(&buffer[..bytes_read]);
     }
 
     Ok(())
@@ -1329,11 +1641,7 @@ fn run_preview_ffmpeg(
         command.args(["-preset", "veryfast", "-crf", "23"]);
     }
 
-    command.args([
-        "-movflags",
-        "+faststart",
-        proxy_arg.as_str(),
-    ]);
+    command.args(["-movflags", "+faststart", proxy_arg.as_str()]);
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -1394,6 +1702,7 @@ async fn reveal_in_folder(path: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(JobProcessState::default())
+        .manage(PreviewAssetScope::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -1415,10 +1724,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_readiness,
+            check_runtime_update,
+            select_source_asset,
+            select_alpha_hint_asset,
             start_processing,
             cancel_processing,
             create_preview_proxy,
-            allow_preview_asset,
             reveal_in_folder
         ])
         .run(tauri::generate_context!())
@@ -1429,11 +1740,13 @@ pub fn run() {
 mod tests {
     use super::{
         build_process_args, candidate_preview_ffmpeg_paths, candidate_runtime_roots,
-        collect_runtime_readiness_for_path, engine_binary_names, is_terminal_job_event_type,
-        job_event_type_from_line, kill_active_child, preview_ffmpeg_binary_name,
-        preview_proxy_path, resolve_selected_model_path, runtime_exit_failure_payload,
-        runtime_working_dir_for_engine, shutdown_active_job, ActiveJob, JobProcessState,
-        ProcessCommandOptions, RuntimeCommandErrorKind, RuntimeReadinessStatus,
+        collect_runtime_readiness_for_path, engine_binary_names, is_preview_asset_allowed,
+        is_terminal_job_event_type, job_event_type_from_line, kill_active_child,
+        preview_ffmpeg_binary_name, preview_proxy_path, preview_source_sample_offsets,
+        registered_preview_asset_path, remember_preview_asset, resolve_preview_ffmpeg_candidate,
+        resolve_selected_model_path, runtime_exit_failure_payload, runtime_working_dir_for_engine,
+        shutdown_active_job, ActiveJob, JobProcessState, PreviewAssetScope, ProcessCommandOptions,
+        RuntimeCommandErrorKind, RuntimeReadinessStatus,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1626,11 +1939,7 @@ mod tests {
     #[test]
     fn selected_model_filename_resolves_under_development_repo_models_dir() {
         let repo = fake_repo_with_models("dev-model-path");
-        let runtime_dir = repo
-            .join("build")
-            .join("release")
-            .join("src")
-            .join("cli");
+        let runtime_dir = repo.join("build").join("release").join("src").join("cli");
         fs::create_dir_all(&runtime_dir).expect("create runtime dir");
         let runtime = runtime_dir.join("corridorkey.exe");
         fs::write(&runtime, "").expect("write fake runtime");
@@ -1728,8 +2037,14 @@ mod tests {
         fs::write(&source, "second version").expect("write changed source");
         let second = preview_proxy_path(&source, &cache).expect("second preview path");
 
-        assert_eq!(first.extension().and_then(|value| value.to_str()), Some("mp4"));
-        assert_eq!(second.extension().and_then(|value| value.to_str()), Some("mp4"));
+        assert_eq!(
+            first.extension().and_then(|value| value.to_str()),
+            Some("mp4")
+        );
+        assert_eq!(
+            second.extension().and_then(|value| value.to_str()),
+            Some("mp4")
+        );
         assert_ne!(first, second);
     }
 
@@ -1745,6 +2060,58 @@ mod tests {
         let second = preview_proxy_path(&source, &cache).expect("second preview path");
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn preview_source_sample_offsets_are_bounded_for_large_media() {
+        let offsets = preview_source_sample_offsets(10 * 1024 * 1024, 64 * 1024);
+
+        assert_eq!(offsets.len(), 3);
+        assert_eq!(offsets[0], 0);
+        assert!(offsets[1] > offsets[0]);
+        assert!(offsets[2] > offsets[1]);
+    }
+
+    #[test]
+    fn preview_asset_scope_rejects_paths_not_registered_by_native_flow() {
+        let dir = unique_test_dir("preview-asset-scope");
+        let selected = dir.join("selected.mov");
+        let unrelated = dir.join("unrelated.mov");
+        fs::write(&selected, "selected").expect("write selected asset");
+        fs::write(&unrelated, "unrelated").expect("write unrelated asset");
+        let scope = PreviewAssetScope::default();
+
+        remember_preview_asset(&scope, &selected).expect("remember selected asset");
+
+        assert!(is_preview_asset_allowed(&scope, &selected));
+        assert!(!is_preview_asset_allowed(&scope, &unrelated));
+    }
+
+    #[test]
+    fn preview_proxy_source_must_be_registered_before_transcoding() {
+        let dir = unique_test_dir("preview-proxy-source-scope");
+        let source = dir.join("unregistered.mov");
+        fs::write(&source, "source").expect("write source asset");
+        let scope = PreviewAssetScope::default();
+
+        let error = registered_preview_asset_path(&scope, &source, "create_preview_proxy")
+            .expect_err("unregistered source should be rejected");
+
+        assert_eq!(error.kind, RuntimeCommandErrorKind::PrerequisiteFailed);
+        assert_eq!(error.command, "create_preview_proxy");
+        assert!(error.message.contains("outside the selected job scope"));
+    }
+
+    #[test]
+    fn preview_ffmpeg_resolution_does_not_fall_back_to_path_binary() {
+        let missing = unique_test_dir("preview-ffmpeg-missing").join(preview_ffmpeg_binary_name());
+
+        let error = resolve_preview_ffmpeg_candidate(vec![missing])
+            .expect_err("missing packaged ffmpeg should be a package error");
+
+        assert_eq!(error.kind, RuntimeCommandErrorKind::PrerequisiteFailed);
+        assert_eq!(error.command, "create_preview_proxy");
+        assert!(error.message.contains(preview_ffmpeg_binary_name()));
     }
 
     #[test]
@@ -1886,11 +2253,8 @@ mod tests {
         fs::create_dir_all(repo.join("src").join("gui").join("src-tauri"))
             .expect("create fake tauri source dir");
         fs::create_dir_all(repo.join("models")).expect("create fake models dir");
-        fs::write(
-            repo.join("models").join("corridorkey_fp16_1024.onnx"),
-            "",
-        )
-        .expect("write fake model");
+        fs::write(repo.join("models").join("corridorkey_fp16_1024.onnx"), "")
+            .expect("write fake model");
         repo
     }
 

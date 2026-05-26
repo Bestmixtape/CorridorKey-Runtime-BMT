@@ -13,6 +13,47 @@ $tauriRuntimeDir = Join-Path $repoRoot "src\gui\src-tauri\resources\runtime"
 . (Join-Path $PSScriptRoot "windows_runtime_helpers.ps1")
 $Version = Initialize-CorridorKeyVersion -RepoRoot $repoRoot -Version $Version
 
+function Test-CorridorKeyFfmpegExecutable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CandidatePath
+    )
+
+    $candidateItem = Get-Item -LiteralPath $CandidatePath -ErrorAction Stop
+    if ($candidateItem.PSIsContainer) {
+        throw "FFmpeg source must point to ffmpeg.exe, not a directory: $CandidatePath"
+    }
+    if ($candidateItem.Name -ne "ffmpeg.exe") {
+        throw "FFmpeg source must be named ffmpeg.exe: $CandidatePath"
+    }
+
+    $versionOutput = & $CandidatePath -version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "FFmpeg source did not pass '-version': $CandidatePath`n$versionOutput"
+    }
+
+    return $candidateItem.FullName
+}
+
+function Resolve-TauriPreviewFfmpeg {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PortableBundleDir
+    )
+
+    $portableFfmpeg = Join-Path $PortableBundleDir "ffmpeg.exe"
+    if (Test-Path $portableFfmpeg) {
+        return Test-CorridorKeyFfmpegExecutable -CandidatePath $portableFfmpeg
+    }
+
+    $explicitFfmpeg = $env:CORRIDORKEY_FFMPEG_PATH
+    if (-not [string]::IsNullOrWhiteSpace($explicitFfmpeg)) {
+        return Test-CorridorKeyFfmpegExecutable -CandidatePath $explicitFfmpeg
+    }
+
+    throw "ffmpeg.exe was not found in the portable runtime bundle. Set CORRIDORKEY_FFMPEG_PATH to the reviewed ffmpeg.exe used for Tauri result preview proxies."
+}
+
 $portableArgs = @{}
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
     $portableArgs["Version"] = $Version
@@ -54,16 +95,7 @@ foreach ($file in $rootFiles) {
     Copy-Item $file.FullName (Join-Path $tauriRuntimeDir $file.Name) -Force
 }
 
-$ffmpegCommand = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-if ($null -eq $ffmpegCommand) {
-    throw "ffmpeg.exe was not found on PATH. It is required for Tauri result preview proxies."
-}
-$ffmpegItem = Get-Item -LiteralPath $ffmpegCommand.Source -ErrorAction Stop
-$ffmpegSource = if ($ffmpegItem.LinkType -and $ffmpegItem.Target.Count -gt 0) {
-    $ffmpegItem.Target[0]
-} else {
-    $ffmpegItem.FullName
-}
+$ffmpegSource = Resolve-TauriPreviewFfmpeg -PortableBundleDir $portableBundleDir
 Copy-Item -LiteralPath $ffmpegSource (Join-Path $tauriRuntimeDir "ffmpeg.exe") -Force
 
 foreach ($directoryName in @("models", "torchtrt-runtime")) {

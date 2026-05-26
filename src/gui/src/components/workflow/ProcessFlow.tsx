@@ -29,7 +29,7 @@ import {
   fileName,
   previewKindForPath,
 } from "@/lib/media";
-import { allowPreviewAsset, createPreviewProxy, formatPreviewError } from "@/lib/preview";
+import { createPreviewProxy, formatPreviewError, selectAlphaHintAsset, selectSourceAsset } from "@/lib/preview";
 import { jobTelemetrySummary, type JobMetrics, type JobTelemetrySummary } from "@/lib/jobTelemetry";
 import {
   comparisonClipStyle,
@@ -88,7 +88,7 @@ interface PreviewVideoSync {
 
 export function ProcessFlow() {
   const {
-    inputPath, setInput,
+    inputPath, inputSourceMode, setInput,
     outputPath, setOutput,
     hintPath, setHint,
     selectedModelId, setSelectedModelId,
@@ -112,7 +112,10 @@ export function ProcessFlow() {
   const presetChoiceValues = presetChoices.map(presetOptionValue).filter(Boolean);
   const modelChoiceValues = modelChoices.map(modelOptionValue).filter(Boolean);
   const runtimeUsable = Boolean(readiness && readiness.status !== "error");
-  const artifactOptions = outputArtifactOptions(inputPath);
+  const sourceContext = useMemo(() => ({
+    selectedAsFolder: inputSourceMode === "folder"
+  }), [inputSourceMode]);
+  const artifactOptions = outputArtifactOptions(inputPath, sourceContext);
   const artifactOption = artifactOptions.find((option) => option.value === outputRecipe.artifactFamily) ?? artifactOptions[0];
   const outputReady = isOutputPathReady(outputPath, outputRecipe);
   const hasRunnableSelection = Boolean(selectedPresetId || selectedModelId);
@@ -169,7 +172,13 @@ export function ProcessFlow() {
     if (!inputPath || outputPath) {
       return;
     }
-    const suggestedOutput = suggestOutputPathForRecipe(inputPath, null, defaultOutputDir, outputRecipe);
+    const suggestedOutput = suggestOutputPathForRecipe(
+      inputPath,
+      null,
+      defaultOutputDir,
+      outputRecipe,
+      sourceContext
+    );
     if (suggestedOutput) {
       setOutput(suggestedOutput);
     }
@@ -178,6 +187,7 @@ export function ProcessFlow() {
     outputPath,
     defaultOutputDir,
     outputRecipe,
+    sourceContext,
     setOutput
   ]);
 
@@ -224,41 +234,68 @@ export function ProcessFlow() {
   ]);
 
   const handleSelectInput = async () => {
-    const selected = await open({
-      multiple: false,
-      filters: [{
-        name: "Video/Images",
-        extensions: ["mp4", "mov", "exr", "png", "jpg"]
-      }]
-    });
-    if (selected && !Array.isArray(selected)) {
-      void allowPreviewAsset(selected);
-      setInput(selected);
-      const suggestedOutput = suggestOutputPathForRecipe(selected, outputPath, defaultOutputDir, outputRecipe);
-      if (suggestedOutput) {
-        setOutput(suggestedOutput);
-      }
+    await applySelectedInput(await selectSourceAsset("file"), "file");
+  };
+
+  const handleSelectInputFolder = async () => {
+    await applySelectedInput(await selectSourceAsset("folder"), "folder");
+  };
+
+  const applySelectedInput = async (selected: string | null, mode: "file" | "folder") => {
+    if (!selected) return;
+
+    const shouldUseMovie = mode === "file" && previewKindForPath(selected) === "video";
+    const nextRecipe = mode === "folder"
+      ? { ...outputRecipe, artifactFamily: "png_sequence" as const }
+      : shouldUseMovie
+        ? { ...outputRecipe, artifactFamily: "movie" as const }
+        : outputRecipe;
+    const nextSourceContext = { selectedAsFolder: mode === "folder" };
+    setInput(selected, mode);
+    if (mode === "folder" && outputRecipe.artifactFamily === "movie") {
+      setOutputRecipeSetting("artifactFamily", "png_sequence");
+    }
+    if (shouldUseMovie && outputRecipe.artifactFamily !== "movie") {
+      setOutputRecipeSetting("artifactFamily", "movie");
+    }
+    const suggestedOutput = suggestOutputPathForRecipe(
+      selected,
+      null,
+      defaultOutputDir,
+      nextRecipe,
+      nextSourceContext
+    );
+    if (suggestedOutput) {
+      setOutput(suggestedOutput);
     }
   };
 
   const handleSelectHint = async () => {
-    const selected = await open({
-      multiple: false,
-      filters: [{
-        name: "Video/Images",
-        extensions: ["mp4", "mov", "exr", "png", "jpg"]
-      }]
-    });
-    if (selected && !Array.isArray(selected)) {
-      void allowPreviewAsset(selected);
+    const selected = await selectAlphaHintAsset();
+    if (selected) {
       setHint(selected);
     }
+  };
+
+  const handleClearHint = () => {
+    setHint(null);
+  };
+
+  const handleSelectReplacementMedia = async () => {
+    const selected = await selectSourceAsset("file");
+    if (selected) {
+      setOutputRecipeSetting("replacementMediaPath", selected);
+    }
+  };
+
+  const handleClearReplacementMedia = () => {
+    setOutputRecipeSetting("replacementMediaPath", null);
   };
 
   const handleSelectOutput = async () => {
     const defaultPath = outputReady
       ? outputPath || undefined
-      : suggestOutputPathForRecipe(inputPath, null, defaultOutputDir, outputRecipe) || undefined;
+      : suggestOutputPathForRecipe(inputPath, null, defaultOutputDir, outputRecipe, sourceContext) || undefined;
     const selected = outputRecipe.artifactFamily === "movie"
       ? await save({
           defaultPath,
@@ -340,17 +377,37 @@ export function ProcessFlow() {
               active={Boolean(inputPath)}
               disabled={isProcessing}
             />
+            <button
+              type="button"
+              disabled={isProcessing}
+              onClick={handleSelectInputFolder}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-bold text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <FolderDown className="h-4 w-4" />
+              Select sequence or project folder
+            </button>
             <FileSlot
               icon={Layers}
               step="2"
               title="Alpha Hint"
               value={fileName(hintPath)}
               placeholder="Select alpha hint"
-              meta="Optional"
+              meta={hintModeLabel(hintPath)}
               onClick={handleSelectHint}
               active={Boolean(hintPath)}
               disabled={isProcessing}
             />
+            {hintPath && (
+              <button
+                type="button"
+                disabled={isProcessing}
+                onClick={handleClearHint}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-bold text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Clear Alpha Hint
+              </button>
+            )}
             <FileSlot
               icon={FolderDown}
               step="3"
@@ -418,6 +475,37 @@ export function ProcessFlow() {
                   className="h-8 w-12 rounded border border-zinc-800 bg-zinc-950 disabled:opacity-50"
                 />
               </label>
+            )}
+
+            {outputRecipe.previewBackground === "replacement_media" && (
+              <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                  Replacement media
+                </div>
+                <div className="truncate text-xs font-medium text-zinc-300">
+                  {outputRecipe.replacementMediaPath
+                    ? `Replacement media selected: ${fileName(outputRecipe.replacementMediaPath)}`
+                    : "No replacement media selected"}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isProcessing}
+                    onClick={handleSelectReplacementMedia}
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Select replacement media
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessing || !outputRecipe.replacementMediaPath}
+                    onClick={handleClearReplacementMedia}
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Clear replacement
+                  </button>
+                </div>
+              </div>
             )}
 
             <AdvancedSelect
@@ -517,20 +605,24 @@ export function ProcessFlow() {
 
               {showAdvanced && (
                 <div className="space-y-4 border-t border-zinc-800 p-3">
-                  <AdvancedGroup title="Inference">
+                  <AdvancedGroup title="Screen color">
+                    <AdvancedInfo
+                      label="Active screen color"
+                      value={screenColorLabel(selectedModel ?? null)}
+                    />
+                    <AdvancedInfo
+                      label="Selection policy"
+                      value={selectedModel ? "Explicit model" : "Runtime preset"}
+                    />
+                  </AdvancedGroup>
+
+                  <AdvancedGroup title="Quality">
                     <AdvancedSelect
                       label="Quality fallback"
                       value={advancedSettings.qualityFallback}
                       options={QUALITY_FALLBACK_OPTIONS}
                       disabled={isProcessing}
                       onChange={(value) => setAdvancedSetting("qualityFallback", value as QualityFallbackMode)}
-                    />
-                    <AdvancedSelect
-                      label="Refinement mode"
-                      value={advancedSettings.refinementMode}
-                      options={REFINEMENT_MODE_OPTIONS}
-                      disabled={isProcessing}
-                      onChange={(value) => setAdvancedSetting("refinementMode", value as RefinementMode)}
                     />
                     <AdvancedSelect
                       label="Precision"
@@ -557,7 +649,18 @@ export function ProcessFlow() {
                     />
                   </AdvancedGroup>
 
-                  <AdvancedGroup title="Matte cleanup">
+                  <AdvancedGroup title="Alpha hint">
+                    <AdvancedInfo
+                      label="Hint mode"
+                      value={hintPath ? "External alpha hint" : "Runtime rough-matte fallback"}
+                    />
+                    <AdvancedInfo
+                      label="Hint source"
+                      value={hintPath ? fileName(hintPath) : "No hint selected"}
+                    />
+                  </AdvancedGroup>
+
+                  <AdvancedGroup title="Despill">
                     <AdvancedNumber
                       label="Despill"
                       value={advancedSettings.despill}
@@ -573,12 +676,34 @@ export function ProcessFlow() {
                       disabled={isProcessing}
                       onChange={(value) => setAdvancedSetting("despeckle", value)}
                     />
+                  </AdvancedGroup>
+
+                  <AdvancedGroup title="Output mode">
+                    <AdvancedInfo label="Artifact family" value={outputRecipeLabel(outputRecipe)} />
+                    <AdvancedInfo label="Alpha output" value={displayModeLabel(outputRecipe.alphaMode)} />
+                    <AdvancedInfo label="Preview background" value={displayModeLabel(outputRecipe.previewBackground)} />
+                    <AdvancedInfo label="Color intent" value={displayModeLabel(outputRecipe.colorIntent)} />
+                  </AdvancedGroup>
+
+                  <AdvancedGroup title="Tiling and refinement">
+                    <AdvancedSelect
+                      label="Refinement mode"
+                      value={advancedSettings.refinementMode}
+                      options={REFINEMENT_MODE_OPTIONS}
+                      disabled={isProcessing}
+                      onChange={(value) => setAdvancedSetting("refinementMode", value as RefinementMode)}
+                    />
                     <AdvancedCheckbox
                       label="Force tiled processing"
                       checked={advancedSettings.tiled}
                       disabled={isProcessing}
                       onChange={(value) => setAdvancedSetting("tiled", value)}
                     />
+                  </AdvancedGroup>
+
+                  <AdvancedGroup title="Runtime diagnostics">
+                    <AdvancedInfo label="Readiness" value={readiness ? readinessLabel(readiness.status) : "Probe pending"} />
+                    <AdvancedInfo label="Runtime path" value={readiness?.runtime_path ? fileName(readiness.runtime_path) : "Not resolved"} />
                   </AdvancedGroup>
                 </div>
               )}
@@ -1450,6 +1575,15 @@ function AdvancedGroup({ title, children }: { title: string; children: ReactNode
   );
 }
 
+function AdvancedInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-1 truncate text-xs font-medium text-zinc-200">{value}</div>
+    </div>
+  );
+}
+
 function AdvancedSelect({
   label,
   value,
@@ -1593,6 +1727,23 @@ function artifactOptionStatusLabel(status: string): string {
   if (status === "needs_video_source") return "Video source";
   if (status === "planned") return "Planned";
   return "Supported";
+}
+
+function screenColorLabel(model: RuntimeCatalogEntry | null): string {
+  const screenColor = stringField(model?.screen_color);
+  if (!screenColor) return "Runtime preset";
+  return displayModeLabel(screenColor);
+}
+
+function displayModeLabel(value: string): string {
+  return value
+    .split("_")
+    .map((part, index) => index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part)
+    .join(" ");
+}
+
+function hintModeLabel(hintPath: string | null): string {
+  return hintPath ? "External hint" : "Runtime fallback";
 }
 
 function stringField(value: unknown): string {

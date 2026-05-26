@@ -33,6 +33,51 @@ describe("output recipe", () => {
     ).toBe("D:\\Renders\\plate_corridorkey_png");
   });
 
+  test("treats selected source folders as sequence-capable inputs", () => {
+    expect(outputArtifactOptions("C:\\Shots\\JordanSequence").map((option) => [
+      option.value,
+      option.enabled
+    ])).toEqual([
+      ["movie", false],
+      ["exr_sequence", true],
+      ["png_sequence", true],
+      ["preview_only", false]
+    ]);
+
+    expect(
+      suggestOutputPathForRecipe(
+        "C:\\Shots\\JordanSequence",
+        null,
+        "D:\\Renders",
+        DEFAULT_OUTPUT_RECIPE
+      )
+    ).toBe("D:\\Renders\\JordanSequence_corridorkey_png");
+  });
+
+  test("uses native folder selection context for dotted project folder names", () => {
+    const dottedFolder = "C:\\Shots\\Project.v001";
+    const selectedAsFolder = { selectedAsFolder: true };
+
+    expect(outputArtifactOptions(dottedFolder, selectedAsFolder).map((option) => [
+      option.value,
+      option.enabled
+    ])).toEqual([
+      ["movie", false],
+      ["exr_sequence", true],
+      ["png_sequence", true],
+      ["preview_only", false]
+    ]);
+    expect(
+      suggestOutputPathForRecipe(
+        dottedFolder,
+        null,
+        "D:\\Renders",
+        DEFAULT_OUTPUT_RECIPE,
+        selectedAsFolder
+      )
+    ).toBe("D:\\Renders\\Project.v001_corridorkey_png");
+  });
+
   test("reports artifact availability from the selected source", () => {
     expect(outputArtifactOptions("C:\\Shots\\plate.mov").map((option) => [
       option.value,
@@ -79,5 +124,15 @@ describe("output recipe", () => {
       "Preview Solid #111827",
       "Color Linear sRGB"
     ]);
+  });
+
+  test("tracks replacement media as a preview background choice", () => {
+    const recipe = normalizeOutputRecipe({
+      previewBackground: "replacement_media",
+      replacementMediaPath: "C:\\Shots\\clean_plate.mov"
+    });
+
+    expect(recipe.replacementMediaPath).toBe("C:\\Shots\\clean_plate.mov");
+    expect(outputRecipeChips(recipe)).toContain("Preview Replacement clean_plate.mov");
   });
 });

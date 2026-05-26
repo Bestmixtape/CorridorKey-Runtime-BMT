@@ -2,7 +2,7 @@ import { fileExtension, fileName, hasFileExtension } from "@/lib/media";
 
 export type OutputArtifactFamily = "movie" | "exr_sequence" | "png_sequence" | "preview_only";
 export type OutputAlphaMode = "transparent" | "matte_only" | "composited_preview";
-export type PreviewBackgroundMode = "checkerboard" | "solid" | "transparent";
+export type PreviewBackgroundMode = "checkerboard" | "solid" | "transparent" | "replacement_media";
 export type OutputColorIntent = "runtime_default" | "linear_srgb";
 
 export interface OutputRecipeSettings {
@@ -10,6 +10,7 @@ export interface OutputRecipeSettings {
   alphaMode: OutputAlphaMode;
   previewBackground: PreviewBackgroundMode;
   previewSolidColor: string;
+  replacementMediaPath: string | null;
   colorIntent: OutputColorIntent;
 }
 
@@ -20,11 +21,16 @@ export interface OutputArtifactOption {
   status: "supported" | "needs_image_source" | "needs_video_source" | "planned";
 }
 
+export interface OutputRecipeSourceContext {
+  selectedAsFolder?: boolean;
+}
+
 export const DEFAULT_OUTPUT_RECIPE: OutputRecipeSettings = {
   artifactFamily: "movie",
   alphaMode: "transparent",
   previewBackground: "checkerboard",
   previewSolidColor: "#111827",
+  replacementMediaPath: null,
   colorIntent: "runtime_default"
 };
 
@@ -37,7 +43,8 @@ export const OUTPUT_ALPHA_OPTIONS: Array<{ value: OutputAlphaMode; label: string
 export const PREVIEW_BACKGROUND_OPTIONS: Array<{ value: PreviewBackgroundMode; label: string }> = [
   { value: "checkerboard", label: "Checkerboard" },
   { value: "solid", label: "Solid" },
-  { value: "transparent", label: "Transparent" }
+  { value: "transparent", label: "Transparent" },
+  { value: "replacement_media", label: "Replacement media" }
 ];
 
 export const OUTPUT_COLOR_OPTIONS: Array<{ value: OutputColorIntent; label: string }> = [
@@ -56,6 +63,7 @@ const PREVIEW_BACKGROUND_MODES = PREVIEW_BACKGROUND_OPTIONS.map((option) => opti
 const COLOR_INTENTS = OUTPUT_COLOR_OPTIONS.map((option) => option.value);
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi"]);
 const IMAGE_EXTENSIONS = new Set(["png", "exr", "jpg", "jpeg"]);
+type InputSourceKind = "video" | "image" | "folder" | "unknown";
 
 export function normalizeOutputRecipe(
   input: Partial<OutputRecipeSettings>
@@ -69,30 +77,35 @@ export function normalizeOutputRecipe(
       DEFAULT_OUTPUT_RECIPE.previewBackground
     ),
     previewSolidColor: normalizeHexColor(input.previewSolidColor, DEFAULT_OUTPUT_RECIPE.previewSolidColor),
+    replacementMediaPath: normalizeReplacementMediaPath(input.replacementMediaPath),
     colorIntent: oneOf(input.colorIntent, COLOR_INTENTS, DEFAULT_OUTPUT_RECIPE.colorIntent)
   };
 }
 
-export function outputArtifactOptions(inputPath: string | null): OutputArtifactOption[] {
-  const sourceKind = inputSourceKind(inputPath);
+export function outputArtifactOptions(
+  inputPath: string | null,
+  sourceContext: OutputRecipeSourceContext = {}
+): OutputArtifactOption[] {
+  const sourceKind = inputSourceKind(inputPath, sourceContext);
+  const sequenceCapable = sourceKind === "image" || sourceKind === "folder";
   return [
     {
       value: "movie",
       label: "Movie",
-      enabled: sourceKind !== "image",
-      status: sourceKind === "image" ? "needs_video_source" : "supported"
+      enabled: sourceKind === "video" || sourceKind === "unknown",
+      status: sequenceCapable ? "needs_video_source" : "supported"
     },
     {
       value: "exr_sequence",
       label: "EXR sequence",
-      enabled: sourceKind === "image",
-      status: sourceKind === "image" ? "supported" : "needs_image_source"
+      enabled: sequenceCapable,
+      status: sequenceCapable ? "supported" : "needs_image_source"
     },
     {
       value: "png_sequence",
       label: "PNG sequence",
-      enabled: sourceKind === "image",
-      status: sourceKind === "image" ? "supported" : "needs_image_source"
+      enabled: sequenceCapable,
+      status: sequenceCapable ? "supported" : "needs_image_source"
     },
     {
       value: "preview_only",
@@ -145,9 +158,10 @@ export function suggestOutputPathForRecipe(
   inputPath: string | null,
   currentOutputPath: string | null,
   defaultOutputDir: string | null,
-  recipe: OutputRecipeSettings
+  recipe: OutputRecipeSettings,
+  sourceContext: OutputRecipeSourceContext = {}
 ): string | null {
-  const normalized = normalizeOutputRecipe(recipe);
+  const normalized = effectiveRecipeForSource(inputPath, normalizeOutputRecipe(recipe), sourceContext);
   if (!inputPath || isOutputPathReady(currentOutputPath, normalized)) {
     return null;
   }
@@ -157,9 +171,12 @@ export function suggestOutputPathForRecipe(
     return null;
   }
 
-  const inputBase = fileName(inputPath).replace(/\.[^.]+$/, "") || "corridorkey_output";
+  const inputName = fileName(inputPath);
+  const inputBase = sourceContext.selectedAsFolder
+    ? inputName
+    : inputName.replace(/\.[^.]+$/, "");
   const suffix = outputSuffix(normalized);
-  return joinLocalPath(directory, `${inputBase}_${suffix}`);
+  return joinLocalPath(directory, `${inputBase || "corridorkey_output"}_${suffix}`);
 }
 
 export function previewBackgroundStyle(
@@ -181,11 +198,29 @@ export function previewBackgroundStyle(
   };
 }
 
-function inputSourceKind(inputPath: string | null): "video" | "image" | "unknown" {
+function inputSourceKind(
+  inputPath: string | null,
+  sourceContext: OutputRecipeSourceContext = {}
+): InputSourceKind {
+  if (!inputPath) return "unknown";
+  if (sourceContext.selectedAsFolder) return "folder";
   const extension = fileExtension(inputPath);
   if (VIDEO_EXTENSIONS.has(extension)) return "video";
   if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (!extension) return "folder";
   return "unknown";
+}
+
+function effectiveRecipeForSource(
+  inputPath: string | null,
+  recipe: OutputRecipeSettings,
+  sourceContext: OutputRecipeSourceContext = {}
+): OutputRecipeSettings {
+  const sourceKind = inputSourceKind(inputPath, sourceContext);
+  if ((sourceKind === "image" || sourceKind === "folder") && recipe.artifactFamily === "movie") {
+    return { ...recipe, artifactFamily: "png_sequence" };
+  }
+  return recipe;
 }
 
 function outputSuffix(recipe: OutputRecipeSettings): string {
@@ -195,6 +230,9 @@ function outputSuffix(recipe: OutputRecipeSettings): string {
 }
 
 function previewBackgroundLabel(recipe: OutputRecipeSettings): string {
+  if (recipe.previewBackground === "replacement_media") {
+    return `Replacement ${fileName(recipe.replacementMediaPath) || "not selected"}`;
+  }
   if (recipe.previewBackground === "solid") {
     return `Solid ${recipe.previewSolidColor}`;
   }
@@ -208,6 +246,14 @@ function formatMode(value: string): string {
     .split("_")
     .map((part, index) => index === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part)
     .join(" ");
+}
+
+function normalizeReplacementMediaPath(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizeHexColor(value: string | undefined, fallback: string): string {

@@ -21,6 +21,7 @@ const MAX_HISTORY_RECORDS = 50;
 const MAX_LOG_LINES = 200;
 
 export type JobTerminalStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
+export type InputSourceSelectionMode = "file" | "folder";
 
 export interface JobProgress {
   type:
@@ -79,6 +80,7 @@ interface JobRunContext {
 
 interface JobState {
   inputPath: string | null;
+  inputSourceMode: InputSourceSelectionMode | null;
   outputPath: string | null;
   hintPath: string | null;
   selectedPresetId: string | null;
@@ -102,7 +104,7 @@ interface JobState {
   logs: string[];
   history: JobRecord[];
 
-  setInput: (path: string | null) => void;
+  setInput: (path: string | null, mode?: InputSourceSelectionMode | null) => void;
   setOutput: (path: string | null) => void;
   setHint: (path: string | null) => void;
   setSelectedPresetId: (presetId: string | null) => void;
@@ -126,6 +128,7 @@ interface JobState {
 
 export const useJobStore = create<JobState>((set, get) => ({
   inputPath: null,
+  inputSourceMode: null,
   outputPath: null,
   hintPath: null,
   selectedPresetId: null,
@@ -149,7 +152,11 @@ export const useJobStore = create<JobState>((set, get) => ({
   logs: [],
   history: [],
 
-  setInput: (path) => set({ inputPath: path, error: null }),
+  setInput: (path, mode = null) => set({
+    inputPath: path,
+    inputSourceMode: path ? mode : null,
+    error: null
+  }),
   setOutput: (path) => set({ outputPath: path, error: null }),
   setHint: (path) => set({ hintPath: path }),
   setSelectedPresetId: (presetId) => set({ selectedPresetId: presetId }),
@@ -203,6 +210,7 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   reset: () => set((state) => ({
     inputPath: null,
+    inputSourceMode: null,
     outputPath: state.defaultOutputDir,
     hintPath: null,
     selectedPresetId: null,
@@ -378,9 +386,6 @@ export const useJobStore = create<JobState>((set, get) => ({
             }
             break;
           case "artifact_written":
-            if (payload.artifact_path) {
-              void invoke("allow_preview_asset", { path: payload.artifact_path });
-            }
             set({
               artifactPath: payload.artifact_path || null,
               statusMessage: payload.message || "Artifact written"
