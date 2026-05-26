@@ -54,6 +54,9 @@ selects more than one host surface.
 - The installer must expose selectable components for CLI/runtime core,
   Tauri GUI, OFX Resolve/Fusion, OFX Nuke, Adobe plugins, Green model pack,
   Blue model/runtime pack, and the recommended Green plus Blue install.
+- CLI/runtime core is the fixed base component. Tauri GUI, every host plugin
+  surface, and every Green/Blue model/runtime pack must remain optional even
+  when a recommended setup type preselects them.
 - The installer must define one shared runtime/model installation root or
   cache strategy used by selected host and GUI surfaces.
 - The installer must reuse existing package outputs where possible and define
@@ -84,8 +87,15 @@ Per-criterion progress tracking lives in per-Spec tasks.
 
 - A generated suite installer script contains all supported component choices
   and maps each choice to a staged payload or download manifest entry.
+- A custom install can leave every component deselected except CLI/runtime
+  core, and the generated installer does not force GUI, host plugins, or model
+  packs outside an explicit setup recommendation.
 - Selecting multiple host surfaces uses one shared runtime/model payload root
   instead of duplicating the same model pack per host.
+- The online flavor uses installer-managed downloads for every selected
+  payload that can be represented by a checksummed manifest entry; embedded
+  bytes are limited to the fixed bootstrap/base payloads and any explicitly
+  documented payload that cannot yet be externalized safely.
 - Online and offline installer builds fail when required checksums or staged
   payload inventory entries are missing.
 - Repair, clean install, and component deselection behavior are documented and
@@ -101,6 +111,7 @@ Per-criterion progress tracking lives in per-Spec tasks.
 - User selects OFX Nuke but Resolve/Fusion is absent, or the reverse.
 - User selects GUI without host plugins.
 - User selects CLI/runtime core only.
+- User selects no optional GUI, host plugin, or model pack components.
 - User selects both Green and Blue packs.
 - User reruns the installer with a previously installed pack deselected.
 - Offline payload is missing, corrupt, or has a checksum mismatch.
@@ -137,9 +148,17 @@ the better fit for multi-surface component selection.
   `Contents\Resources\models` and `blue-runtime` into
   `Contents\Resources\torchtrt-runtime\bin`. The suite model list is the
   Windows RTX product contract, not the maintainer reference catalog.
-- Online payloads: online suite installers embed the thin host and GUI payloads
-  and download selected model/runtime packs from the distribution manifest with
-  checksum verification.
+- Component optionality: CLI/runtime core is fixed and not deselectable. Tauri
+  GUI, OFX Resolve/Fusion, OFX Nuke, Adobe plugins, Green model pack, and Blue
+  model/runtime pack are optional components. Recommended setup types may
+  preselect them, but custom installs must be able to install only the fixed
+  CLI/runtime core.
+- Online payloads: online suite installers prefer Inno Setup's download flow
+  for selected payloads represented by checksummed manifest entries. The online
+  flavor should download model/runtime packs and should also externalize
+  optional GUI/host payloads when those package outputs have stable URLs,
+  sizes, and SHA-256 values. Any embedded optional payload must be explicit in
+  the generated inventory until it can move to the online manifest.
 - Offline payloads: offline suite installers bundle every distribution-manifest
   pack and expose the same Green, Blue, and Green plus Blue component choices
   as the online flavor. The bundled bytes stay in the installer; the selected
