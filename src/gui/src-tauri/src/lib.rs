@@ -248,9 +248,48 @@ fn push_runtime_root(runtime_roots: &mut Vec<PathBuf>, candidate: PathBuf) {
     }
 }
 
+fn runtime_root_from_config(config_path: &Path) -> Option<PathBuf> {
+    let content = fs::read_to_string(config_path).ok()?;
+    let mut in_runtime_section = false;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_runtime_section = line[1..line.len() - 1].eq_ignore_ascii_case("runtime");
+            continue;
+        }
+        if !in_runtime_section {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim().eq_ignore_ascii_case("shared_root") {
+            let trimmed = value.trim().trim_matches('"');
+            if !trimmed.is_empty() {
+                return Some(PathBuf::from(trimmed));
+            }
+        }
+    }
+    None
+}
+
+fn push_suite_runtime_roots(runtime_roots: &mut Vec<PathBuf>, config_dir: &Path) {
+    if let Some(runtime_root) = runtime_root_from_config(&config_dir.join("corridorkey_runtime.ini"))
+    {
+        push_runtime_root(
+            runtime_roots,
+            runtime_root.join("Contents").join("Win64"),
+        );
+    }
+}
+
 fn candidate_runtime_roots(exe_dir: &Path, resource_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut runtime_roots: Vec<PathBuf> = Vec::new();
 
+    push_suite_runtime_roots(&mut runtime_roots, exe_dir);
     push_runtime_root(&mut runtime_roots, exe_dir.to_path_buf());
     push_runtime_root(&mut runtime_roots, exe_dir.join("runtime"));
     push_runtime_root(&mut runtime_roots, exe_dir.join("resources"));
@@ -1744,9 +1783,9 @@ mod tests {
         is_terminal_job_event_type, job_event_type_from_line, kill_active_child,
         preview_ffmpeg_binary_name, preview_proxy_path, preview_source_sample_offsets,
         registered_preview_asset_path, remember_preview_asset, resolve_preview_ffmpeg_candidate,
-        resolve_selected_model_path, runtime_exit_failure_payload, runtime_working_dir_for_engine,
-        shutdown_active_job, ActiveJob, JobProcessState, PreviewAssetScope, ProcessCommandOptions,
-        RuntimeCommandErrorKind, RuntimeReadinessStatus,
+        resolve_selected_model_path, runtime_exit_failure_payload, runtime_root_from_config,
+        runtime_working_dir_for_engine, shutdown_active_job, ActiveJob, JobProcessState,
+        PreviewAssetScope, ProcessCommandOptions, RuntimeCommandErrorKind, RuntimeReadinessStatus,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1777,6 +1816,45 @@ mod tests {
         let count = roots.iter().filter(|path| **path == runtime_entry).count();
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn candidate_runtime_roots_read_suite_shared_runtime_config() {
+        let root = unique_test_dir("suite-runtime-config");
+        let gui_dir = root.join("GUI");
+        let shared_runtime = root.join("Runtime");
+        fs::create_dir_all(&gui_dir).expect("create fake gui dir");
+        fs::write(
+            gui_dir.join("corridorkey_runtime.ini"),
+            format!(
+                "[runtime]\nshared_root={}\n",
+                shared_runtime.to_string_lossy()
+            ),
+        )
+        .expect("write suite runtime config");
+
+        let roots = candidate_runtime_roots(&gui_dir, None);
+
+        assert_eq!(
+            roots.first(),
+            Some(&shared_runtime.join("Contents").join("Win64"))
+        );
+    }
+
+    #[test]
+    fn runtime_root_from_config_ignores_other_ini_sections() {
+        let root = unique_test_dir("suite-runtime-config-sections");
+        let config_path = root.join("corridorkey_runtime.ini");
+        fs::create_dir_all(&root).expect("create fake config dir");
+        fs::write(
+            &config_path,
+            "[other]\nshared_root=C:\\Wrong\n[runtime]\nshared_root=C:\\CorridorKey\\Runtime\n",
+        )
+        .expect("write suite runtime config");
+
+        let runtime_root = runtime_root_from_config(&config_path).expect("runtime root");
+
+        assert_eq!(runtime_root, PathBuf::from("C:\\CorridorKey\\Runtime"));
     }
 
     #[test]

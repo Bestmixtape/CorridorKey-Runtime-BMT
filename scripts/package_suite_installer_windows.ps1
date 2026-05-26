@@ -11,6 +11,10 @@ param(
     [string]$OutputDir = "",
     [string]$OutputBaseFilename = "",
     [string]$SuitePayloadRoot = "",
+    [string]$SuitePayloadOutputRoot = "",
+    [string]$RuntimePackageRoot = "",
+    [string]$OfxPackageRoot = "",
+    [string]$AdobePackageRoot = "",
     [string]$ModelPayloadDir = "",
     [string]$ISCCPath = "",
     [string]$DistributionManifestPath = ""
@@ -322,6 +326,8 @@ function New-CorridorKeySuiteIss {
         "{#SharedRuntimeRoot}\Contents\Resources\torchtrt-runtime\bin",
         "{#SuiteGuiRoot}",
         "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle",
+        "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources",
+        "{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey\Contents\Resources",
         "{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey"
     )) {
         Add-CorridorKeySuiteLine -Lines $lines -Value ('Name: "' + $dir + '"')
@@ -330,7 +336,8 @@ function New-CorridorKeySuiteIss {
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Files]"
     $payloadEntries = @(
-        @{ Source = "{#SuitePayloadRoot}\runtime\*"; Dest = "{#SharedRuntimeRoot}\Contents\Win64"; Component = "runtime-core" },
+        @{ Source = "{#SuitePayloadRoot}\runtime\win64\*"; Dest = "{#SharedRuntimeRoot}\Contents\Win64"; Component = "runtime-core" },
+        @{ Source = "{#SuitePayloadRoot}\runtime\resources\*"; Dest = "{#SharedRuntimeRoot}\Contents\Resources"; Component = "runtime-core" },
         @{ Source = "{#SuitePayloadRoot}\gui\*"; Dest = "{#SuiteGuiRoot}"; Component = "gui" },
         @{ Source = "{#SuitePayloadRoot}\ofx-resolve-fusion\*"; Dest = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle"; Component = "ofx-resolve-fusion" },
         @{ Source = "{#SuitePayloadRoot}\ofx-nuke\*"; Dest = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle"; Component = "ofx-nuke" },
@@ -371,6 +378,18 @@ function New-CorridorKeySuiteIss {
                 Add-CorridorKeySuiteLine -Lines $lines -Value ('Source: "' + $offlinePackRoot + '\' + $file.filename + '"; DestDir: "' + $destDir + '"; Components: ' + $componentName + '; Flags: ignoreversion')
             }
         }
+    }
+
+    Add-CorridorKeySuiteLine -Lines $lines
+    Add-CorridorKeySuiteLine -Lines $lines -Value "[INI]"
+    foreach ($iniEntry in @(
+        @{ Filename = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources\corridorkey_runtime.ini"; Component = "ofx-resolve-fusion" },
+        @{ Filename = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources\corridorkey_runtime.ini"; Component = "ofx-nuke" },
+        @{ Filename = "{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey\Contents\Resources\corridorkey_runtime.ini"; Component = "adobe" },
+        @{ Filename = "{#SuiteGuiRoot}\corridorkey_runtime.ini"; Component = "gui" }
+    )) {
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$iniEntry.Component)
+        Add-CorridorKeySuiteLine -Lines $lines -Value ('Filename: "' + $iniEntry.Filename + '"; Section: "runtime"; Key: "shared_root"; String: "{#SharedRuntimeRoot}"; Components: ' + $componentName)
     }
 
     if ($Flavor -eq "online") {
@@ -497,6 +516,358 @@ function Test-CorridorKeyDirectoryHasFiles {
     return @(Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0
 }
 
+function ConvertTo-CorridorKeyFullPath {
+    param([string]$Path)
+
+    return [System.IO.Path]::GetFullPath($Path)
+}
+
+function Test-CorridorKeySamePath {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    $leftFull = (ConvertTo-CorridorKeyFullPath -Path $Left).TrimEnd('\', '/')
+    $rightFull = (ConvertTo-CorridorKeyFullPath -Path $Right).TrimEnd('\', '/')
+    return [StringComparer]::OrdinalIgnoreCase.Equals($leftFull, $rightFull)
+}
+
+function Test-CorridorKeyPathContains {
+    param(
+        [string]$Parent,
+        [string]$Child
+    )
+
+    $parentFull = (ConvertTo-CorridorKeyFullPath -Path $Parent).TrimEnd('\', '/')
+    $childFull = (ConvertTo-CorridorKeyFullPath -Path $Child).TrimEnd('\', '/')
+    if (Test-CorridorKeySamePath -Left $parentFull -Right $childFull) {
+        return $true
+    }
+
+    return $childFull.StartsWith($parentFull + "\", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-CorridorKeyPathOverlaps {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    return (Test-CorridorKeyPathContains -Parent $Left -Child $Right) -or
+        (Test-CorridorKeyPathContains -Parent $Right -Child $Left)
+}
+
+function Assert-CorridorKeyExistingDirectory {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "$Label is required when staging a suite payload."
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "$Label not found or not a directory: $Path"
+    }
+
+    return (Resolve-Path -LiteralPath $Path).ProviderPath
+}
+
+function Assert-CorridorKeySafeSuitePayloadOutputRoot {
+    param(
+        [string]$Root,
+        [string[]]$SourceRoots
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Root)) {
+        throw "Suite payload output root is required when staging a suite payload."
+    }
+
+    $resolvedRoot = ConvertTo-CorridorKeyFullPath -Path $Root
+    $trimmedRoot = $resolvedRoot.TrimEnd('\', '/')
+    $driveRoot = ([System.IO.Path]::GetPathRoot($resolvedRoot)).TrimEnd('\', '/')
+    if ([StringComparer]::OrdinalIgnoreCase.Equals($trimmedRoot, $driveRoot)) {
+        throw "Suite payload output root must not be a filesystem root: $resolvedRoot"
+    }
+
+    $allowedParents = @(
+        (Join-Path $repoRoot "dist"),
+        $env:TEMP,
+        $env:TMP
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+
+    $isAllowedChild = $false
+    foreach ($allowedParent in $allowedParents) {
+        if ((Test-CorridorKeyPathContains -Parent $allowedParent -Child $resolvedRoot) -and
+            -not (Test-CorridorKeySamePath -Left $resolvedRoot -Right $allowedParent)) {
+            $isAllowedChild = $true
+            break
+        }
+    }
+    if (-not $isAllowedChild) {
+        throw "Suite payload output root must be a child of dist or TEMP: $resolvedRoot"
+    }
+
+    foreach ($sourceRoot in $SourceRoots) {
+        if ([string]::IsNullOrWhiteSpace($sourceRoot)) {
+            continue
+        }
+        $resolvedSourceRoot = ConvertTo-CorridorKeyFullPath -Path $sourceRoot
+        if (Test-CorridorKeyPathOverlaps -Left $resolvedRoot -Right $resolvedSourceRoot) {
+            throw "Suite payload output root must not overlap component package roots: $resolvedRoot overlaps $resolvedSourceRoot"
+        }
+    }
+
+    return $resolvedRoot
+}
+
+function Copy-CorridorKeyDirectoryContents {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [string[]]$ExcludeNames = @()
+    )
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $Source -Force) {
+        if ($ExcludeNames -contains $item.Name) {
+            continue
+        }
+        Copy-Item -LiteralPath $item.FullName -Destination $Destination -Recurse -Force
+    }
+}
+
+function Copy-CorridorKeySuiteRuntimePayload {
+    param(
+        [string]$RuntimeRoot,
+        [string]$Destination,
+        [string[]]$RuntimeSidecarRoots = @()
+    )
+
+    $resolvedRuntimeRoot = Assert-CorridorKeyExistingDirectory -Path $RuntimeRoot -Label "Runtime package root"
+    $enginePath = Join-Path $resolvedRuntimeRoot "ck-engine.exe"
+    $cliPath = Join-Path $resolvedRuntimeRoot "corridorkey.exe"
+    if (-not (Test-Path -LiteralPath $enginePath -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
+        throw "Runtime package root is missing ck-engine.exe or corridorkey.exe: $resolvedRuntimeRoot"
+    }
+
+    $guiExecutablePath = Join-Path $resolvedRuntimeRoot "CorridorKey_Runtime.exe"
+    if (-not (Test-Path -LiteralPath $guiExecutablePath -PathType Leaf)) {
+        throw "Runtime package root is missing CorridorKey_Runtime.exe for suite GUI staging: $resolvedRuntimeRoot"
+    }
+
+    $win64Destination = Join-Path $Destination "win64"
+    $resourcesDestination = Join-Path $Destination "resources"
+    Copy-CorridorKeyDirectoryContents `
+        -Source $resolvedRuntimeRoot `
+        -Destination $win64Destination `
+        -ExcludeNames @("CorridorKey_Runtime.exe", "README.txt", "smoke_test.bat", "models", "outputs", "torchtrt-runtime", "model_inventory.json")
+
+    $sourceCliPath = if (Test-Path -LiteralPath $cliPath -PathType Leaf) { $cliPath } else { $enginePath }
+    $cliAliasPath = Join-Path $win64Destination "corridorkey.exe"
+    if (-not (Test-Path -LiteralPath $cliAliasPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $sourceCliPath -Destination $cliAliasPath -Force
+    }
+
+    $runtimeServerCandidates = @(
+        (Join-Path $resolvedRuntimeRoot "corridorkey_host_plugin_runtime_server.exe")
+    )
+    foreach ($sidecarRoot in $RuntimeSidecarRoots) {
+        if ([string]::IsNullOrWhiteSpace($sidecarRoot)) {
+            continue
+        }
+        $runtimeServerCandidates += Join-Path $sidecarRoot "Contents\Win64\corridorkey_host_plugin_runtime_server.exe"
+        $runtimeServerCandidates += Join-Path $sidecarRoot "corridorkey_host_plugin_runtime_server.exe"
+    }
+    $runtimeServerSource = @($runtimeServerCandidates | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        } | Select-Object -First 1)
+    if ($runtimeServerSource.Count -eq 0) {
+        throw "Suite runtime staging requires corridorkey_host_plugin_runtime_server.exe from the runtime, OFX, or Adobe package root."
+    }
+    Copy-Item `
+        -LiteralPath $runtimeServerSource[0] `
+        -Destination (Join-Path $win64Destination "corridorkey_host_plugin_runtime_server.exe") `
+        -Force
+
+    $torchTrtRuntimeRoot = Join-Path $resolvedRuntimeRoot "torchtrt-runtime"
+    if (Test-Path -LiteralPath $torchTrtRuntimeRoot -PathType Container) {
+        New-Item -ItemType Directory -Path $resourcesDestination -Force | Out-Null
+        Copy-Item -LiteralPath $torchTrtRuntimeRoot -Destination $resourcesDestination -Recurse -Force
+    }
+
+    $torchTrtWrapperCandidates = @(
+        (Join-Path $resolvedRuntimeRoot "torchtrt-runtime\bin\corridorkey_torchtrt.dll")
+    )
+    foreach ($sidecarRoot in $RuntimeSidecarRoots) {
+        if ([string]::IsNullOrWhiteSpace($sidecarRoot)) {
+            continue
+        }
+        $torchTrtWrapperCandidates += Join-Path $sidecarRoot "Contents\Resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll"
+        $torchTrtWrapperCandidates += Join-Path $sidecarRoot "torchtrt-runtime\bin\corridorkey_torchtrt.dll"
+    }
+    $torchTrtWrapperSource = @($torchTrtWrapperCandidates | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        } | Select-Object -First 1)
+    if ($torchTrtWrapperSource.Count -eq 0) {
+        throw "Suite runtime staging requires corridorkey_torchtrt.dll from the runtime, OFX, or Adobe package root."
+    }
+    $torchTrtWrapperDestinationDir = Join-Path $resourcesDestination "torchtrt-runtime\bin"
+    New-Item -ItemType Directory -Path $torchTrtWrapperDestinationDir -Force | Out-Null
+    Copy-Item `
+        -LiteralPath $torchTrtWrapperSource[0] `
+        -Destination (Join-Path $torchTrtWrapperDestinationDir "corridorkey_torchtrt.dll") `
+        -Force
+
+    $modelInventoryPath = Join-Path $resolvedRuntimeRoot "model_inventory.json"
+    if (Test-Path -LiteralPath $modelInventoryPath -PathType Leaf) {
+        New-Item -ItemType Directory -Path $resourcesDestination -Force | Out-Null
+        Copy-Item -LiteralPath $modelInventoryPath -Destination (Join-Path $resourcesDestination "model_inventory.json") -Force
+    }
+}
+
+function Copy-CorridorKeySuiteGuiPayload {
+    param(
+        [string]$RuntimeRoot,
+        [string]$Destination
+    )
+
+    $resolvedRuntimeRoot = Assert-CorridorKeyExistingDirectory -Path $RuntimeRoot -Label "Runtime package root"
+    $guiExecutablePath = Join-Path $resolvedRuntimeRoot "CorridorKey_Runtime.exe"
+    if (-not (Test-Path -LiteralPath $guiExecutablePath -PathType Leaf)) {
+        throw "Runtime package root is missing CorridorKey_Runtime.exe for suite GUI staging: $resolvedRuntimeRoot"
+    }
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Copy-Item -LiteralPath $guiExecutablePath -Destination (Join-Path $Destination "CorridorKey.exe") -Force
+}
+
+function Resolve-CorridorKeyOfxBundleRoot {
+    param([string]$PackageRoot)
+
+    $resolvedPackageRoot = Assert-CorridorKeyExistingDirectory -Path $PackageRoot -Label "OFX package root"
+    $directContents = Join-Path $resolvedPackageRoot "Contents\Win64\CorridorKey.ofx"
+    if (Test-Path -LiteralPath $directContents -PathType Leaf) {
+        return $resolvedPackageRoot
+    }
+
+    $bundleRoot = Join-Path $resolvedPackageRoot "CorridorKey.ofx.bundle"
+    $bundleContents = Join-Path $bundleRoot "Contents\Win64\CorridorKey.ofx"
+    if (Test-Path -LiteralPath $bundleContents -PathType Leaf) {
+        return $bundleRoot
+    }
+
+    throw "OFX package root must be a CorridorKey.ofx.bundle or contain one: $resolvedPackageRoot"
+}
+
+function Resolve-CorridorKeyAdobePayloadRoot {
+    param([string]$PackageRoot)
+
+    $resolvedPackageRoot = Assert-CorridorKeyExistingDirectory -Path $PackageRoot -Label "Adobe package root"
+    $mediaCoreRoot = Join-Path $resolvedPackageRoot "Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey"
+    $mediaCoreWin64Root = Join-Path $mediaCoreRoot "Contents\Win64"
+    if (@(Get-ChildItem -LiteralPath $mediaCoreWin64Root -Filter "*.aex" -File -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0) {
+        return $mediaCoreRoot
+    }
+
+    $directWin64Root = Join-Path $resolvedPackageRoot "Contents\Win64"
+    if (@(Get-ChildItem -LiteralPath $directWin64Root -Filter "*.aex" -File -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0) {
+        return $resolvedPackageRoot
+    }
+
+    throw "Adobe package root must be a package output or exact MediaCore CorridorKey payload containing Contents\Win64 .aex files: $resolvedPackageRoot"
+}
+
+function Copy-CorridorKeySuiteOfxPayload {
+    param(
+        [string]$BundleRoot,
+        [string]$Destination
+    )
+
+    $sourceWin64 = Join-Path $BundleRoot "Contents\Win64"
+    $destinationWin64 = Join-Path $Destination "Contents\Win64"
+    New-Item -ItemType Directory -Path $destinationWin64 -Force | Out-Null
+    $pluginFiles = @(Get-ChildItem -LiteralPath $sourceWin64 -Filter "*.ofx" -File -ErrorAction SilentlyContinue)
+    if ($pluginFiles.Count -eq 0) {
+        throw "OFX package root does not contain a host plugin binary under Contents\Win64: $BundleRoot"
+    }
+
+    foreach ($pluginFile in $pluginFiles) {
+        Copy-Item -LiteralPath $pluginFile.FullName -Destination $destinationWin64 -Force
+    }
+}
+
+function Copy-CorridorKeySuiteAdobePayload {
+    param(
+        [string]$PayloadRoot,
+        [string]$Destination
+    )
+
+    $sourceWin64 = Join-Path $PayloadRoot "Contents\Win64"
+    $destinationWin64 = Join-Path $Destination "Contents\Win64"
+    New-Item -ItemType Directory -Path $destinationWin64 -Force | Out-Null
+    $pluginFiles = @(Get-ChildItem -LiteralPath $sourceWin64 -Filter "*.aex" -File -ErrorAction SilentlyContinue)
+    if ($pluginFiles.Count -eq 0) {
+        throw "Adobe payload root does not contain .aex files under Contents\Win64: $PayloadRoot"
+    }
+
+    foreach ($pluginFile in $pluginFiles) {
+        Copy-Item -LiteralPath $pluginFile.FullName -Destination $destinationWin64 -Force
+    }
+}
+
+function New-CorridorKeySuitePayloadRootFromPackages {
+    param(
+        [string]$OutputRoot,
+        [string]$RuntimeRoot,
+        [string]$OfxRoot,
+        [string]$AdobeRoot
+    )
+
+    $resolvedRuntimeRoot = Assert-CorridorKeyExistingDirectory -Path $RuntimeRoot -Label "Runtime package root"
+    $resolvedOfxPackageRoot = Assert-CorridorKeyExistingDirectory -Path $OfxRoot -Label "OFX package root"
+    $ofxBundleRoot = Resolve-CorridorKeyOfxBundleRoot -PackageRoot $resolvedOfxPackageRoot
+    $resolvedAdobePackageRoot = Assert-CorridorKeyExistingDirectory -Path $AdobeRoot -Label "Adobe package root"
+    $adobePayloadRoot = Resolve-CorridorKeyAdobePayloadRoot -PackageRoot $resolvedAdobePackageRoot
+    $resolvedOutputRoot = Assert-CorridorKeySafeSuitePayloadOutputRoot `
+        -Root $OutputRoot `
+        -SourceRoots @(
+            $resolvedRuntimeRoot,
+            $resolvedOfxPackageRoot,
+            $ofxBundleRoot,
+            $resolvedAdobePackageRoot,
+            $adobePayloadRoot
+        )
+
+    if (Test-Path -LiteralPath $resolvedOutputRoot) {
+        Remove-Item -LiteralPath $resolvedOutputRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $resolvedOutputRoot -Force | Out-Null
+
+    Copy-CorridorKeySuiteRuntimePayload `
+        -RuntimeRoot $resolvedRuntimeRoot `
+        -Destination (Join-Path $resolvedOutputRoot "runtime") `
+        -RuntimeSidecarRoots @($ofxBundleRoot, $adobePayloadRoot)
+    Copy-CorridorKeySuiteGuiPayload `
+        -RuntimeRoot $resolvedRuntimeRoot `
+        -Destination (Join-Path $resolvedOutputRoot "gui")
+
+    Copy-CorridorKeySuiteOfxPayload `
+        -BundleRoot $ofxBundleRoot `
+        -Destination (Join-Path $resolvedOutputRoot "ofx-resolve-fusion")
+    Copy-CorridorKeySuiteOfxPayload `
+        -BundleRoot $ofxBundleRoot `
+        -Destination (Join-Path $resolvedOutputRoot "ofx-nuke")
+
+    Copy-CorridorKeySuiteAdobePayload `
+        -PayloadRoot $adobePayloadRoot `
+        -Destination (Join-Path $resolvedOutputRoot "adobe")
+
+    return $resolvedOutputRoot
+}
+
 function Assert-CorridorKeyFileSha256 {
     param(
         [string]$Path,
@@ -523,7 +894,7 @@ function Assert-CorridorKeySuitePayloadRoot {
         throw "Suite payload root not found: $Root"
     }
 
-    foreach ($relativeDir in @("runtime", "gui", "ofx-resolve-fusion", "ofx-nuke", "adobe")) {
+    foreach ($relativeDir in @("runtime\win64", "runtime\resources", "gui", "ofx-resolve-fusion", "ofx-nuke", "adobe")) {
         $candidate = Join-Path $Root $relativeDir
         if (-not (Test-CorridorKeyDirectoryHasFiles -Path $candidate)) {
             throw "Suite payload subdirectory is missing, not a directory, or empty: $candidate"
@@ -654,6 +1025,18 @@ if ([string]::IsNullOrWhiteSpace($OutputIssPath)) {
     $tempIssDir = Join-Path $env:TEMP ("corridorkey_suite_iss_" + [System.Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tempIssDir -Force | Out-Null
     $OutputIssPath = Join-Path $tempIssDir "corridorkey_suite.iss"
+}
+
+if (-not [string]::IsNullOrWhiteSpace($SuitePayloadRoot) -and -not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot)) {
+    throw "Pass either -SuitePayloadRoot or -SuitePayloadOutputRoot, not both."
+}
+if (-not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot)) {
+    $SuitePayloadRoot = New-CorridorKeySuitePayloadRootFromPackages `
+        -OutputRoot $SuitePayloadOutputRoot `
+        -RuntimeRoot $RuntimePackageRoot `
+        -OfxRoot $OfxPackageRoot `
+        -AdobeRoot $AdobePackageRoot
+    Write-Host "[suite] Staged suite payload: $SuitePayloadRoot" -ForegroundColor Green
 }
 
 $resolvedSuitePayloadRoot = Assert-CorridorKeySuitePayloadRoot -Root $SuitePayloadRoot

@@ -272,6 +272,10 @@ std::filesystem::path resolve_host_plugin_runtime_server_binary(
     }
 
 #ifdef _WIN32
+    if (auto shared_root = common::host_plugin_shared_runtime_root(plugin_module_path);
+        shared_root.has_value()) {
+        return *shared_root / "Contents" / "Win64" / "corridorkey_host_plugin_runtime_server.exe";
+    }
     auto win64_dir = plugin_module_path.parent_path();
     return win64_dir / "corridorkey_host_plugin_runtime_server.exe";
 #elif defined(__linux__)

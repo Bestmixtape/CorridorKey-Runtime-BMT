@@ -1,10 +1,14 @@
 #include <catch2/catch_all.hpp>
 
+#include <filesystem>
+#include <fstream>
+
 #include "app/host_plugin_runtime_client.hpp"
 #include "app/host_plugin_runtime_family.hpp"
 #include "app/host_plugin_runtime_service.hpp"
 #include "app/host_plugin_session_broker.hpp"
 #include "common/host_plugin_runtime_defaults.hpp"
+#include "common/runtime_paths.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -54,6 +58,37 @@ TEST_CASE("windows host plugin runtime server resolves to the dedicated GUI bina
 
     REQUIRE(runtime_server.filename() == "corridorkey_host_plugin_runtime_server.exe");
     REQUIRE(runtime_server.parent_path() == plugin_path.parent_path());
+#endif
+}
+
+TEST_CASE("windows suite runtime config points host plugins at shared runtime root",
+          "[unit][ofx][runtime][regression]") {
+#if !defined(_WIN32)
+    SUCCEED("The Windows suite runtime config is only consumed on Windows.");
+#else
+    const auto temp_root = std::filesystem::temp_directory_path() /
+                           ("corridorkey-suite-runtime-config-" +
+                            std::to_string(Catch::getSeed()));
+    std::filesystem::remove_all(temp_root);
+    const auto plugin_path =
+        temp_root / "CorridorKey.ofx.bundle" / "Contents" / "Win64" / "CorridorKey.ofx";
+    const auto config_path =
+        temp_root / "CorridorKey.ofx.bundle" / "Contents" / "Resources" /
+        "corridorkey_runtime.ini";
+    const auto shared_root = temp_root / "SharedRuntime";
+    std::filesystem::create_directories(plugin_path.parent_path());
+    std::filesystem::create_directories(config_path.parent_path());
+    std::ofstream(config_path) << "[runtime]\nshared_root=" << shared_root.string() << "\n";
+
+    const auto resolved_root = common::host_plugin_shared_runtime_root(plugin_path);
+    REQUIRE(resolved_root.has_value());
+    REQUIRE(*resolved_root == shared_root);
+
+    const auto runtime_server = resolve_host_plugin_runtime_server_binary(plugin_path);
+    REQUIRE(runtime_server == shared_root / "Contents" / "Win64" /
+                                  "corridorkey_host_plugin_runtime_server.exe");
+
+    std::filesystem::remove_all(temp_root);
 #endif
 }
 

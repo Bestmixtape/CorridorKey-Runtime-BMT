@@ -1025,6 +1025,14 @@ std::filesystem::path resolve_models_root() {
     }
 
     if (auto module_path = plugin_module_path(); module_path.has_value()) {
+        if (auto shared_root = common::host_plugin_shared_runtime_root(*module_path);
+            shared_root.has_value()) {
+            auto models = *shared_root / "Contents" / "Resources" / "models";
+            log_message("resolve_models_root",
+                        std::string("Using suite shared runtime models: ") + models.string());
+            return models;
+        }
+
         auto resources = module_path->parent_path().parent_path() / "Resources" / "models";
         std::error_code error;
         if (std::filesystem::exists(resources, error) && !error) {

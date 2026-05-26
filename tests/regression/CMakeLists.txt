@@ -155,4 +155,11 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_compile_scaffold.ps1
     )
     set_tests_properties(regression_windows_suite_compile_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_payload_staging
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_payload_staging.ps1
+    )
+    set_tests_properties(regression_windows_suite_payload_staging PROPERTIES LABELS "regression")
 endif()

@@ -302,6 +302,64 @@ inline std::filesystem::path default_models_root() {
     return "models";
 }
 
+inline std::optional<std::filesystem::path> suite_runtime_root_from_config_file(
+    const std::filesystem::path& config_path) {
+#if defined(_WIN32)
+    std::error_code error;
+    if (config_path.empty() || !std::filesystem::exists(config_path, error) || error) {
+        return std::nullopt;
+    }
+
+    std::wstring buffer(32768, L'\0');
+    const auto copied = GetPrivateProfileStringW(
+        L"runtime", L"shared_root", L"", buffer.data(), static_cast<DWORD>(buffer.size()),
+        config_path.wstring().c_str());
+    if (copied == 0) {
+        return std::nullopt;
+    }
+    buffer.resize(copied);
+    return std::filesystem::path(buffer);
+#else
+    (void)config_path;
+    return std::nullopt;
+#endif
+}
+
+inline std::vector<std::filesystem::path> host_plugin_runtime_config_candidates(
+    const std::filesystem::path& plugin_module_path) {
+    std::vector<std::filesystem::path> candidates;
+    if (plugin_module_path.empty()) {
+        return candidates;
+    }
+
+    const auto plugin_dir = plugin_module_path.parent_path();
+    if (plugin_dir.empty()) {
+        return candidates;
+    }
+
+    const auto contents_dir = plugin_dir.parent_path();
+    if (plugin_dir.filename() == "Win64" && contents_dir.filename() == "Contents") {
+        candidates.push_back(contents_dir / "Resources" / "corridorkey_runtime.ini");
+    }
+    candidates.push_back(plugin_dir / "corridorkey_runtime.ini");
+    return candidates;
+}
+
+inline std::optional<std::filesystem::path> host_plugin_shared_runtime_root(
+    const std::filesystem::path& plugin_module_path) {
+    if (auto override_path = environment_variable_copy("CORRIDORKEY_SHARED_RUNTIME_ROOT");
+        override_path.has_value()) {
+        return std::filesystem::path(*override_path);
+    }
+
+    for (const auto& candidate : host_plugin_runtime_config_candidates(plugin_module_path)) {
+        if (auto root = suite_runtime_root_from_config_file(candidate); root.has_value()) {
+            return root;
+        }
+    }
+    return std::nullopt;
+}
+
 inline std::optional<std::filesystem::path> cache_root_override() {
     auto override_path = environment_variable_copy("CORRIDORKEY_CACHE_DIR");
     if (!override_path.has_value()) {

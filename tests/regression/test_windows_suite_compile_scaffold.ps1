@@ -142,7 +142,8 @@ function New-SuitePayloadRoot {
     param([string]$Root)
 
     foreach ($relativeDir in @(
-        "runtime",
+        "runtime\win64",
+        "runtime\resources",
         "gui",
         "ofx-resolve-fusion",
         "ofx-nuke",
@@ -155,7 +156,8 @@ function New-SuitePayloadRoot {
 function New-FileBackedSuitePayloadRoot {
     param([string]$Root)
 
-    New-TextFile -Path (Join-Path $Root "runtime")
+    New-TextFile -Path (Join-Path $Root "runtime\win64")
+    New-TextFile -Path (Join-Path $Root "runtime\resources\payload.txt")
     foreach ($relativeDir in @(
         "gui",
         "ofx-resolve-fusion",
