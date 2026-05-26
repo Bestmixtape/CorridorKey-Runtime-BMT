@@ -592,8 +592,17 @@ async function configureAdvancedControls(page) {
   await waitForBody(page, "Output mode");
   await waitForBody(page, "Tiling and refinement");
   await waitForBody(page, "Runtime diagnostics");
+  await waitForBody(page, "Tiled (needs runtime support)");
+  const tiledRefinementDisabled = await page
+    .getByLabel("Refinement mode")
+    .locator("option[value='tiled']")
+    .evaluate((option) => option.disabled);
+  assert.equal(
+    tiledRefinementDisabled,
+    true,
+    "Tiled refinement must stay disabled until runtime artifacts advertise support"
+  );
   await page.getByLabel("Quality fallback").selectOption("coarse_to_fine");
-  await page.getByLabel("Refinement mode").selectOption("tiled");
   await page.getByLabel("Precision").selectOption("fp16");
   await page.getByLabel("Resolution").selectOption("2048");
   await page.getByLabel("Batch size").fill("3");
@@ -607,7 +616,7 @@ async function assertAdvancedProcessPayload(page) {
   const args = await page.evaluate(() => window.__corridorkeyLastProcessArgs);
 
   assert.equal(args.quality_fallback, "coarse_to_fine");
-  assert.equal(args.refinement_mode, "tiled");
+  assert.equal(args.refinement_mode, undefined);
   assert.equal(args.precision, "fp16");
   assert.equal(args.resolution, 2048);
   assert.equal(args.batch_size, 3);

@@ -2,15 +2,15 @@ import { describe, expect, test } from "vitest";
 import {
   advancedProcessingPayload,
   normalizeAdvancedSettings,
+  REFINEMENT_MODE_OPTIONS,
   RESOLUTION_OPTIONS,
   type AdvancedProcessingSettings
 } from "@/lib/advancedSettings";
 
 describe("advanced processing settings", () => {
-  test("normalizes runtime controls into the Tauri process payload", () => {
+  test("normalizes supported runtime controls into the Tauri process payload", () => {
     const settings = normalizeAdvancedSettings({
       qualityFallback: "coarse_to_fine",
-      refinementMode: "tiled",
       precision: "fp16",
       resolution: 2048,
       batchSize: 3,
@@ -21,7 +21,6 @@ describe("advanced processing settings", () => {
 
     expect(advancedProcessingPayload(settings)).toEqual({
       quality_fallback: "coarse_to_fine",
-      refinement_mode: "tiled",
       precision: "fp16",
       resolution: 2048,
       batch_size: 3,
@@ -47,5 +46,26 @@ describe("advanced processing settings", () => {
     ]);
 
     expect(normalizeAdvancedSettings({ resolution: 768 as never }).resolution).toBe(0);
+  });
+
+  test("classifies non-auto refinement overrides as awaiting runtime contract", () => {
+    expect(REFINEMENT_MODE_OPTIONS.map((option) => [
+      option.value,
+      option.enabled,
+      option.status
+    ])).toEqual([
+      ["auto", true, "supported"],
+      ["full_frame", false, "awaiting_runtime_contract"],
+      ["tiled", false, "awaiting_runtime_contract"]
+    ]);
+  });
+
+  test("fails closed when disabled refinement overrides are restored from state", () => {
+    const settings = normalizeAdvancedSettings({
+      refinementMode: "tiled"
+    } satisfies Partial<AdvancedProcessingSettings>);
+
+    expect(settings.refinementMode).toBe("auto");
+    expect(advancedProcessingPayload(settings).refinement_mode).toBeUndefined();
   });
 });

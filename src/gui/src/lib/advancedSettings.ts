@@ -2,6 +2,14 @@ export type QualityFallbackMode = "auto" | "direct" | "coarse_to_fine";
 export type RefinementMode = "auto" | "full_frame" | "tiled";
 export type PrecisionMode = "auto" | "fp16";
 export type RuntimeResolution = 0 | 512 | 1024 | 1536 | 2048;
+export type AdvancedControlStatus = "supported" | "awaiting_runtime_contract";
+
+export interface AdvancedControlOption<T extends string | number> {
+  value: T;
+  label: string;
+  enabled: boolean;
+  status: AdvancedControlStatus;
+}
 
 export interface AdvancedProcessingSettings {
   qualityFallback: QualityFallbackMode;
@@ -36,33 +44,43 @@ export const DEFAULT_ADVANCED_SETTINGS: AdvancedProcessingSettings = {
   tiled: false
 };
 
-export const QUALITY_FALLBACK_OPTIONS: Array<{ value: QualityFallbackMode; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "direct", label: "Direct" },
-  { value: "coarse_to_fine", label: "Coarse to fine" }
+export const QUALITY_FALLBACK_OPTIONS: Array<AdvancedControlOption<QualityFallbackMode>> = [
+  { value: "auto", label: "Auto", enabled: true, status: "supported" },
+  { value: "direct", label: "Direct", enabled: true, status: "supported" },
+  { value: "coarse_to_fine", label: "Coarse to fine", enabled: true, status: "supported" }
 ];
 
-export const REFINEMENT_MODE_OPTIONS: Array<{ value: RefinementMode; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "full_frame", label: "Full frame" },
-  { value: "tiled", label: "Tiled" }
+export const REFINEMENT_MODE_OPTIONS: Array<AdvancedControlOption<RefinementMode>> = [
+  { value: "auto", label: "Auto", enabled: true, status: "supported" },
+  {
+    value: "full_frame",
+    label: "Full frame",
+    enabled: false,
+    status: "awaiting_runtime_contract"
+  },
+  {
+    value: "tiled",
+    label: "Tiled",
+    enabled: false,
+    status: "awaiting_runtime_contract"
+  }
 ];
 
-export const PRECISION_OPTIONS: Array<{ value: PrecisionMode; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "fp16", label: "FP16" }
+export const PRECISION_OPTIONS: Array<AdvancedControlOption<PrecisionMode>> = [
+  { value: "auto", label: "Auto", enabled: true, status: "supported" },
+  { value: "fp16", label: "FP16", enabled: true, status: "supported" }
 ];
 
-export const RESOLUTION_OPTIONS: Array<{ value: RuntimeResolution; label: string }> = [
-  { value: 0, label: "Auto" },
-  { value: 512, label: "512" },
-  { value: 1024, label: "1024" },
-  { value: 1536, label: "1536" },
-  { value: 2048, label: "2048" }
+export const RESOLUTION_OPTIONS: Array<AdvancedControlOption<RuntimeResolution>> = [
+  { value: 0, label: "Auto", enabled: true, status: "supported" },
+  { value: 512, label: "512", enabled: true, status: "supported" },
+  { value: 1024, label: "1024", enabled: true, status: "supported" },
+  { value: 1536, label: "1536", enabled: true, status: "supported" },
+  { value: 2048, label: "2048", enabled: true, status: "supported" }
 ];
 
 const QUALITY_FALLBACK_MODES = QUALITY_FALLBACK_OPTIONS.map((option) => option.value);
-const REFINEMENT_MODES = REFINEMENT_MODE_OPTIONS.map((option) => option.value);
+const REFINEMENT_MODES = enabledOptionValues(REFINEMENT_MODE_OPTIONS);
 const PRECISION_MODES = PRECISION_OPTIONS.map((option) => option.value);
 const RESOLUTIONS = RESOLUTION_OPTIONS.map((option) => option.value);
 
@@ -147,4 +165,10 @@ function clampNumber(
   }
 
   return Math.max(min, Math.min(max, value));
+}
+
+function enabledOptionValues<T extends string | number>(
+  options: Array<AdvancedControlOption<T>>
+): T[] {
+  return options.filter((option) => option.enabled).map((option) => option.value);
 }
