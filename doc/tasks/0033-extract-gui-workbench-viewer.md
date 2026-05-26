@@ -1,6 +1,6 @@
 # Task `0033`: Extract GUI Workbench Viewer
 
-**Status:** in-progress
+**Status:** done
 **Created:** 2026-05-26
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0003-useful-tauri-gui.md
@@ -19,23 +19,24 @@ testable pieces without changing product behavior.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] `ProcessFlow.tsx` is split into focused workflow shell, setup rail,
+- [x] `ProcessFlow.tsx` is split into focused workflow shell, setup rail,
       viewer stage, comparison surface, preview surface, job status, and
       advanced/output panels where that reduces complexity.
-- [ ] Viewer state helpers remain testable under `src/gui/src/lib/` and do not
+- [x] Viewer state helpers remain testable under `src/gui/src/lib/` and do not
       depend on React component internals.
-- [ ] Existing behaviors are preserved: result preview fallback, source/hint
+- [x] Existing behaviors are preserved: result preview fallback, source/hint
       selection, comparison modes, synchronized playback, output backgrounds,
       reset, and diagnostics actions.
-- [ ] No new dependency is added for comparison or viewer state unless a
+- [x] No new dependency is added for comparison or viewer state unless a
       separate review shows it is smaller and safer than local code.
-- [ ] Unit and E2E coverage remain green before, during, and after extraction.
+- [x] Unit and E2E coverage remain green before, during, and after extraction.
 
 ## Plan
 
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
-- [ ] Establish a green baseline with `pnpm test` and real-preview smoke.
+- [x] Establish a green baseline with `pnpm test`; real-preview smoke was
+      attempted and blocked by missing preview `ffmpeg.exe`.
 - [x] Extract pure helper logic first from `ProcessFlow.tsx` into
       `src/gui/src/lib/` only when tests pin behavior.
 - [x] Extract React components under `src/gui/src/components/workflow/` in
@@ -43,7 +44,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Keep prop surfaces small: pass buffer descriptors and callbacks rather
       than entire stores when possible.
 - [x] Run smoke tests after each meaningful extraction.
-- [ ] Finish with a fresh-context review focused on behavior preservation.
+- [x] Finish with a fresh-context review focused on behavior preservation.
 
 ## Notes
 
@@ -84,11 +85,27 @@ components.
 
 Verification: `pnpm test` passed from `src/gui` after the second extraction.
 
+Fresh-context review completed through `ad-review` against the setup-rail
+extraction commit. Standards had no findings. Spec had one concern: the setup
+rail still owned too many panels to close this task. The concern was addressed
+by extracting `WorkflowInputsPanel.tsx`, `OutputRecipePanel.tsx`,
+`QualityControlsPanel.tsx`, `WorkflowRunPanel.tsx`, and
+`WorkflowPanelPrimitives.tsx`. `WorkflowSetupRail.tsx` now assembles those
+panels and no longer owns their markup directly.
+
+Verification after the panel extraction: `pnpm exec tsc --noEmit --pretty
+false` passed. `pnpm test` initially hit two transient E2E failures: a local
+`net::ERR_NO_BUFFER_SPACE` CSS load failure and one comparison-drag assertion
+that immediately passed when the job smoke was rerun in isolation. A final
+`pnpm test` passed from `src/gui`, including unit, build, readiness smoke, and
+job lifecycle E2E coverage. Real-runtime smoke remains blocked by the missing
+preview `ffmpeg.exe` prerequisite documented above.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
-- [ ] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
-- [ ] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Local tests pass (or N/A documented in Notes)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [x] No orphan `TODO`/`FIXME` introduced
+- [x] Status updated to `done` and Notes log closes the task
