@@ -11,6 +11,8 @@ export interface DiagnosticSummaryInput {
   artifactPath: string | null;
   error: string | null;
   warnings: string[];
+  recipeChips?: string[];
+  artifactMetadata?: Record<string, unknown>;
   metrics?: object;
   timings: DiagnosticTiming[] | undefined;
   logs: string[];
@@ -42,12 +44,26 @@ export function buildDiagnosticSummary(input: DiagnosticSummaryInput): string {
     }
   }
 
-  if (input.metrics && Object.keys(input.metrics).length > 0) {
+  if (input.recipeChips && input.recipeChips.length > 0) {
+    lines.push("", "Job recipe:");
+    for (const chip of input.recipeChips) {
+      lines.push(`- ${chip}`);
+    }
+  }
+
+  const artifactMetadata = renderableEntries(input.artifactMetadata);
+  if (artifactMetadata.length > 0) {
+    lines.push("", "Artifact metadata:");
+    for (const [key, value] of artifactMetadata) {
+      lines.push(`${key}: ${value}`);
+    }
+  }
+
+  const metrics = renderableEntries(input.metrics);
+  if (metrics.length > 0) {
     lines.push("", "Metrics:");
-    for (const [key, value] of Object.entries(input.metrics)) {
-      if (isRenderableMetric(value)) {
-        lines.push(`${key}: ${value}`);
-      }
+    for (const [key, value] of metrics) {
+      lines.push(`${key}: ${value}`);
     }
   }
 
@@ -76,6 +92,16 @@ function formatTimingLine(timing: DiagnosticTiming): string {
     : "";
 
   return `${name}: ${total}${samples}`;
+}
+
+function renderableEntries(input: object | undefined): Array<[string, string | number | boolean]> {
+  if (!input) {
+    return [];
+  }
+
+  return Object.entries(input).filter((entry): entry is [string, string | number | boolean] =>
+    isRenderableMetric(entry[1])
+  );
 }
 
 function isRenderableMetric(value: unknown): value is string | number | boolean {

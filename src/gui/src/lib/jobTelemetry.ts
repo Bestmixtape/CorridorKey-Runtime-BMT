@@ -6,6 +6,7 @@ export interface JobTiming {
 
 export interface JobMetrics {
   active_stage?: string;
+  proxy_state?: string;
   processed_frames?: number;
   total_frames?: number;
   render_fps?: number;
@@ -37,6 +38,11 @@ export interface JobTelemetrySummary {
   workerLabel: string;
   decodeFpsLabel: string;
   encodeFpsLabel: string;
+  throughputLabel: string;
+  proxyLabel: string;
+  ramLabel: string;
+  cpuLabel: string;
+  vramLabel: string;
   stageCount: number;
 }
 
@@ -49,10 +55,15 @@ export function jobTelemetrySummary(input: JobTelemetryInput): JobTelemetrySumma
     etaLabel: etaMs === null ? "n/a" : formatSeconds(etaMs),
     fpsLabel: formatFps(metricNumber(input.metrics?.render_fps) ?? frameFps(input.timings ?? [])),
     frameLabel: frameLabel(input.metrics),
-    stageLabel: input.metrics?.active_stage || "n/a",
+    stageLabel: stageLabel(input.metrics),
     workerLabel: workerLabel(input.metrics),
     decodeFpsLabel: fpsKindLabel(input.metrics?.decode_fps, "decode"),
     encodeFpsLabel: fpsKindLabel(input.metrics?.encode_fps, "encode"),
+    throughputLabel: formatFps(throughputFps(input.metrics, elapsedMs)),
+    proxyLabel: proxyLabel(input.metrics),
+    ramLabel: memoryLabel(input.metrics?.ram_usage_mb, "RAM"),
+    cpuLabel: cpuLabel(input.metrics?.cpu_usage_percent),
+    vramLabel: memoryLabel(input.metrics?.vram_usage_mb, "VRAM"),
     stageCount: input.timings?.length ?? 0
   };
 }
@@ -89,6 +100,15 @@ function frameFps(timings: JobTiming[]): number | null {
   return frameTiming.sample_count / (frameTiming.total_ms / 1000);
 }
 
+function throughputFps(metrics: JobMetrics | undefined, elapsedMs: number): number | null {
+  const processedFrames = metricNumber(metrics?.processed_frames);
+  if (processedFrames === null || processedFrames <= 0 || elapsedMs <= 0) {
+    return null;
+  }
+
+  return processedFrames / (elapsedMs / 1000);
+}
+
 function formatSeconds(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(1)}s`;
 }
@@ -118,9 +138,67 @@ function workerLabel(metrics: JobMetrics | undefined): string {
   return `${rounded} ${rounded === 1 ? "worker" : "workers"}`;
 }
 
+function stageLabel(metrics: JobMetrics | undefined): string {
+  const stage = stringMetric(metrics?.active_stage);
+  if (!stage) {
+    return "n/a";
+  }
+
+  const knownStages: Record<string, string> = {
+    decode: "Decode",
+    decoding: "Decode",
+    encode: "Encode",
+    encoding: "Encode",
+    inference: "Render",
+    infer: "Render",
+    render: "Render",
+    matting: "Matte",
+    matte: "Matte",
+    proxy: "Proxy",
+    proxy_generation: "Proxy generation",
+    preview_proxy: "Preview proxy"
+  };
+
+  return knownStages[stage] ?? formatMetricText(stage);
+}
+
+function proxyLabel(metrics: JobMetrics | undefined): string {
+  const proxyState = stringMetric(metrics?.proxy_state);
+  return proxyState ? formatMetricText(proxyState) : "n/a";
+}
+
 function fpsKindLabel(value: number | undefined, kind: string): string {
   const fps = metricNumber(value);
   return fps === null ? "n/a" : `${fps.toFixed(2)} fps ${kind}`;
+}
+
+function memoryLabel(value: number | undefined, kind: string): string {
+  const megabytes = metricNumber(value);
+  if (megabytes === null || megabytes <= 0) {
+    return "n/a";
+  }
+  return `${Math.round(megabytes)}MB ${kind}`;
+}
+
+function cpuLabel(value: number | undefined): string {
+  const percent = metricNumber(value);
+  if (percent === null || percent < 0) {
+    return "n/a";
+  }
+  return `${percent.toFixed(1)}% CPU`;
+}
+
+function stringMetric(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function formatMetricText(value: string): string {
+  const normalized = value.replace(/[_-]+/g, " ");
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function metricNumber(value: number | undefined): number | null {

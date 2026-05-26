@@ -274,6 +274,20 @@ export function ProcessFlow() {
     outputRecipe,
     advancedSettings
   ]);
+  const artifactMetadata = useMemo(() => ({
+    output_recipe: outputRecipeLabel(outputRecipe),
+    artifact_family: outputRecipe.artifactFamily,
+    alpha_mode: outputRecipe.alphaMode,
+    preview_background: outputRecipe.previewBackground,
+    color_intent: outputRecipe.colorIntent,
+    video_encode: videoEncodeMode,
+    output_path: artifactPath || outputPath || ""
+  }), [
+    artifactPath,
+    outputPath,
+    outputRecipe,
+    videoEncodeMode
+  ]);
 
   const handleSelectInput = async () => {
     await applySelectedInput(await selectSourceAsset("file"), "file");
@@ -405,6 +419,7 @@ export function ProcessFlow() {
           metrics={metrics}
           telemetry={telemetry}
           recipeChips={recipeChips}
+          artifactMetadata={artifactMetadata}
           showLogs={showLogs}
           onRevealArtifact={handleRevealArtifact}
           onToggleLogs={() => setShowLogs(!showLogs)}
@@ -1356,6 +1371,7 @@ function JobStatusPanel({
   metrics,
   telemetry,
   recipeChips,
+  artifactMetadata,
   showLogs,
   onRevealArtifact,
   onToggleLogs
@@ -1372,6 +1388,7 @@ function JobStatusPanel({
   metrics: JobMetrics;
   telemetry: JobTelemetrySummary;
   recipeChips: string[];
+  artifactMetadata: Record<string, string>;
   showLogs: boolean;
   onRevealArtifact: () => void;
   onToggleLogs: () => void;
@@ -1391,6 +1408,8 @@ function JobStatusPanel({
     artifactPath,
     error,
     warnings,
+    recipeChips,
+    artifactMetadata,
     metrics,
     timings,
     logs
@@ -1401,6 +1420,8 @@ function JobStatusPanel({
     artifactPath,
     error,
     warnings,
+    recipeChips,
+    artifactMetadata,
     metrics,
     timings,
     logs
@@ -1446,16 +1467,18 @@ function JobStatusPanel({
           {telemetry.stageLabel !== "n/a" && <StatusPill label={`Stage ${telemetry.stageLabel}`} />}
           {telemetry.frameLabel !== "n/a" && <StatusPill label={telemetry.frameLabel} />}
           {telemetry.fpsLabel !== "n/a" && <StatusPill label={`Render ${telemetry.fpsLabel}`} />}
+          {telemetry.throughputLabel !== "n/a" && <StatusPill label={`Throughput ${telemetry.throughputLabel}`} />}
           {telemetry.decodeFpsLabel !== "n/a" && <StatusPill label={telemetry.decodeFpsLabel} />}
           {telemetry.encodeFpsLabel !== "n/a" && <StatusPill label={telemetry.encodeFpsLabel} />}
+          {telemetry.proxyLabel !== "n/a" && <StatusPill label={`Proxy ${telemetry.proxyLabel}`} />}
           {telemetry.workerLabel !== "n/a" && <StatusPill label={telemetry.workerLabel} />}
           {telemetry.stageCount > 0 && <StatusPill label={`${telemetry.stageCount} stages`} />}
           {recipeChips.slice(0, 16).map((chip) => (
             <StatusPill key={chip} label={chip} />
           ))}
-          {metrics.ram_usage_mb && <StatusPill label={`${metrics.ram_usage_mb}MB RAM`} />}
-          {metrics.cpu_usage_percent !== undefined && <StatusPill label={`${metrics.cpu_usage_percent.toFixed(1)}% CPU`} />}
-          {metrics.vram_usage_mb && <StatusPill label={`${metrics.vram_usage_mb}MB VRAM`} />}
+          {telemetry.ramLabel !== "n/a" && <StatusPill label={telemetry.ramLabel} />}
+          {telemetry.cpuLabel !== "n/a" && <StatusPill label={telemetry.cpuLabel} />}
+          {telemetry.vramLabel !== "n/a" && <StatusPill label={telemetry.vramLabel} />}
           <StatusPill label={`${Math.round(currentProgress)}%`} />
         </div>
       </div>

@@ -219,8 +219,15 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     event.message = "Generic CPU";
     event.fallback = BackendFallbackInfo{Backend::CoreML, Backend::CPU, "CoreML session failed"};
     event.timings.push_back(StageTiming{"ort_run", 12.5, 1, 3});
+    event.metrics["active_stage"] = "inference";
+    event.metrics["proxy_state"] = "building_preview";
     event.metrics["render_fps"] = 18.5;
+    event.metrics["decode_fps"] = 62.25;
+    event.metrics["encode_fps"] = 30.0;
     event.metrics["processed_frames"] = 12;
+    event.metrics["total_frames"] = 24;
+    event.metrics["worker_count"] = 3;
+    event.metrics["vram_usage_mb"] = 8192;
 
     auto json = to_json(event);
 
@@ -233,8 +240,15 @@ TEST_CASE("job events serialize to stable NDJSON payloads", "[unit][runtime]") {
     REQUIRE(json["timings"][0]["total_ms"] == Catch::Approx(12.5));
     REQUIRE(json["timings"][0]["avg_ms"] == Catch::Approx(12.5));
     REQUIRE(json["timings"][0]["ms_per_unit"] == Catch::Approx(12.5 / 3.0));
+    REQUIRE(json["metrics"]["active_stage"] == "inference");
+    REQUIRE(json["metrics"]["proxy_state"] == "building_preview");
     REQUIRE(json["metrics"]["render_fps"] == Catch::Approx(18.5));
+    REQUIRE(json["metrics"]["decode_fps"] == Catch::Approx(62.25));
+    REQUIRE(json["metrics"]["encode_fps"] == Catch::Approx(30.0));
     REQUIRE(json["metrics"]["processed_frames"] == 12);
+    REQUIRE(json["metrics"]["total_frames"] == 24);
+    REQUIRE(json["metrics"]["worker_count"] == 3);
+    REQUIRE(json["metrics"]["vram_usage_mb"] == 8192);
 }
 
 TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {

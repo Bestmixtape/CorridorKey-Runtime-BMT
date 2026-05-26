@@ -4,9 +4,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 #include "../test_model_artifact_utils.hpp"
 #include "app/job_orchestrator.hpp"
+#include "app/runtime_contracts.hpp"
 
 using namespace corridorkey;
 using namespace corridorkey::app;
@@ -76,14 +78,19 @@ TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[inte
 
     SECTION("Happy path completion") {
         int frames_processed = 0;
+        std::vector<nlohmann::json> events;
         auto on_progress = [&](float /*progress*/, const std::string& status) -> bool {
             if (status.find("Processing frame") != std::string::npos) {
                 frames_processed++;
             }
             return true;  // Continue
         };
+        auto on_event = [&](const JobEvent& event) -> bool {
+            events.push_back(to_json(event));
+            return true;
+        };
 
-        auto run_res = JobOrchestrator::run(request, on_progress, nullptr);
+        auto run_res = JobOrchestrator::run(request, on_progress, on_event);
         if (!run_res.has_value()) {
             FAIL("Orchestrator returned error: " << run_res.error().message);
         }
@@ -92,6 +99,23 @@ TEST_CASE("JobOrchestrator runs full sequence and respects cancellation", "[inte
         REQUIRE(std::filesystem::exists(tmp_dir / "out_seq" / "Comp" / "dummy_frame_0001.png"));
         REQUIRE(std::filesystem::exists(tmp_dir / "out_seq" / "Comp" / "dummy_frame_0002.png"));
         REQUIRE(std::filesystem::exists(tmp_dir / "out_seq" / "Comp" / "dummy_frame_0003.png"));
+
+        auto progress_it = std::find_if(events.begin(), events.end(), [](const auto& event) {
+            return event.value("type", std::string()) == "progress" && event.contains("metrics");
+        });
+        REQUIRE(progress_it != events.end());
+        REQUIRE((*progress_it)["metrics"]["active_stage"] == "inference");
+        REQUIRE((*progress_it)["metrics"]["total_frames"] == 3);
+        REQUIRE((*progress_it)["metrics"]["worker_count"] == 1);
+
+        auto completed_it = std::find_if(events.begin(), events.end(), [](const auto& event) {
+            return event.value("type", std::string()) == "completed" && event.contains("metrics");
+        });
+        REQUIRE(completed_it != events.end());
+        REQUIRE((*completed_it)["metrics"]["active_stage"] == "complete");
+        REQUIRE((*completed_it)["metrics"]["processed_frames"] == 3);
+        REQUIRE((*completed_it)["metrics"]["total_frames"] == 3);
+        REQUIRE((*completed_it)["metrics"]["worker_count"] == 1);
     }
 
     SECTION("Immediate cancellation") {

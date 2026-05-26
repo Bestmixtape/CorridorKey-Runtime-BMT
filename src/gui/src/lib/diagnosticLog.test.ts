@@ -10,6 +10,17 @@ describe("diagnostic log summary", () => {
       artifactPath: "C:\\Shots\\result.mov",
       error: "Runtime fixture failed",
       warnings: ["Fallback probe skipped"],
+      recipeChips: [
+        "Preset Preview",
+        "Model Green Matting",
+        "Output Movie",
+        "Alpha Composited preview"
+      ],
+      artifactMetadata: {
+        output_recipe: "Movie",
+        artifact_family: "movie",
+        video_encode: "balanced"
+      },
       metrics: {
         render_fps: 18.5,
         processed_frames: 12,
@@ -32,6 +43,11 @@ describe("diagnostic log summary", () => {
     expect(summary).toContain("Error: Runtime fixture failed");
     expect(summary).toContain("Warnings:");
     expect(summary).toContain("- Fallback probe skipped");
+    expect(summary).toContain("Job recipe:");
+    expect(summary).toContain("- Model Green Matting");
+    expect(summary).toContain("Artifact metadata:");
+    expect(summary).toContain("output_recipe: Movie");
+    expect(summary).toContain("video_encode: balanced");
     expect(summary).toContain("Metrics:");
     expect(summary).toContain("render_fps: 18.5");
     expect(summary).toContain("processed_frames: 12");

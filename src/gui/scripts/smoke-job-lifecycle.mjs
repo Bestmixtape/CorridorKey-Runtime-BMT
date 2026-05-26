@@ -40,14 +40,17 @@ const scenarios = [
       await assertAdvancedProcessPayload(page);
       await waitForBody(page, "Complete");
       await waitForBody(page, artifactPath);
-      await waitForBody(page, "Stage matte");
+      await waitForBody(page, "Stage Matte");
+      await waitForBody(page, "Proxy Building preview");
       await waitForBody(page, "12 / 24 frames");
       await waitForBody(page, "Render 18.50 fps");
+      await waitForBody(page, "Throughput");
       await waitForBody(page, "62.25 fps decode");
       await waitForBody(page, "30.00 fps encode");
       await waitForBody(page, "3 workers");
       await waitForBody(page, "512MB RAM");
       await waitForBody(page, "12.5% CPU");
+      await waitForBody(page, "8192MB VRAM");
       await waitForBody(page, "2 stages");
       await waitForBody(page, "Encode balanced");
       await waitForBody(page, "Output Movie");
@@ -295,6 +298,7 @@ async function runScenario(context, baseUrl, scenario) {
           message: "Processing...",
           metrics: {
             active_stage: "matte",
+            proxy_state: "building_preview",
             processed_frames: 12,
             total_frames: 24,
             render_fps: 18.5,
@@ -302,7 +306,8 @@ async function runScenario(context, baseUrl, scenario) {
             encode_fps: 30,
             worker_count: 3,
             ram_usage_mb: 512,
-            cpu_usage_percent: 12.5
+            cpu_usage_percent: 12.5,
+            vram_usage_mb: 8192
           }
         });
 
@@ -658,6 +663,10 @@ async function assertCopyDiagnostics(page, expectedText) {
   const copied = await page.evaluate(() => window.__corridorkeyClipboard);
   assert(copied.includes("Raw logs:"), `Copied diagnostics missing raw logs:\n${copied}`);
   assert(copied.includes("Metrics:"), `Copied diagnostics missing metrics:\n${copied}`);
+  assert(copied.includes("Job recipe:"), `Copied diagnostics missing job recipe:\n${copied}`);
+  assert(copied.includes("Model Auto"), `Copied diagnostics missing model selection:\n${copied}`);
+  assert(copied.includes("Artifact metadata:"), `Copied diagnostics missing artifact metadata:\n${copied}`);
+  assert(copied.includes("output_recipe: Movie"), `Copied diagnostics missing output recipe:\n${copied}`);
 }
 
 async function assertPreviewProxyFallback(page) {
