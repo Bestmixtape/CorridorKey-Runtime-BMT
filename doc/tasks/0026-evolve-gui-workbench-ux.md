@@ -29,7 +29,7 @@ discover `doctor`, `models`, `presets`, or related diagnostics in a terminal.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] Completed jobs show a playable Result preview in the app for the
+- [x] Completed jobs show a playable Result preview in the app for the
       `assets/video_samples/Jordan4k.mp4` real-runtime smoke path, including
       browser-friendly fallback when the runtime artifact codec is not directly
       previewable.
@@ -461,6 +461,36 @@ Verification passed after review fixes: `pnpm test` with 44 unit tests plus
 build, readiness smoke, and fake-job E2E; full `cargo test` with 28 tests in
 `src/gui/src-tauri`; `tests/regression/test_tauri_runtime_staging_ffmpeg_source.ps1`;
 and `git diff --check` with CRLF normalization warnings only.
+
+### 2026-05-26
+
+Closed the real Result-preview acceptance criterion with a TDD smoke-contract
+slice. RED extended `smoke-real-runtime.mjs` to require a browser-friendly
+preview proxy for the Jordan 2048 real-runtime output; it failed because only
+the runtime `.mov` was produced. GREEN now resolves the staged Tauri
+`ffmpeg.exe` or canonical explicit `CORRIDORKEY_FFMPEG_PATH`, probes it,
+generates the same 720p H.264 MP4 proxy shape used by the native Tauri command,
+validates proxy decoding, opens the built GUI, completes a job whose Result
+artifact is the real Jordan output, forces the viewer codec-error fallback, and
+proves the Result viewer loads the proxy through its own Chromium `<video>`
+element. The fake-job E2E also asserts that a viewer codec error switches the
+UI to the `_preview.mp4` proxy and displays the `Preview proxy` marker.
+
+Verification passed: `pnpm test` with 44 unit tests plus build, readiness
+smoke, and fake-job E2E; and `pnpm smoke:real-runtime` with
+`CORRIDORKEY_FFMPEG_PATH` explicitly set to the local `ffmpeg.exe`, which
+processed `assets/video_samples/Jordan4k.mp4` with the 2048 model, wrote
+`build/gui-real-e2e/Jordan4k_gui_smoke_2048.mov`, generated
+`build/gui-real-e2e/Jordan4k_gui_smoke_2048_preview.mp4`, and loaded the proxy
+in Chromium as 1280x720 at 3.542 seconds.
+
+Fresh-context agent review first found that the fake-job proxy assertion could
+skip the visible proxy marker/source checks and that the real-runtime smoke
+proved only a standalone HTML preview rather than the in-app Result viewer.
+Both were fixed before the acceptance criterion was kept checked. A follow-up
+Standards rereview also removed the non-canonical `CK_REAL_PREVIEW_FFMPEG`
+override and hardened the local media server's HTTP byte-range handling for
+suffix and invalid ranges.
 
 ## Definition of Done
 

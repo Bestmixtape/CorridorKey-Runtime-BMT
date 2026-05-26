@@ -625,20 +625,26 @@ async function assertCopyDiagnostics(page, expectedText) {
 }
 
 async function assertPreviewProxyFallback(page) {
-  if (await page.evaluate(() => (window.__corridorkeyPreviewProxyCalls || 0) > 0)) {
-    return;
-  }
-
   const before = await page.evaluate(() => window.__corridorkeyPreviewProxyCalls || 0);
-  if (await page.locator("video").count() > 0) {
+  if (before === 0 && await page.locator("video").count() > 0) {
     await page.locator("video").first().evaluate((video) => {
       video.dispatchEvent(new Event("error"));
     });
+
+    await page.waitForFunction(
+      (count) => (window.__corridorkeyPreviewProxyCalls || 0) > count,
+      before,
+      { timeout: 15000 }
+    );
   }
 
+  await waitForBody(page, "Preview proxy");
   await page.waitForFunction(
-    (count) => (window.__corridorkeyPreviewProxyCalls || 0) > count,
-    before,
+    () =>
+      Array.from(document.querySelectorAll("video")).some((video) =>
+        (video.currentSrc || video.src || "").includes("_preview.mp4")
+      ),
+    null,
     { timeout: 15000 }
   );
 }
