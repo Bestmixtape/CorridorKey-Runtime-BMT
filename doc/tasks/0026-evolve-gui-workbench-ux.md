@@ -195,7 +195,7 @@ Executable follow-up slices split from this umbrella task.
       focused components and testable state helpers without behavior changes.
 - [x] `0034-finish-gui-comparison-ux.md` finishes A/B review ergonomics,
       missing-buffer states, side swapping, and desync recovery.
-- [ ] `0035-spike-gui-runtime-performance.md` investigates safe runtime
+- [x] `0035-spike-gui-runtime-performance.md` investigates safe runtime
       performance improvements before any render hot path change.
 - [ ] `0036-audit-gui-design-system.md` audits visual polish and token usage
       against the CorridorKey design system.
