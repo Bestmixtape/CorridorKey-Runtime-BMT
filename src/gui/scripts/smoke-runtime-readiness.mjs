@@ -1,24 +1,30 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import {
   chmodSync,
+  createReadStream,
   existsSync,
   mkdtempSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { createServer } from "vite";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const guiRoot = path.resolve(scriptDir, "..");
+const distRoot = path.join(guiRoot, "dist");
 const downloadsPath = "C:\\Users\\Smoke\\Downloads";
+const macModelName = "corridorkey_mlx.safetensors";
 const greenModelName = "corridorkey_fp16_1024.onnx";
 const blueModelName = "corridorkey_dynamic_blue_fp16.ts";
+const reference768ModelName = "corridorkey_fp16_768.onnx";
+const referenceFp32ModelName = "corridorkey_fp32_1024.onnx";
 
 let runtimePath = "";
 
@@ -27,23 +33,36 @@ const scenarios = [
     name: "success",
     statusText: "runtime ready",
     workflow: async (page) => {
-      await assertSelectOptions(page, 0, ["Fast Green", "Quality Blue"]);
-      await assertSelectOptions(page, 1, [
+      await assertSelectOptions(page, "Preset", ["Fast Green", "Quality Blue"]);
+      await assertSelectOptionsMissing(page, "Preset", ["Mac Balanced", "Mac Ultra Quality"]);
+      await assertSelectOptions(page, "Model", [
         "Runtime preset default",
         greenModelName,
         blueModelName
       ]);
+      await assertSelectOptionsMissing(page, "Model", [macModelName]);
       assert.equal(
-        await page.locator("select").nth(1).inputValue(),
+        await page.getByLabel("Model").inputValue(),
         "",
         "model selector should let the runtime preset choose by default"
       );
     },
-    diagnostics: async (_page, body) => {
+    diagnostics: async (page, body) => {
       assertContains(body, "Runtime ready", "success diagnostics summary");
       assertContains(body, runtimePath, "success runtime path");
       assertContains(body, "RTX Smoke 4090", "success device list");
       assertContains(body, "ok", "success command status");
+      await page.getByRole("button", { name: /Copy Doctor JSON/i }).click();
+      const copied = await page.evaluate(() => window.__corridorkeyClipboard || "");
+      assertContains(copied, "Runtime ready", "copied doctor JSON");
+    },
+    settings: async (page, body) => {
+      assertContains(body, "Engine Preferences", "settings title");
+      assertContains(body, "Workflow advanced controls", "settings advanced pointer");
+      assert(
+        !body.includes("Auto-Enabled"),
+        `settings should not render stale tiling copy. Body was:\n${body}`
+      );
     }
   },
   {
@@ -56,14 +75,17 @@ const scenarios = [
   },
   {
     name: "missing_models",
-    statusText: "runtime needs attention",
+    statusText: "runtime usable",
     workflow: async (page) => {
-      await assertSelectOptions(page, 1, ["Runtime preset default", greenModelName]);
-      await assertSelectOptionsMissing(page, 1, [blueModelName]);
+      await assertSelectOptions(page, "Model", ["Runtime preset default", greenModelName]);
+      await assertSelectOptionsMissing(page, "Preset", ["Quality Blue", "Mac Balanced"]);
+      await assertSelectOptionsMissing(page, "Model", [blueModelName, macModelName]);
     },
     diagnostics: async (_page, body) => {
       assertContains(body, "Runtime usable with missing model packs", "missing model summary");
       assertContains(body, blueModelName, "missing model filename");
+      assertMissing(body, reference768ModelName, "retired 768px reference artifact");
+      assertMissing(body, referenceFp32ModelName, "fp32 reference artifact");
       assertContains(body, "Repair or reinstall the desktop runtime package", "missing model recovery");
       assertContains(body, "unsupported", "unsupported backend capability");
     }
@@ -86,56 +108,73 @@ const scenarios = [
   }
 ];
 
+assert(existsSync(path.join(distRoot, "index.html")), "Build the GUI before smoke tests: pnpm build");
+
 const fakeRuntime = createFakeRuntime();
-const server = await createServer({
-  root: guiRoot,
-  configFile: path.join(guiRoot, "vite.config.ts"),
-  logLevel: "error",
-  server: {
-    host: "127.0.0.1",
-    port: 0,
-    strictPort: false
-  }
-});
+const server = createStaticServer(distRoot);
 
 let browser;
+let context;
 
 try {
   runtimePath = fakeRuntime.executablePath;
-  await server.listen();
+  await listenServer(server);
   const baseUrl = resolveServerUrl(server);
   browser = await chromium.launch({
     headless: true,
     executablePath: findChromiumExecutable()
   });
+  context = await browser.newContext({
+    viewport: { width: 1366, height: 900 }
+  });
 
   for (const scenario of scenarios) {
-    await runScenario(browser, baseUrl, scenario, fakeRuntime);
+    await runScenario(context, baseUrl, scenario, fakeRuntime);
     console.log(`[smoke] ${scenario.name}`);
   }
 } finally {
+  if (context) {
+    await context.close();
+  }
   if (browser) {
     await browser.close();
   }
-  await server.close();
+  await closeServer(server);
   rmSync(fakeRuntime.root, { recursive: true, force: true });
 }
 
-async function runScenario(browserInstance, baseUrl, scenario, runtime) {
-  const context = await browserInstance.newContext({
-    viewport: { width: 1366, height: 900 }
-  });
+async function runScenario(context, baseUrl, scenario, runtime) {
   const page = await context.newPage();
   const pageErrors = [];
+  const consoleErrors = [];
+  const requestFailures = [];
 
   page.on("pageerror", (error) => {
     pageErrors.push(error.message);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push(message.text());
+    }
+  });
+  page.on("requestfailed", (request) => {
+    requestFailures.push(`${request.url()} ${request.failure()?.errorText ?? ""}`);
   });
 
   await page.exposeFunction("__corridorkeySmokeInvoke", async (command, args) => {
     return handleInvoke(runtime, scenario.name, command, args);
   });
   await page.addInitScript(() => {
+    window.__corridorkeyClipboard = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text) => {
+          window.__corridorkeyClipboard = text;
+          return Promise.resolve();
+        }
+      }
+    });
     globalThis.__TAURI_INTERNALS__ = {
       invoke: (command, args, options) => globalThis.__corridorkeySmokeInvoke(command, args, options),
       transformCallback: () => 1,
@@ -147,7 +186,18 @@ async function runScenario(browserInstance, baseUrl, scenario, runtime) {
 
   try {
     await page.goto(`${baseUrl}?smoke=${scenario.name}`, { waitUntil: "domcontentloaded" });
-    await waitForBody(page, scenario.statusText);
+    try {
+      await waitForBody(page, scenario.statusText);
+      await assertSidebarCollapse(page);
+    } catch (error) {
+      const diagnostics = [...pageErrors, ...consoleErrors, ...requestFailures];
+      if (diagnostics.length > 0) {
+        throw new Error(`${scenario.name} emitted browser errors before readiness: ${diagnostics.join(" | ")}`, {
+          cause: error
+        });
+      }
+      throw error;
+    }
     const workflowBody = await bodyText(page);
     assertNoFallback(workflowBody, scenario.name);
     if (scenario.workflow) {
@@ -159,10 +209,24 @@ async function runScenario(browserInstance, baseUrl, scenario, runtime) {
     const diagnosticsBody = await bodyText(page);
     assertNoFallback(diagnosticsBody, scenario.name);
     await scenario.diagnostics(page, diagnosticsBody);
+    if (scenario.settings) {
+      await page.getByRole("button", { name: "Settings" }).click();
+      await waitForBody(page, "engine preferences");
+      const settingsBody = await bodyText(page);
+      assertNoFallback(settingsBody, scenario.name);
+      await scenario.settings(page, settingsBody);
+    }
     assert.deepEqual(pageErrors, [], `${scenario.name} emitted page errors`);
+    assert.deepEqual(consoleErrors, [], `${scenario.name} emitted console errors`);
+    assert.deepEqual(requestFailures, [], `${scenario.name} emitted request failures`);
   } finally {
-    await context.close();
+    await page.close();
   }
+}
+
+async function assertSidebarCollapse(page) {
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
 }
 
 function handleInvoke(runtime, scenarioName, command, args) {
@@ -176,6 +240,18 @@ function handleInvoke(runtime, scenarioName, command, args) {
 
   if (command === "plugin:path|join" || command === "plugin:path|resolve") {
     return Array.isArray(args?.paths) ? args.paths.join("\\") : downloadsPath;
+  }
+
+  if (command === "create_preview_proxy") {
+    return {
+      source_path: args.source,
+      path: args.source.replace(/\.mov$/i, "_preview.mp4"),
+      reused: false
+    };
+  }
+
+  if (command === "allow_preview_asset") {
+    return null;
   }
 
   throw new Error(`Unexpected Tauri command in smoke test: ${command}`);
@@ -360,8 +436,11 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
 const scenario = process.env.CK_SMOKE_SCENARIO || "success";
 const command = process.argv[2];
+const macModelName = ${JSON.stringify(macModelName)};
 const greenModelName = ${JSON.stringify(greenModelName)};
 const blueModelName = ${JSON.stringify(blueModelName)};
+const reference768ModelName = ${JSON.stringify(reference768ModelName)};
+const referenceFp32ModelName = ${JSON.stringify(referenceFp32ModelName)};
 
 const modelPath = (filename) => path.join(root, "models", filename);
 const greenCatalog = () => ({
@@ -370,7 +449,20 @@ const greenCatalog = () => ({
   name: "Green Matting",
   screen_color: "green",
   recommended_backend: "tensorrt",
+  installable_model_pack: true,
   packaged_for_windows: true
+});
+const macCatalog = () => ({
+  id: "mac",
+  filename: macModelName,
+  name: "Mac MLX Matting",
+  screen_color: "green",
+  intended_platforms: ["macos_apple_silicon"],
+  validated_platforms: ["macos_apple_silicon"],
+  recommended_backend: "mlx",
+  installable_model_pack: true,
+  packaged_for_macos: true,
+  packaged_for_windows: false
 });
 const blueCatalog = () => ({
   id: "blue",
@@ -378,22 +470,40 @@ const blueCatalog = () => ({
   name: "Blue Matting",
   screen_color: "blue",
   recommended_backend: "torchtrt",
+  installable_model_pack: true,
   packaged_for_windows: true
 });
-const doctorModel = (model, usable) => ({
+const referenceCatalog = (filename) => ({
+  filename,
+  intended_platforms: ["windows_rtx_30_plus"],
+  intended_use: "reference_validation",
+  recommended_backend: "tensorrt",
+  installable_model_pack: false,
+  packaged_for_macos: false,
+  packaged_for_windows: false
+});
+const doctorModel = (model, usable, stateOverrides = {}) => ({
   ...model,
   path: modelPath(model.filename),
   found: usable,
   usable,
-  artifact_status: usable ? "ok" : "missing",
+  artifact_status: usable ? "usable" : "missing",
   artifact_error: usable ? "" : "model pack missing",
   artifact_state: {
     present: usable,
-    certified_for_active_device: usable
+    certified_for_active_device: usable,
+    certified_for_active_track: usable,
+    packaged_for_active_track: true,
+    ...stateOverrides
   }
 });
 const baseInfo = (supportedBackends) => ({
   version: "smoke-runtime",
+  active_device: {
+    name: "RTX Smoke 4090",
+    memory_mb: 24576,
+    backend: "tensorrt"
+  },
   devices: [
     {
       name: "RTX Smoke 4090",
@@ -402,6 +512,7 @@ const baseInfo = (supportedBackends) => ({
     }
   ],
   capabilities: {
+    platform: "windows",
     supported_backends: supportedBackends,
     cpu_fallback_available: supportedBackends.includes("cpu")
   },
@@ -419,27 +530,53 @@ const qualityBluePreset = () => ({
   recommended_backend: "torchtrt",
   recommended_model: blueModelName
 });
+const macPreset = () => ({
+  id: "mac-balanced",
+  name: "Mac Balanced",
+  default_for_macos: true,
+  default_for_windows: false,
+  intended_platforms: ["macos_apple_silicon"],
+  validated_platforms: ["macos_apple_silicon"],
+  recommended_model: macModelName
+});
+const macUltraPreset = () => ({
+  id: "mac-ultra-quality",
+  name: "Mac Ultra Quality",
+  default_for_macos: false,
+  default_for_windows: false,
+  intended_platforms: ["macos_apple_silicon"],
+  validated_platforms: ["macos_apple_silicon"],
+  recommended_model: macModelName
+});
 
 const payloads = {
   success: {
-    info: baseInfo(["tensorrt", "cpu"]),
+    info: baseInfo(["tensorrt", "torchtrt", "cpu"]),
     doctor: {
       summary: { healthy: true, video_healthy: true, message: "Runtime ready" },
       supported_tracks: ["green", "blue"],
-      models: [doctorModel(greenCatalog(), true), doctorModel(blueCatalog(), true)]
+      models: [
+        doctorModel(macCatalog(), true, {
+          certified_for_active_device: false,
+          certified_for_active_track: false,
+          packaged_for_active_track: false
+        }),
+        doctorModel(greenCatalog(), true),
+        doctorModel(blueCatalog(), true)
+      ]
     },
     models: {
       supported_tracks: ["green", "blue"],
       missing_models: [],
       missing_count: 0,
-      models: [greenCatalog(), blueCatalog()]
+      models: [macCatalog(), greenCatalog(), blueCatalog()]
     },
     presets: {
-      presets: [fastGreenPreset(), qualityBluePreset()]
+      presets: [macPreset(), fastGreenPreset(), qualityBluePreset(), macUltraPreset()]
     }
   },
   missing_models: {
-    info: baseInfo(["cpu"]),
+    info: baseInfo(["tensorrt", "cpu"]),
     doctor: {
       summary: {
         healthy: false,
@@ -447,16 +584,40 @@ const payloads = {
         message: "Runtime usable with missing model packs"
       },
       supported_tracks: ["green"],
-      models: [doctorModel(greenCatalog(), true), doctorModel(blueCatalog(), false)]
+      models: [
+        doctorModel(macCatalog(), true, {
+          certified_for_active_device: false,
+          certified_for_active_track: false,
+          packaged_for_active_track: false
+        }),
+        doctorModel(greenCatalog(), true),
+        doctorModel(blueCatalog(), false),
+        doctorModel(referenceCatalog(reference768ModelName), false, {
+          certified_for_active_device: false,
+          certified_for_active_track: false,
+          packaged_for_active_track: false
+        }),
+        doctorModel(referenceCatalog(referenceFp32ModelName), false, {
+          certified_for_active_device: false,
+          certified_for_active_track: false,
+          packaged_for_active_track: false
+        })
+      ]
     },
     models: {
       supported_tracks: ["green"],
-      missing_models: [blueModelName],
-      missing_count: 1,
-      models: [greenCatalog(), blueCatalog()]
+      missing_models: [blueModelName, reference768ModelName, referenceFp32ModelName],
+      missing_count: 3,
+      models: [
+        macCatalog(),
+        greenCatalog(),
+        blueCatalog(),
+        referenceCatalog(reference768ModelName),
+        referenceCatalog(referenceFp32ModelName)
+      ]
     },
     presets: {
-      presets: [fastGreenPreset()]
+      presets: [macPreset(), fastGreenPreset(), qualityBluePreset()]
     }
   },
   invalid_json: {
@@ -507,22 +668,22 @@ process.stdout.write(JSON.stringify(payload));
 `;
 }
 
-async function assertSelectOptions(page, index, expectedLabels) {
-  const labels = await page.locator("select").nth(index).locator("option").allTextContents();
+async function assertSelectOptions(page, label, expectedLabels) {
+  const labels = await page.getByLabel(label).locator("option").allTextContents();
   for (const expected of expectedLabels) {
     assert(
       labels.some((label) => label.includes(expected)),
-      `select ${index} did not include ${expected}. Saw: ${labels.join(", ")}`
+      `${label} select did not include ${expected}. Saw: ${labels.join(", ")}`
     );
   }
 }
 
-async function assertSelectOptionsMissing(page, index, rejectedLabels) {
-  const labels = await page.locator("select").nth(index).locator("option").allTextContents();
+async function assertSelectOptionsMissing(page, label, rejectedLabels) {
+  const labels = await page.getByLabel(label).locator("option").allTextContents();
   for (const rejected of rejectedLabels) {
     assert(
       labels.every((label) => !label.includes(rejected)),
-      `select ${index} should not include ${rejected}. Saw: ${labels.join(", ")}`
+      `${label} select should not include ${rejected}. Saw: ${labels.join(", ")}`
     );
   }
 }
@@ -536,7 +697,8 @@ async function waitForBody(page, expectedText) {
     );
   } catch (error) {
     const body = await bodyText(page).catch(() => "<body unavailable>");
-    throw new Error(`Timed out waiting for "${expectedText}". Body was:\n${body}`, {
+    const html = await page.locator("body").evaluate((element) => element.innerHTML).catch(() => "<html unavailable>");
+    throw new Error(`Timed out waiting for "${expectedText}". Body was:\n${body}\nHTML was:\n${html}`, {
       cause: error
     });
   }
@@ -553,23 +715,68 @@ function assertContains(body, expected, context) {
   );
 }
 
+function assertMissing(body, expected, context) {
+  assert(
+    !body.toLowerCase().includes(expected.toLowerCase()),
+    `${context} unexpectedly included "${expected}". Body was:\n${body}`
+  );
+}
+
 function assertNoFallback(body, scenarioName) {
   assert(!body.includes("Engine Standby"), `${scenarioName} rendered Engine Standby fallback`);
   assert(!body.includes("CPU Baseline"), `${scenarioName} rendered CPU Baseline fallback`);
 }
 
-function resolveServerUrl(viteServer) {
-  const address = viteServer.httpServer?.address();
+function createStaticServer(root) {
+  return createServer((request, response) => {
+    const requestUrl = new URL(request.url || "/", "http://127.0.0.1");
+    const relativePath = requestUrl.pathname === "/" ? "index.html" : decodeURIComponent(requestUrl.pathname.slice(1));
+    let filePath = path.resolve(root, relativePath);
+
+    if (!filePath.startsWith(root)) {
+      response.writeHead(403);
+      response.end("Forbidden");
+      return;
+    }
+
+    if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+      filePath = path.join(root, "index.html");
+    }
+
+    response.writeHead(200, { "Content-Type": contentTypeForPath(filePath) });
+    createReadStream(filePath).pipe(response);
+  });
+}
+
+function contentTypeForPath(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".html") return "text/html; charset=utf-8";
+  if (extension === ".js") return "text/javascript; charset=utf-8";
+  if (extension === ".css") return "text/css; charset=utf-8";
+  if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".png") return "image/png";
+  return "application/octet-stream";
+}
+
+function listenServer(httpServer) {
+  return new Promise((resolve) => {
+    httpServer.listen(0, "127.0.0.1", resolve);
+  });
+}
+
+function closeServer(httpServer) {
+  return new Promise((resolve) => {
+    httpServer.close(resolve);
+  });
+}
+
+function resolveServerUrl(httpServer) {
+  const address = httpServer.address();
   if (address && typeof address === "object") {
     return `http://127.0.0.1:${address.port}/`;
   }
 
-  const localUrl = viteServer.resolvedUrls?.local?.[0];
-  if (localUrl) {
-    return localUrl;
-  }
-
-  throw new Error("Vite did not report a local server URL.");
+  throw new Error("Smoke server did not report a local URL.");
 }
 
 function findChromiumExecutable() {

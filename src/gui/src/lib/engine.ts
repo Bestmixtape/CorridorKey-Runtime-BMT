@@ -8,8 +8,11 @@ export interface DeviceInfo {
 
 export interface SystemInfo {
   version?: string;
+  active_device?: DeviceInfo;
   devices?: DeviceInfo[];
   capabilities?: {
+    platform?: string;
+    apple_silicon?: boolean;
     tensorrt_rtx_available?: boolean;
     multi_gpu_available?: boolean;
     cpu_fallback_available?: boolean;
@@ -54,6 +57,10 @@ export interface RuntimeCatalogEntry {
   artifact_state?: Record<string, unknown>;
   path?: string;
   screen_color?: string;
+  intended_use?: string;
+  intended_platforms?: string[];
+  installable_model_pack?: boolean;
+  validated_platforms?: string[];
   recommended_backend?: string;
   recommended_model?: string;
   default_for_windows?: boolean;

@@ -232,7 +232,9 @@ EZ-CorridorKey's visual identity, palette, typography, or component styling.
 ## Related
 
 - ADRs: `doc/adr/0001-agentic-repository-layout.md`
-- Tasks: `doc/tasks/0024-implement-gui-runtime-readiness.md`
+- Tasks: `doc/tasks/0024-implement-gui-runtime-readiness.md`,
+  `doc/tasks/0025-implement-gui-job-lifecycle.md`,
+  `doc/tasks/0026-evolve-gui-workbench-ux.md`
 - Supersedes / Depends on: depends on `ARCHITECTURE.md`, `DESIGN.md`,
   `docs/SPEC.md`, `docs/FRONTEND.md`, `src/gui/`,
   `src/gui/src/index.css`, `scripts/windows.ps1`, and

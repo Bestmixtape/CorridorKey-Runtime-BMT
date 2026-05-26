@@ -5,8 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:e2e",
+    "test:unit": "vitest run",
+    "test:integration": "pnpm smoke:readiness",
+    "test:e2e": "pnpm smoke:job",
     "build": "tsc && vite build",
     "smoke:readiness": "node scripts/smoke-runtime-readiness.mjs",
+    "smoke:job": "node scripts/smoke-job-lifecycle.mjs",
+    "smoke:real-runtime": "node scripts/smoke-real-runtime.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -33,6 +39,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "playwright": "1.60.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.7"
   }
 }

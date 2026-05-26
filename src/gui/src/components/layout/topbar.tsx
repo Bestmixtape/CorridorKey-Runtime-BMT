@@ -12,7 +12,7 @@ export function TopBar() {
     : readiness?.status === "ready"
       ? "Runtime Ready"
       : readiness?.status === "degraded"
-        ? "Runtime Needs Attention"
+        ? "Runtime Usable"
         : hasRuntime
           ? "Runtime Error"
           : "Runtime Missing";
@@ -28,7 +28,7 @@ export function TopBar() {
   const deviceLabel = gpu?.name ?? (hasRuntime ? "No runtime device reported" : "Runtime not found");
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-zinc-800 bg-zinc-950/40 px-8 backdrop-blur-md">
+    <header className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/40 px-4 py-2 backdrop-blur-md lg:px-8">
       <div className="flex items-center gap-2">
         <div className={cn("h-2 w-2 rounded-md", statusClass)} />
         <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
@@ -45,7 +45,7 @@ export function TopBar() {
           ) : (
             <Monitor className="h-3 w-3" />
           )}
-          <span className="max-w-64 truncate">{deviceLabel}</span>
+          <span className="max-w-[52vw] truncate lg:max-w-64">{deviceLabel}</span>
         </div>
       </div>
     </header>

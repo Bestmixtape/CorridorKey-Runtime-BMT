@@ -5,6 +5,11 @@ import { ProcessFlow } from "./components/workflow/ProcessFlow";
 import { useEngineStore } from "./lib/store";
 import { useJobStore } from "./lib/job";
 import {
+  runtimeCommandCenterRows,
+  runtimeCommandCopyText,
+  type RuntimeCommandCenterRow
+} from "./lib/runtimeCommands";
+import {
   Settings as SettingsIcon,
   History as HistoryIcon,
   Cpu,
@@ -12,9 +17,11 @@ import {
   Trash2,
   Clock,
   Box,
+  AlertCircle,
   CheckCircle2,
   HelpCircle,
-  RefreshCw
+  RefreshCw,
+  Copy
 } from "lucide-react";
 import { Button } from "./components/ui/button";
 
@@ -29,8 +36,17 @@ function App() {
     getSupportedTracks,
     getDoctorSummary
   } = useEngineStore();
-  const { history, loadHistory, clearHistory, videoEncodeMode, setVideoEncodeMode, initDefaults } = useJobStore();
+  const {
+    history,
+    loadHistory,
+    clearHistory,
+    videoEncodeMode,
+    setVideoEncodeMode,
+    advancedSettings,
+    initDefaults
+  } = useJobStore();
   const [activeTab, setActiveTab] = useState("Workflow");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   useEffect(() => {
     refreshInfo();
@@ -42,12 +58,15 @@ function App() {
     switch (activeTab) {
       case "Workflow":
         return (
-          <div className="max-w-4xl mx-auto space-y-12">
-            <div className="space-y-4 text-center">
-              <h1 className="text-4xl font-bold tracking-tight lg:text-5xl text-foreground">
-                Neural Keying <br />
-                <span className="text-muted-foreground font-medium underline decoration-brand decoration-4 underline-offset-8">Native Engine</span>
-              </h1>
+          <div className="mx-auto flex h-full max-w-[1500px] flex-col gap-5">
+            <div className="flex flex-col gap-2 border-b border-zinc-900 pb-4 md:flex-row md:items-end md:justify-between">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.28em] text-brand">CorridorKey Runtime</div>
+                <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground md:text-3xl">Neural Keying Workbench</h1>
+              </div>
+              <div className="text-xs font-medium text-zinc-500">
+                Source, matte, result
+              </div>
             </div>
             <ProcessFlow />
           </div>
@@ -78,16 +97,26 @@ function App() {
                 {history.map((record) => (
                   <div key={record.id} className="p-4 rounded-xl border bg-card/50 flex items-center justify-between group">
                     <div className="flex items-center gap-4">
-                      <div className="p-2 rounded-lg bg-brand/10 text-brand">
-                        <CheckCircle2 className="w-5 h-5" />
+                      <div className={`p-2 rounded-lg ${record.status === "failed" ? "bg-destructive/10 text-destructive" : "bg-brand/10 text-brand"}`}>
+                        {record.status === "failed" ? (
+                          <AlertCircle className="w-5 h-5" />
+                        ) : (
+                          <CheckCircle2 className="w-5 h-5" />
+                        )}
                       </div>
                       <div className="space-y-0.5">
                         <div className="font-medium text-sm truncate max-w-xs">{record.input.split(/[\\/]/).pop()}</div>
                         <div className="flex items-center gap-3 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
-                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {(record.duration_ms! / 1000).toFixed(1)}s</span>
-                          <span className="flex items-center gap-1"><Box className="w-3 h-3" /> {record.backend}</span>
-                          <span>{new Date(record.timestamp).toLocaleDateString()}</span>
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {formatDuration(record.duration_ms)}</span>
+                          <span className="flex items-center gap-1"><Box className="w-3 h-3" /> {record.backend || "backend pending"}</span>
+                          <span>{new Date(record.completed_at || record.timestamp).toLocaleDateString()}</span>
+                          <span>{record.status}</span>
                         </div>
+                        {(record.preset || record.model || record.diagnostic_summary) && (
+                          <div className="text-[11px] text-zinc-500 truncate max-w-lg">
+                            {[record.preset, record.model, record.diagnostic_summary].filter(Boolean).join(" | ")}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity">
@@ -103,9 +132,7 @@ function App() {
         const missingModels = getMissingModels();
         const supportedTracks = getSupportedTracks();
         const doctorSummary = getDoctorSummary();
-        const commandResults = readiness
-          ? [readiness.info, readiness.doctor, readiness.models, readiness.presets]
-          : [];
+        const commandRows = runtimeCommandCenterRows(readiness);
         const backendSupported = (backend: string, legacyValue?: boolean): boolean | undefined => {
           if (legacyValue !== undefined) {
             return legacyValue;
@@ -189,18 +216,9 @@ function App() {
 
               <DiagnosticPanel title="Runtime Commands">
                 <div className="space-y-2">
-                  {commandResults.length === 0 ? (
-                    <p className="text-sm text-zinc-400">No command results yet.</p>
-                  ) : (
-                    commandResults.map((result) => (
-                      <div key={result.command} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                        <span className="text-sm font-medium text-zinc-100">{result.command}</span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider ${result.ok ? "text-brand" : "text-destructive"}`}>
-                          {result.ok ? "ok" : result.error?.kind || "error"}
-                        </span>
-                      </div>
-                    ))
-                  )}
+                  {commandRows.map((row) => (
+                    <RuntimeCommandRow key={row.command} row={row} />
+                  ))}
                 </div>
               </DiagnosticPanel>
             </div>
@@ -272,15 +290,27 @@ function App() {
                 </div>
               </div>
 
-              <div className="p-6 rounded-2xl border bg-card/50 flex items-center justify-between">
-                <div className="space-y-1">
-                  <div className="font-bold text-lg">Tiling Strategy</div>
-                  <div className="text-sm text-muted-foreground text-balance max-w-md">
-                    Automatically split high-resolution inputs (4K+) to fit available VRAM.
+              <div className="p-6 rounded-2xl border bg-card/50 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="font-bold text-lg">Workflow advanced controls</div>
+                    <div className="text-sm text-muted-foreground text-balance max-w-md">
+                      Current defaults used by the processing panel.
+                    </div>
+                  </div>
+                  <div className="px-3 py-1 rounded-full bg-zinc-900 text-zinc-300 text-[10px] font-bold border border-zinc-800 uppercase tracking-widest">
+                    Runtime-backed
                   </div>
                 </div>
-                <div className="px-3 py-1 rounded-full bg-brand/10 text-brand text-[10px] font-bold border border-brand/20 uppercase tracking-widest">
-                  Auto-Enabled
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <PreferenceChip label="Quality" value={formatSettingValue(advancedSettings.qualityFallback)} />
+                  <PreferenceChip label="Refinement" value={formatSettingValue(advancedSettings.refinementMode)} />
+                  <PreferenceChip label="Precision" value={advancedSettings.precision.toUpperCase()} />
+                  <PreferenceChip label="Resolution" value={advancedSettings.resolution === 0 ? "Auto" : `${advancedSettings.resolution}`} />
+                  <PreferenceChip label="Batch" value={`${advancedSettings.batchSize}`} />
+                  <PreferenceChip label="Despill" value={advancedSettings.despill.toFixed(2)} />
+                  <PreferenceChip label="Despeckle" value={advancedSettings.despeckle ? "On" : "Off"} />
+                  <PreferenceChip label="Tiling" value={advancedSettings.tiled ? "Forced" : "Off"} />
                 </div>
               </div>
             </div>
@@ -339,13 +369,18 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-transparent text-foreground selection:bg-brand/20">
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-transparent text-foreground selection:bg-brand/20 lg:flex-row">
+      <Sidebar
+        activeTab={activeTab}
+        collapsed={sidebarCollapsed}
+        onTabChange={setActiveTab}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+      />
 
-      <main className="flex flex-col flex-1 min-w-0 bg-zinc-950/30 backdrop-blur-sm">
+      <main className="flex min-h-0 flex-1 flex-col bg-zinc-950/30 backdrop-blur-sm lg:min-w-0">
         <TopBar />
 
-        <div className="flex-1 overflow-y-auto p-8 lg:p-12">
+        <div className="flex-1 overflow-y-auto p-5 lg:p-8">
           {engineError && (
             <div className="mb-8 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm animate-in shake-1 duration-500">
               <strong>Engine Error:</strong> {engineError}
@@ -373,6 +408,73 @@ function DiagnosticPanel({ title, children }: DiagnosticPanelProps) {
   );
 }
 
+function RuntimeCommandRow({ row }: { row: RuntimeCommandCenterRow }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const stateClass = row.state === "ok"
+    ? "text-brand"
+    : row.state === "error"
+      ? "text-destructive"
+      : "text-zinc-500";
+  const policyClass = row.policy === "gated"
+    ? "border-zinc-700 bg-zinc-900 text-zinc-500"
+    : "border-brand/25 bg-brand/10 text-brand";
+  const canCopy = Boolean(row.result);
+
+  const handleCopy = async () => {
+    if (!canCopy) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(runtimeCommandCopyText(row));
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-zinc-100">{row.label}</div>
+          <div className="mt-0.5 font-mono text-[10px] text-zinc-500">{row.command}</div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${policyClass}`}>
+            {row.policy}
+          </span>
+          <span className={`text-[10px] font-bold uppercase tracking-wider ${stateClass}`}>
+            {row.result?.error?.kind || row.state}
+          </span>
+        </div>
+      </div>
+      <div className="mt-2 text-xs leading-relaxed text-zinc-500">
+        {row.description}
+      </div>
+      {canCopy && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="mt-2 flex items-center gap-1.5 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition-colors hover:border-brand/40 hover:text-brand"
+        >
+          <Copy className="h-3 w-3" />
+          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy Failed" : `Copy ${row.label} JSON`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PreferenceChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
+      <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-1 truncate text-xs font-medium text-zinc-200">{value}</div>
+    </div>
+  );
+}
+
 function CapabilityRow({ label, value }: { label: string; value?: boolean }) {
   const valueText = value === undefined ? "not reported" : value ? "available" : "unsupported";
   const valueClass = value === undefined ? "text-zinc-500" : value ? "text-brand" : "text-destructive";
@@ -391,6 +493,18 @@ function readinessLabel(status: string) {
   if (status === "ready") return "Runtime ready";
   if (status === "degraded") return "Runtime usable with diagnostics";
   return "Runtime error";
+}
+
+function formatDuration(durationMs?: number) {
+  if (typeof durationMs !== "number") return "n/a";
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function formatSettingValue(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export default App;
