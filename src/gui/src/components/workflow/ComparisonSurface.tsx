@@ -133,7 +133,7 @@ export function ComparisonSurface({
     <div
       ref={surfaceRef}
       className={cn(
-        "relative aspect-video min-h-72 overflow-hidden bg-black",
+        "relative aspect-video min-h-48 overflow-hidden bg-black sm:min-h-72",
         clipped && "cursor-crosshair"
       )}
       onPointerDown={(event) => {
@@ -219,7 +219,7 @@ function ComparisonDivider({
   return (
     <svg
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 h-full w-full overflow-visible drop-shadow-[0_0_8px_rgba(14,165,233,0.55)]"
+      className="ck-wipe-divider pointer-events-none absolute inset-0 h-full w-full overflow-visible"
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
     >

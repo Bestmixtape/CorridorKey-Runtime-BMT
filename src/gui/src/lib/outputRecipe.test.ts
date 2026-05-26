@@ -8,6 +8,7 @@ import {
   outputRecipeControlOptions,
   outputRecipeChips,
   outputRecipeLabel,
+  previewBackgroundStyle,
   suggestOutputPathForRecipe,
   type RuntimeOutputRecipeCapabilities
 } from "@/lib/outputRecipe";
@@ -183,6 +184,22 @@ describe("output recipe", () => {
 
     expect(recipe.replacementMediaPath).toBe("C:\\Shots\\clean_plate.mov");
     expect(outputRecipeChips(recipe)).toContain("Preview Replacement clean_plate.mov");
+  });
+
+  test("uses design-system utility classes for preview backgrounds", () => {
+    expect(previewBackgroundStyle(DEFAULT_OUTPUT_RECIPE)).toEqual({
+      className: "ck-preview-checkerboard"
+    });
+
+    expect(
+      previewBackgroundStyle(normalizeOutputRecipe({
+        previewBackground: "solid",
+        previewSolidColor: "#101010"
+      }))
+    ).toEqual({
+      className: "bg-zinc-950",
+      style: { backgroundColor: "#101010" }
+    });
   });
 
   test("classifies recipe controls by the current runtime output contract", () => {

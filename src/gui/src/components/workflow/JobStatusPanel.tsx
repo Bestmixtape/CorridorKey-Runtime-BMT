@@ -93,7 +93,7 @@ export function JobStatusPanel({
 
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 shadow-apple">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="grid gap-4 lg:grid-cols-[minmax(12rem,16rem)_1fr] lg:items-start">
         <div className="flex min-w-0 items-start gap-3">
           <div className={cn(
             "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
@@ -115,7 +115,7 @@ export function JobStatusPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex min-w-0 flex-wrap gap-2">
           {activeBackend && <StatusPill label={activeBackend} />}
           <StatusPill label={`Elapsed ${telemetry.elapsedLabel}`} />
           {telemetry.etaLabel !== "n/a" && <StatusPill label={`ETA ${telemetry.etaLabel}`} />}

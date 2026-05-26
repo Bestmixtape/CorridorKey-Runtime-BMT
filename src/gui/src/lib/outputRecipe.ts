@@ -265,8 +265,7 @@ export function previewBackgroundStyle(
     return { className: "bg-transparent" };
   }
   return {
-    className:
-      "bg-[linear-gradient(45deg,#18181b_25%,transparent_25%),linear-gradient(-45deg,#18181b_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#18181b_75%),linear-gradient(-45deg,transparent_75%,#18181b_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0] bg-zinc-950"
+    className: "ck-preview-checkerboard"
   };
 }
 

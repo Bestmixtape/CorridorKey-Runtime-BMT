@@ -122,8 +122,8 @@ function App() {
             </div>
 
             {history.length === 0 ? (
-              <div className="p-20 rounded-2xl border border-dashed border-zinc-800 text-center space-y-4">
-                <div className="mx-auto w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-zinc-800 p-20 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-900">
                   <HistoryIcon className="w-6 h-6 text-muted-foreground" />
                 </div>
                 <p className="text-muted-foreground">No recent jobs found. Process a video to see your history here.</p>
@@ -352,7 +352,7 @@ function App() {
               <SettingsIcon className="w-6 h-6 text-brand" /> Workflow Defaults
             </h2>
             <div className="space-y-4">
-              <div className="p-6 rounded-2xl border bg-card/50 flex items-center justify-between">
+              <div className="flex items-center justify-between rounded-xl border bg-card/50 p-6">
                 <div className="space-y-1">
                   <div className="font-bold text-lg">Output Encoding</div>
                   <div className="text-sm text-muted-foreground text-balance max-w-md">
@@ -364,7 +364,7 @@ function App() {
                     onClick={() => setVideoEncodeMode("lossless")}
                     className={`px-4 py-1.5 rounded-md text-xs font-bold ${
                       videoEncodeMode === "lossless"
-                        ? "bg-brand text-white shadow-lg"
+                        ? "bg-brand text-white shadow-apple"
                         : "text-muted-foreground hover:text-zinc-100"
                     }`}
                   >
@@ -374,7 +374,7 @@ function App() {
                     onClick={() => setVideoEncodeMode("balanced")}
                     className={`px-4 py-1.5 rounded-md text-xs font-bold ${
                       videoEncodeMode === "balanced"
-                        ? "bg-brand text-white shadow-lg"
+                        ? "bg-brand text-white shadow-apple"
                         : "text-muted-foreground hover:text-zinc-100"
                     }`}
                   >
@@ -383,7 +383,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="p-6 rounded-2xl border bg-card/50 space-y-4">
+              <div className="space-y-4 rounded-xl border bg-card/50 p-6">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="font-bold text-lg">Output Recipe</div>
@@ -409,7 +409,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="p-6 rounded-2xl border bg-card/50 space-y-4">
+              <div className="space-y-4 rounded-xl border bg-card/50 p-6">
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="font-bold text-lg">Workflow advanced controls</div>

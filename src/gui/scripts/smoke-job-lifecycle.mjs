@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import {
   createReadStream,
   existsSync,
+  mkdirSync,
   readdirSync,
   statSync
 } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -31,13 +33,18 @@ const scenarios = [
   {
     name: "success",
     run: async (page) => {
+      await assertVisualLayout(page, "desktop-dialog-entry-ready");
       await selectSourceFolder(page);
       await selectInput(page);
+      await selectOutputDialog(page);
+      await assertVisualLayout(page, "desktop-dialog-output-selected");
       await assertAlphaHintSelectionAndClear(page);
       await configureOutputRecipe(page);
       await configureAdvancedControls(page);
       await page.getByRole("button", { name: /Run Neural Keyer/i }).click();
       await assertAdvancedProcessPayload(page);
+      await waitForBody(page, "Processing...");
+      await assertVisualLayout(page, "desktop-workflow-progress", { settleMs: 0 });
       await waitForBody(page, "Complete");
       await waitForBody(page, artifactPath);
       await waitForBody(page, "Stage Matte");
@@ -65,6 +72,7 @@ const scenarios = [
       assert.equal(await page.evaluate(() => window.__corridorkeyRevealCalls || 0), 1);
       await assertViewerComparisonControls(page);
       await assertPreviewProxyFallback(page);
+      await assertVisualLayout(page, "desktop-workflow-complete");
       await assertResetWorkbench(page);
       await page.getByRole("button", { name: "History" }).click();
       await waitForBody(page, "success");
@@ -88,6 +96,7 @@ const scenarios = [
       await assertDefaultProcessPayloadOmitsAdvanced(page);
       await waitForBody(page, "Processing Failed");
       await waitForBody(page, "Runtime fixture failed");
+      await assertVisualLayout(page, "desktop-workflow-failure");
       await page.getByRole("button", { name: "History" }).click();
       await waitForBody(page, "failed");
       await waitForBody(page, "Runtime fixture failed");
@@ -105,9 +114,11 @@ const scenarios = [
       await selectInput(page);
       await page.getByRole("button", { name: /Run Neural Keyer/i }).click();
       await waitForBody(page, "Processing...");
+      await assertVisualLayout(page, "desktop-workflow-cancelling", { settleMs: 0 });
       await page.getByRole("button", { name: /Cancel/i }).click();
       await waitForBody(page, "Cancelled");
       await waitForBody(page, "Retry");
+      await assertVisualLayout(page, "desktop-workflow-cancelled");
     }
   },
   {
@@ -119,6 +130,44 @@ const scenarios = [
       await waitForBody(page, "malformed JSON");
       await page.getByRole("button", { name: "History" }).click();
       await waitForBody(page, "failed");
+    }
+  },
+  {
+    name: "layout",
+    viewport: { width: 760, height: 900 },
+    run: async (page) => {
+      await assertVisualLayout(page, "narrow-workflow-ready");
+      await page.getByRole("button", { name: "Hardware" }).click();
+      await waitForBody(page, "Runtime Diagnostics");
+      await assertVisualLayout(page, "narrow-hardware");
+      await page.getByRole("button", { name: "Settings" }).click();
+      await waitForBody(page, "Workflow Defaults");
+      await assertVisualLayout(page, "narrow-settings");
+      await page.getByRole("button", { name: "Support" }).click();
+      await waitForBody(page, "Runtime recovery");
+      await assertVisualLayout(page, "narrow-support");
+      await page.getByRole("button", { name: "History" }).click();
+      await waitForBody(page, "Job History");
+      await assertVisualLayout(page, "narrow-history");
+    }
+  },
+  {
+    name: "mobile-layout",
+    viewport: { width: 390, height: 844 },
+    run: async (page) => {
+      await assertVisualLayout(page, "mobile-workflow-ready");
+      await page.getByRole("button", { name: "Hardware" }).click();
+      await waitForBody(page, "Runtime Diagnostics");
+      await assertVisualLayout(page, "mobile-hardware");
+      await page.getByRole("button", { name: "Settings" }).click();
+      await waitForBody(page, "Workflow Defaults");
+      await assertVisualLayout(page, "mobile-settings");
+      await page.getByRole("button", { name: "Support" }).click();
+      await waitForBody(page, "Runtime recovery");
+      await assertVisualLayout(page, "mobile-support");
+      await page.getByRole("button", { name: "History" }).click();
+      await waitForBody(page, "Job History");
+      await assertVisualLayout(page, "mobile-history");
     }
   }
 ];
@@ -138,7 +187,7 @@ try {
   });
   for (const scenario of scenarios) {
     const context = await browser.newContext({
-      viewport: { width: 1366, height: 900 }
+      viewport: scenario.viewport ?? { width: 1366, height: 900 }
     });
     try {
       await runScenario(context, baseUrl, scenario);
@@ -192,6 +241,8 @@ async function runScenario(context, baseUrl, scenario) {
       window.__corridorkeyLastProcessArgs = null;
       window.__corridorkeySourceSelectionModes = [];
       window.__corridorkeyHintSelections = 0;
+      window.__corridorkeyDialogOpenCalls = 0;
+      window.__corridorkeyDialogSaveCalls = 0;
       window.__corridorkeyClipboard = "";
       window.__corridorkeyRevealCalls = 0;
 
@@ -326,7 +377,7 @@ async function runScenario(context, baseUrl, scenario) {
         });
 
         if (scenarioName === "failure") {
-          scheduleEvent(80, { type: "failed", message: "Runtime fixture failed" });
+          scheduleEvent(650, { type: "failed", message: "Runtime fixture failed" });
           return;
         }
 
@@ -335,9 +386,9 @@ async function runScenario(context, baseUrl, scenario) {
           return;
         }
 
-        scheduleEvent(80, { type: "warning", message: "Fallback probe skipped" });
-        scheduleEvent(100, { type: "artifact_written", artifact_path: artifactPath, message: "Artifact written" });
-        scheduleEvent(120, {
+        scheduleEvent(450, { type: "warning", message: "Fallback probe skipped" });
+        scheduleEvent(550, { type: "artifact_written", artifact_path: artifactPath, message: "Artifact written" });
+        scheduleEvent(650, {
           type: "completed",
           message: "Finished",
           timings: [
@@ -436,10 +487,12 @@ async function runScenario(context, baseUrl, scenario) {
           }
 
           if (command === "plugin:dialog|open") {
+            window.__corridorkeyDialogOpenCalls += 1;
             return Promise.resolve(inputPath);
           }
 
           if (command === "plugin:dialog|save") {
+            window.__corridorkeyDialogSaveCalls += 1;
             return Promise.resolve(outputPath);
           }
 
@@ -566,6 +619,17 @@ async function selectInput(page) {
   await waitForBody(page, "input.mov");
   await waitForBody(page, "input_corridorkey.mov");
   await page.waitForFunction(() => window.__corridorkeySourceSelectionModes.includes("file"));
+}
+
+async function selectOutputDialog(page) {
+  const before = await page.evaluate(() => window.__corridorkeyDialogSaveCalls || 0);
+  await page.getByRole("button", { name: /3\. Destination/i }).click();
+  await waitForBody(page, "output.mov");
+  await page.waitForFunction(
+    (count) => (window.__corridorkeyDialogSaveCalls || 0) > count,
+    before,
+    { timeout: 15000 }
+  );
 }
 
 async function selectSourceFolder(page) {
@@ -855,6 +919,71 @@ async function assertResetWorkbench(page) {
   await expectBodyMissing(page, "Tiling forced");
 }
 
+async function assertVisualLayout(page, label, { settleMs = 250 } = {}) {
+  if (settleMs > 0) {
+    await page.waitForTimeout(settleMs);
+  }
+
+  const metrics = await page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollWidth = Math.max(
+      document.documentElement.scrollWidth,
+      document.body.scrollWidth
+    );
+    const offenders = Array.from(document.body.querySelectorAll("*"))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return {
+          tag: element.tagName.toLowerCase(),
+          text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+          position: style.position,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          height: Math.round(rect.height),
+          width: Math.round(rect.width)
+        };
+      })
+      .filter((item) =>
+        item.width > 1 &&
+        item.position !== "fixed" &&
+        (item.left < -2 || item.right > viewportWidth + 2)
+      )
+      .slice(0, 8);
+    const compressedText = Array.from(document.body.querySelectorAll("div, span, button, h1, h2, h3, p"))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+          height: Math.round(rect.height),
+          width: Math.round(rect.width)
+        };
+      })
+      .filter((item) =>
+        item.text.length >= 6 &&
+        item.width > 1 &&
+        item.width < 32 &&
+        item.height > 80
+      )
+      .slice(0, 8);
+
+    return { viewportWidth, scrollWidth, offenders, compressedText };
+  });
+
+  assert(
+    metrics.scrollWidth <= metrics.viewportWidth + 2,
+    `${label} created horizontal page overflow: ${JSON.stringify(metrics)}`
+  );
+  assert.deepEqual(metrics.offenders, [], `${label} has elements outside the viewport`);
+  assert.deepEqual(metrics.compressedText, [], `${label} has vertically compressed text`);
+
+  const screenshotPath = path.join(smokeScreenshotRoot(), `${label}.png`);
+  await page.screenshot({ path: screenshotPath, fullPage: false });
+  assert(existsSync(screenshotPath), `${label} screenshot was not captured`);
+  console.log(`[smoke] layout ${label} ${screenshotPath}`);
+}
+
 async function waitForBody(page, expectedText) {
   try {
     await page.waitForFunction(
@@ -964,6 +1093,13 @@ function findChromiumExecutable() {
   }
 
   return undefined;
+}
+
+function smokeScreenshotRoot() {
+  const root = process.env.CORRIDORKEY_GUI_SMOKE_SCREENSHOT_DIR ||
+    path.join(tmpdir(), "corridorkey-gui-smoke");
+  mkdirSync(root, { recursive: true });
+  return root;
 }
 
 function isExpectedSmokeConsoleError(text) {

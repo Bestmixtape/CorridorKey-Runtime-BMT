@@ -124,8 +124,8 @@ reach for raw scale values only inside Tailwind utility classes.
 A single font stack: `-apple-system, system-ui, sans-serif`. No web fonts are
 loaded - shipping a native-feeling Tauri desktop and a fast browser POC both
 benefit from the platform-provided UI font. A typographic scale (sizes,
-weights, line-heights) is `<TODO: not yet wired>`; until then, rely on
-Tailwind's default type ramp.
+weights, line-heights) is not declared; until then, rely on Tailwind's default
+type ramp.
 
 ## Shapes
 
@@ -145,16 +145,27 @@ elevation used in macOS-style desktop UIs and survives on zinc-950 because it
 is colored, not just opaque. There is intentionally no shadow ramp; the
 single elevation matches the flat, native-feeling surface.
 
+## Derived Surface Utilities
+
+The GUI may define named utility classes when a visual is a reusable composition
+of existing tokens rather than a new token value.
+
+- `ck-preview-empty` is the empty media viewer background. It derives from
+  `card` and `background`.
+- `ck-preview-checkerboard` is the transparent-preview checkerboard. It derives
+  from `card` and `background`.
+- `ck-wipe-divider` is the comparison divider glow. It derives from `brand`.
+
 ## Layout
 
-Spacing scale: `<TODO: not yet wired>` - use Tailwind's default spacing utilities
-until project-specific tokens are pinned.
+Spacing scale is not declared; use Tailwind's default spacing utilities until
+project-specific tokens are pinned.
 
 ## Motion
 
-Easings and durations: `<TODO: not yet wired>` - use Tailwind's default
-transition utilities (`transition`, `duration-150`, `ease-in-out`) until a
-motion contract is pinned.
+Easings and durations are not declared; use Tailwind's default transition
+utilities (`transition`, `duration-150`, `ease-in-out`) until a motion contract
+is pinned.
 
 ## Do's and Don'ts
 

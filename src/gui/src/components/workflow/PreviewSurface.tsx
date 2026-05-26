@@ -63,8 +63,8 @@ export function PreviewSurface({
   if (!item.path) {
     return (
       <div className={cn(
-        "flex flex-col items-center justify-center gap-3 bg-[radial-gradient(circle_at_center,#18181b_0,#09090b_56%)] px-6 text-center",
-        fill ? "h-full w-full" : "aspect-video min-h-72"
+        "ck-preview-empty flex flex-col items-center justify-center gap-3 px-6 text-center",
+        fill ? "h-full w-full" : "aspect-video min-h-48 sm:min-h-72"
       )}>
         <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-950 text-zinc-500 shadow-apple">
           <item.icon className="h-7 w-7" />
@@ -120,7 +120,7 @@ export function PreviewSurface({
     return (
       <div className={cn(
         "flex flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center",
-        fill ? "h-full w-full" : "aspect-video min-h-72"
+        fill ? "h-full w-full" : "aspect-video min-h-48 sm:min-h-72"
       )}>
         <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-900 text-brand">
           <Zap className="h-7 w-7 animate-pulse" />
@@ -137,7 +137,7 @@ export function PreviewSurface({
     return (
       <div className={cn(
         "flex flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center",
-        fill ? "h-full w-full" : "aspect-video min-h-72"
+        fill ? "h-full w-full" : "aspect-video min-h-48 sm:min-h-72"
       )}>
         <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
           <AlertCircle className="h-7 w-7" />
@@ -155,7 +155,7 @@ export function PreviewSurface({
   if (previewKind === "image") {
     return (
       <div
-        className={cn(previewBackground.className, fill ? "h-full w-full" : "aspect-video min-h-72")}
+        className={cn(previewBackground.className, fill ? "h-full w-full" : "aspect-video min-h-48 sm:min-h-72")}
         style={previewBackground.style}
       >
         <img
@@ -170,7 +170,7 @@ export function PreviewSurface({
   if (previewKind === "video") {
     return (
       <div
-        className={cn("relative", previewBackground.className, fill ? "h-full w-full" : "aspect-video min-h-72")}
+        className={cn("relative", previewBackground.className, fill ? "h-full w-full" : "aspect-video min-h-48 sm:min-h-72")}
         style={previewBackground.style}
       >
         <video
@@ -208,7 +208,7 @@ export function PreviewSurface({
   return (
     <div className={cn(
       "flex flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center",
-      fill ? "h-full w-full" : "aspect-video min-h-72"
+      fill ? "h-full w-full" : "aspect-video min-h-48 sm:min-h-72"
     )}>
       <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-900 text-zinc-500">
         <FileImage className="h-7 w-7" />
