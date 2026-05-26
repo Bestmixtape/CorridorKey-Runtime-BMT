@@ -72,6 +72,18 @@ real-runtime smoke was attempted and blocked before launch because preview
 behavioral regression was observed in fake-runtime unit, readiness, or job
 smoke coverage.
 
+Second behavior-preserving extraction completed. `WorkflowSetupRail.tsx` now
+owns the setup rail, output recipe controls, quality controls, advanced
+controls, and run/reset controls. `ComparisonSurface.tsx` and
+`PreviewSurface.tsx` split comparison geometry/playback sync from preview
+loading/proxy fallback. `workflowLabels.ts` keeps runtime catalog and workflow
+labels testable outside React, with unit coverage in `workflowLabels.test.ts`.
+`ProcessFlow.tsx` is now the workflow shell: it coordinates store state,
+runtime-derived options, side effects, and callbacks passed to focused child
+components.
+
+Verification: `pnpm test` passed from `src/gui` after the second extraction.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
