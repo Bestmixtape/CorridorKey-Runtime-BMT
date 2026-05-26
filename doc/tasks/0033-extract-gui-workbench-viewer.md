@@ -1,6 +1,6 @@
 # Task `0033`: Extract GUI Workbench Viewer
 
-**Status:** proposed
+**Status:** in-progress
 **Created:** 2026-05-26
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0003-useful-tauri-gui.md
@@ -36,13 +36,13 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
 - [ ] Establish a green baseline with `pnpm test` and real-preview smoke.
-- [ ] Extract pure helper logic first from `ProcessFlow.tsx` into
+- [x] Extract pure helper logic first from `ProcessFlow.tsx` into
       `src/gui/src/lib/` only when tests pin behavior.
-- [ ] Extract React components under `src/gui/src/components/workflow/` in
+- [x] Extract React components under `src/gui/src/components/workflow/` in
       vertical slices, one behavior-preserving move at a time.
-- [ ] Keep prop surfaces small: pass buffer descriptors and callbacks rather
+- [x] Keep prop surfaces small: pass buffer descriptors and callbacks rather
       than entire stores when possible.
-- [ ] Run smoke tests after each meaningful extraction.
+- [x] Run smoke tests after each meaningful extraction.
 - [ ] Finish with a fresh-context review focused on behavior preservation.
 
 ## Notes
@@ -57,6 +57,20 @@ direction: `viewerCompare.ts`, `viewerSync.ts`, `outputRecipe.ts`,
 outside React. Public comparison-slider implementations show the same shape:
 small state/control APIs around arbitrary viewer content rather than a single
 monolithic component.
+
+First behavior-preserving extraction completed. `WorkbenchViewer.tsx` now owns
+viewer tabs, comparison modes, comparison surfaces, preview surfaces, preview
+proxy fallback, and playback synchronization. `JobStatusPanel.tsx` now owns
+the job progress/status surface and diagnostic-copy action. `jobStatus.ts`
+keeps status-title and timing formatting testable outside React, with unit
+coverage in `jobStatus.test.ts`. `ProcessFlow.tsx` remains the workflow shell
+and setup rail owner.
+
+Verification: `pnpm test` passed from `src/gui` after extraction. The
+real-runtime smoke was attempted and blocked before launch because preview
+`ffmpeg.exe` is not staged and `CORRIDORKEY_FFMPEG_PATH` is not set; no
+behavioral regression was observed in fake-runtime unit, readiness, or job
+smoke coverage.
 
 ## Definition of Done
 
