@@ -314,15 +314,20 @@ Do not use global ONNX Runtime installations or
 `vendor\onnxruntime-universal` as a fallback path. The release flow must
 resolve one of the curated runtime roots explicitly.
 
-The canonical Windows release command is:
+The canonical Windows release-track command is:
 
-- `scripts\windows.ps1 -Task release -Version X.Y.Z`
+- `scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online`
 
-That canonical command generates the official Windows `RTX` installer by
+That canonical command generates the online Windows `RTX` host package by
 default. Experimental Windows tracks must be requested explicitly:
 
-- `scripts\windows.ps1 -Task release -Version X.Y.Z -Track dml`
-- `scripts\windows.ps1 -Task release -Version X.Y.Z -Track all`
+- `scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online -Track dml`
+- `scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online -Track all`
+
+The top-level Windows suite installer is produced through `package-suite`
+after the runtime, OFX, and Adobe package roots exist. The suite installer is
+the component selection surface for runtime/CLI core, GUI, host plugins, Green,
+and Blue.
 
 The wrapper also supports `build`, `prepare-rtx`, `package-ofx`,
 `package-runtime`, and `sync-version` for local workflow needs, but they are
@@ -349,8 +354,8 @@ The Windows wrapper tasks are intentionally different:
     build. The task uses the modern Inno Setup installer flow and defaults to
     the online flavor unless `-Flavor offline` is selected.
 - `package-runtime`
-  - package the portable Windows runtime/GUI bundle and ZIP. The default track
-    is RTX; DirectML is packaged only when explicitly requested.
+  - package the portable Windows RTX runtime/GUI bundle and ZIP. DirectML
+    portable runtime packaging is not implemented.
 - `package-suite`
   - package the top-level online/offline Windows suite installer. Runtime/CLI
     core is fixed, while GUI, host plugins, Green, and Blue are optional
@@ -384,8 +389,8 @@ preprocessor define:
 
 | Flavor    | Size  | Network at install time | When to use |
 |-----------|-------|-------------------------|-------------|
-| `online`  | ~85 MB | Required | Default. Stub installer downloads selected packs from Hugging Face with SHA256 verification. Recommended setup selects every available pack by default; custom setup can opt down to Green only. |
-| `offline` | ~7 GB  | None     | Air-gapped or low-bandwidth installs. Every available pack is pre-bundled inside the .exe and installed; the component page is skipped. |
+| `online`  | ~85 MB | Required | Default. Stub installer downloads selected packs from Hugging Face with SHA256 verification. Recommended setup preselects every available pack; custom setup can leave only runtime/CLI core selected. |
+| `offline` | ~7 GB  | None     | Air-gapped or low-bandwidth installs. Every available pack is pre-bundled inside the .exe, and the same component choices decide what is installed. |
 
 Local release validation builds use the `online` flavor. The `offline`
 flavor is produced only when validating the no-network installer path or
@@ -393,13 +398,13 @@ serving an environment that cannot download packs at install time. Windows
 GitHub releases publish the online flavor only; the release pipeline rejects
 `-PublishGithub` unless `-Flavor online` is selected.
 
-Component selection differs by transport. The online flavor keeps component
-selection so an operator can install Green only, Blue only, or Recommended
-(Green + Blue), while the offline flavor is complete by construction: every
-available pack is bundled and fixed for install. The same model-pack behavior
-applies to OFX and Adobe installers. The suite installer also exposes the
-Tauri GUI as an optional desktop component that points at the shared runtime
-root.
+Component selection is consistent across transports. The online flavor
+downloads selected packs, while the offline flavor bundles the pack bytes and
+uses the selected components to decide what is installed. Custom setup can
+install runtime/CLI core only, Green only, Blue only, or Recommended
+(Green + Blue). The same model-pack behavior applies to OFX and Adobe
+installers. The suite installer also exposes the Tauri GUI as an optional
+desktop component that points at the shared runtime root.
 
 The modern installer treats selected model packs and the blue runtime DLL
 pack as immutable caches keyed by the manifest SHA256. When a selected
@@ -450,8 +455,8 @@ The supported repo-local runtime locations are only
    ```
 3. Only request experimental Windows tracks intentionally:
    ```powershell
-   .\scripts\windows.ps1 -Task release -Version X.Y.Z -Track dml
-   .\scripts\windows.ps1 -Task release -Version X.Y.Z -Track all
+   .\scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online -Track dml
+   .\scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online -Track all
    ```
 
 Scripts validate the runtime root. If `-OrtRoot` does not map to the expected
@@ -690,8 +695,8 @@ officially supported hardware family.
 
 - The Windows `RTX` artifact is the supported Windows track for NVIDIA RTX 30
   series and newer.
-- The canonical public Windows release produces the Windows RTX installer
-  unless another track is requested explicitly.
+- The canonical public Windows release-track flow produces the Windows RTX
+  online package unless another track is requested explicitly.
 - The Windows `DirectML` artifact is an experimental Windows track. It must
   not be published by default or described as official support for all AMD,
   Intel, or RTX 20 series hardware.
@@ -726,14 +731,13 @@ it explicitly:
 - macOS: `scripts/release_pipeline_macos.sh --display-label X.Y.Z-mac.N --publish-github --notes-file <path>`
 - Linux: `scripts/linux.sh --task release --version X.Y.Z --display-label X.Y.Z-linux.N --publish-github --notes-file <path>`
 
-### CorridorKey OFX (OFX plugin + bundled CLI)
+### CorridorKey OFX (standalone OFX support package)
 
 This release track ships the OFX plugin used by DaVinci Resolve and
-Foundry Nuke, plus the `corridorkey` CLI bundled inside the same
-installer. The CLI's directory is registered on the system `PATH` at
-install time, so a single OFX install delivers both the OFX surface
-and the CLI surface; the Tauri GUI is shipped separately (see the
-"CorridorKey Runtime" track below).
+Foundry Nuke. Standalone OFX packages may include a colocated `corridorkey`
+CLI for host-plugin support, but the suite installer owns the fixed
+runtime/CLI core. The Tauri GUI is shipped either as an optional suite
+component or in the portable Runtime/GUI bundle.
 
 The host-coverage qualifier `[Nuke & Resolve]` precedes the platform
 qualifier on every OFX release title, regardless of platform combination.

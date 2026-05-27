@@ -4,6 +4,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $windowsWrapperPath = Join-Path $repoRoot "scripts\windows.ps1"
 $runtimePackageScriptPath = Join-Path $repoRoot "scripts\package_runtime_installer_windows.ps1"
+$prepareRtxScriptPath = Join-Path $repoRoot "scripts\prepare_windows_rtx_release.ps1"
 
 function Assert-Contains {
     param(
@@ -35,9 +36,13 @@ if (-not (Test-Path -LiteralPath $windowsWrapperPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $runtimePackageScriptPath -PathType Leaf)) {
     throw "Expected runtime package script not found: $runtimePackageScriptPath"
 }
+if (-not (Test-Path -LiteralPath $prepareRtxScriptPath -PathType Leaf)) {
+    throw "Expected prepare-rtx script not found: $prepareRtxScriptPath"
+}
 
 $windowsWrapper = Get-Content -LiteralPath $windowsWrapperPath -Raw
 $runtimePackageScript = Get-Content -LiteralPath $runtimePackageScriptPath -Raw
+$prepareRtxScript = Get-Content -LiteralPath $prepareRtxScriptPath -Raw
 
 Assert-Contains `
     -Content $windowsWrapper `
@@ -53,12 +58,28 @@ Assert-Contains `
     -Label "scripts/windows.ps1 runtime track mapping"
 Assert-Contains `
     -Content $windowsWrapper `
-    -Needle 'default { @("DirectML", "RTX") }' `
-    -Label "scripts/windows.ps1 explicit all runtime track mapping"
+    -Needle "Task 'package-runtime' currently supports only -Track rtx" `
+    -Label "scripts/windows.ps1 runtime track guard"
+Assert-NotContains `
+    -Content $windowsWrapper `
+    -Needle '"dml" { @("DirectML") }' `
+    -Label "scripts/windows.ps1 package-runtime track mapping"
 Assert-Contains `
     -Content $windowsWrapper `
     -Needle '-FfmpegPath' `
     -Label "scripts/windows.ps1 package-runtime FFmpeg argument"
+Assert-Contains `
+    -Content $windowsWrapper `
+    -Needle '-ExpectedSourceRevision' `
+    -Label "scripts/windows.ps1 package-runtime stale source guard"
+Assert-NotContains `
+    -Content $windowsWrapper `
+    -Needle '"package-ofx", "package-adobe", "package-runtime", "package-suite", "smoke-adobe-host"' `
+    -Label "scripts/windows.ps1 pre-package runtime CLI probe"
+Assert-Contains `
+    -Content $windowsWrapper `
+    -Needle '-BuildDir", $runtimeBuildDir' `
+    -Label "scripts/windows.ps1 package-runtime preset build dir"
 
 Assert-Contains `
     -Content $runtimePackageScript `
@@ -76,6 +97,10 @@ Assert-Contains `
     -Content $runtimePackageScript `
     -Needle '$portableArgs["FfmpegPath"] = $FfmpegPath' `
     -Label "scripts/package_runtime_installer_windows.ps1 FFmpeg forwarding"
+Assert-Contains `
+    -Content $runtimePackageScript `
+    -Needle '$portableArgs["ExpectedSourceRevision"] = $ExpectedSourceRevision' `
+    -Label "scripts/package_runtime_installer_windows.ps1 source revision forwarding"
 Assert-Contains `
     -Content $runtimePackageScript `
     -Needle 'Clear-StagedRuntimePayload -RuntimeResourceDir $runtimeResourceDir' `
@@ -103,9 +128,34 @@ Assert-Contains `
     -Content $portablePackageScript `
     -Needle 'Copy-Item -LiteralPath $ffmpegSource -Destination (Join-Path $distDir "ffmpeg.exe")' `
     -Label "scripts/package_windows.ps1"
+Assert-Contains `
+    -Content $portablePackageScript `
+    -Needle 'Assert-CorridorKeyPackagedEngineIdentity' `
+    -Label "scripts/package_windows.ps1"
+Assert-Contains `
+    -Content $portablePackageScript `
+    -Needle 'Copy-CudaNppRuntimeDlls -DestinationDir $distDir' `
+    -Label "scripts/package_windows.ps1"
+Assert-Contains `
+    -Content $portablePackageScript `
+    -Needle '"nppig64_12.dll"' `
+    -Label "scripts/package_windows.ps1"
+Assert-Contains `
+    -Content $portablePackageScript `
+    -Needle 'Packaged runtime source revision mismatch' `
+    -Label "scripts/package_windows.ps1"
 Assert-NotContains `
     -Content $portablePackageScript `
     -Needle 'Get-Command ffmpeg' `
     -Label "scripts/package_windows.ps1"
+
+Assert-NotContains `
+    -Content $prepareRtxScript `
+    -Needle 'scripts\package_windows.ps1' `
+    -Label "scripts/prepare_windows_rtx_release.ps1"
+Assert-NotContains `
+    -Content $prepareRtxScript `
+    -Needle 'corridorkey-gui.exe' `
+    -Label "scripts/prepare_windows_rtx_release.ps1"
 
 Write-Host "[PASS] Windows runtime package wrapper checks passed." -ForegroundColor Green

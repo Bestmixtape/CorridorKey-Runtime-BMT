@@ -4,7 +4,9 @@ param(
     [string]$OrtRoot = "",
     [string]$ReleaseSuffix = "",
     [switch]$CompileContexts,
-    [string]$FfmpegPath = ""
+    [string]$FfmpegPath = "",
+    [string]$ExpectedDisplayVersionLabel = "",
+    [string]$ExpectedSourceRevision = ""
 )
 
 Set-StrictMode -Version Latest
@@ -76,6 +78,12 @@ if ($CompileContexts.IsPresent) {
 }
 if (-not [string]::IsNullOrWhiteSpace($FfmpegPath)) {
     $portableArgs["FfmpegPath"] = $FfmpegPath
+}
+if (-not [string]::IsNullOrWhiteSpace($ExpectedDisplayVersionLabel)) {
+    $portableArgs["ExpectedDisplayVersionLabel"] = $ExpectedDisplayVersionLabel
+}
+if (-not [string]::IsNullOrWhiteSpace($ExpectedSourceRevision)) {
+    $portableArgs["ExpectedSourceRevision"] = $ExpectedSourceRevision
 }
 
 & (Join-Path $repoRoot "scripts\package_windows.ps1") @portableArgs

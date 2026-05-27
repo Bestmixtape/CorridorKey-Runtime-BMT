@@ -55,9 +55,9 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       `scripts/package_adobe_plugins_windows.ps1`, and
       `scripts/package_runtime_installer_windows.ps1`.
 - [x] Ground installer capability against the existing Inno Setup template and
-      official Inno component/download behavior; keep Tauri NSIS as the GUI
-      app installer rather than the suite installer unless evidence says
-      otherwise.
+      official Inno component/download behavior; keep the GUI in the suite
+      installer or portable Runtime/GUI ZIP rather than a full-payload
+      Tauri/NSIS runtime installer.
 - [x] Draft the component matrix and shared payload layout.
 - [x] Decide whether the suite installer should become a new `windows.ps1`
       task or an extension of the existing `package-ofx`/`package-adobe` flow.
@@ -195,9 +195,10 @@ Host detection and destination rules:
 
 Online/offline behavior:
 
-- Online suite installers embed the thin host, CLI/runtime, and GUI payloads,
-  then download selected model/runtime packs from the distribution manifest
-  using checksum verification before files leave the temporary installer area.
+- Online suite installers embed only fixed bootstrap/base payloads and download
+  optional GUI, host, model, or runtime packs when a checksummed manifest entry
+  is available. Any embedded optional payload must be explicit in the generated
+  inventory until it can move to the online manifest.
 - Offline suite installers bundle every distribution-manifest pack and expose
   the same Green, Blue, and Green plus Blue choices as online installers. The
   bundled bytes stay in the installer; the selected components decide what is

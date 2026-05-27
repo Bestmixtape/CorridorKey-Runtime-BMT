@@ -29,10 +29,11 @@ The product currently provides three released surfaces:
   the OFX 1.4 contract level; per-host workarounds (Resolve and Nuke 17 today)
   live in dedicated branches that never regress the path the other host
   depends on.
-- A **CLI** (`corridorkey`) for direct command-line and pipeline use. The CLI
-  ships inside the OFX installer and is registered on the system `PATH` at
-  install time, so a single OFX install delivers both the OFX plugin and the
-  CLI. The CLI is also available standalone in the portable runtime bundle.
+- A **CLI** (`corridorkey`) for direct command-line and pipeline use. The
+  Windows suite installs the CLI/runtime core as the fixed base and registers
+  it on the system `PATH`. The CLI is also available in the portable runtime
+  bundle, and standalone OFX support packages may carry a colocated copy for
+  host-plugin support.
 - A **GUI** (Tauri-based desktop app) for users who prefer a graphical
   workflow over the CLI. The GUI is distributed through the suite installer or
   portable Runtime bundle and resolves the shared or side-by-side packaged
@@ -174,9 +175,10 @@ mandatory bundle. Each pack is identified by product track and screen color
 variant. Packs are hosted on Hugging Face and addressable through the
 `download_url` field on every catalog entry.
 
-The installer or first-run flow offers the user a pack selection: green only,
-blue only, or both. Selecting fewer packs reduces install footprint without
-disabling runtime features beyond the unselected variants. The
+The installer or first-run flow offers the user a pack selection: runtime/CLI
+core only, green only, blue only, or both. Selecting fewer packs reduces
+install footprint without disabling runtime features beyond the unselected
+variants. The
 `corridorkey doctor` command reports which packs are present, which are
 missing, and the canonical Hugging Face source for any missing pack.
 

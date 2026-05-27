@@ -144,6 +144,22 @@ function Invoke-CorridorKeyScript {
     }
 }
 
+function Get-CorridorKeyCurrentSourceRevision {
+    param([string]$RepoRoot)
+
+    $gitPath = Resolve-CorridorKeyGitPath
+    if ([string]::IsNullOrWhiteSpace($gitPath)) {
+        return ""
+    }
+
+    $revision = & $gitPath -C $RepoRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return ""
+    }
+
+    return ($revision | Out-String).Trim()
+}
+
 $resolvedTrack = $Track
 if ($Task -in @("package-suite", "package-runtime", "release") -and -not $PSBoundParameters.ContainsKey("Track")) {
     $resolvedTrack = "rtx"
@@ -155,6 +171,7 @@ if ($Task -eq "package-suite" -and $resolvedTrack -ne "rtx") {
 $syncGuiMetadata = $Task -in @("package-runtime", "release", "sync-version")
 $additionalArguments = @($ForwardArguments)
 $resolvedVersion = $Version
+$explicitDisplayVersionLabel = -not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)
 if ($Task -eq "validate-suite") {
     if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
         $resolvedVersion = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
@@ -405,16 +422,42 @@ switch ($Task) {
         break
     }
     "package-runtime" {
+        if ($resolvedTrack -ne "rtx") {
+            throw "Task 'package-runtime' currently supports only -Track rtx because the portable runtime/GUI package is bound to the Windows RTX contract. DirectML portable runtime packaging is not implemented."
+        }
+
+        $runtimeBuildDir = Join-Path $repoRoot ("build\" + $Preset)
+        $expectedDisplayVersionLabel = ""
+        $expectedSourceRevision = ""
+        if ($explicitDisplayVersionLabel) {
+            $expectedDisplayVersionLabel = $DisplayVersionLabel
+        } else {
+            $expectedSourceRevision = Get-CorridorKeyCurrentSourceRevision -RepoRoot $repoRoot
+            if ([string]::IsNullOrWhiteSpace($expectedSourceRevision)) {
+                throw "Task 'package-runtime' could not resolve the current git source revision for stale-build validation."
+            }
+        }
+
         $runtimeSuffixes = switch ($resolvedTrack) {
             "rtx" { @("RTX") }
-            "dml" { @("DirectML") }
-            default { @("DirectML", "RTX") }
+            default { @("RTX") }
         }
         foreach ($suffix in $runtimeSuffixes) {
-            $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
+            $arguments = @(
+                "-Version", $resolvedVersion,
+                "-ReleaseSuffix", $suffix,
+                "-BuildDir", $runtimeBuildDir
+            )
+            if (-not [string]::IsNullOrWhiteSpace($expectedDisplayVersionLabel)) {
+                $arguments += @("-ExpectedDisplayVersionLabel", $expectedDisplayVersionLabel)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($expectedSourceRevision)) {
+                $arguments += @("-ExpectedSourceRevision", $expectedSourceRevision)
+            }
             if (-not [string]::IsNullOrWhiteSpace($FfmpegPath)) {
                 $arguments += @("-FfmpegPath", $FfmpegPath)
             }
+            $arguments += $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
         break

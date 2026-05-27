@@ -5,6 +5,8 @@ param(
     [string]$ReleaseSuffix = "",
     [switch]$CompileContexts,
     [string]$FfmpegPath = "",
+    [string]$ExpectedDisplayVersionLabel = "",
+    [string]$ExpectedSourceRevision = "",
     [string[]]$ForbiddenPathPrefix = @()
 )
 
@@ -93,6 +95,95 @@ function Copy-DllsFromDir {
     }
 }
 
+function Copy-CudaNppRuntimeDlls {
+    param([string]$DestinationDir)
+
+    $cudaContract = Get-CorridorKeyWindowsRtxBuildContract
+    $cudaVersion = $cudaContract.required_cuda_version
+    $cudaVersionEnvVar = "CUDA_PATH_V" + ($cudaVersion -replace '\.', '_')
+    $candidateRoots = @(
+        [System.Environment]::GetEnvironmentVariable($cudaVersionEnvVar),
+        "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$cudaVersion",
+        $env:CUDA_PATH
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $nppDllNames = @(
+        "nppc64_12.dll",
+        "nppial64_12.dll",
+        "nppidei64_12.dll",
+        "nppif64_12.dll",
+        "nppig64_12.dll"
+    )
+
+    foreach ($candidateRoot in $candidateRoots) {
+        $cudaBin = Join-Path $candidateRoot "bin"
+        if (-not (Test-Path -LiteralPath $cudaBin -PathType Container)) {
+            continue
+        }
+
+        $missingNames = @(
+            $nppDllNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $cudaBin $_) -PathType Leaf) }
+        )
+        if ($missingNames.Count -gt 0) {
+            continue
+        }
+
+        foreach ($nppName in $nppDllNames) {
+            Copy-Item -LiteralPath (Join-Path $cudaBin $nppName) -Destination $DestinationDir -Force
+        }
+        Write-Host "[PASS] Copied CUDA NPP DLLs: $($nppDllNames -join ', ')" -ForegroundColor Green
+        return
+    }
+
+    throw "Required CUDA NPP DLLs not found for CUDA $cudaVersion. Install the CUDA Toolkit to the default path or set $cudaVersionEnvVar."
+}
+
+function Get-CorridorKeyPackagedEngineDisplayLabel {
+    param([string]$EnginePath)
+
+    $versionLines = & $EnginePath --version 2>&1
+    $exitCode = if (Test-Path Variable:LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    $versionText = ($versionLines | Out-String).Trim()
+    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($versionText)) {
+        throw "Packaged runtime version probe failed at $EnginePath."
+    }
+
+    $versionMatch = [regex]::Match($versionText, '^CorridorKey Runtime v(?<label>\S+)$')
+    if (-not $versionMatch.Success) {
+        throw "Packaged runtime version output has unexpected format: $versionText"
+    }
+
+    return $versionMatch.Groups["label"].Value
+}
+
+function Assert-CorridorKeyPackagedEngineIdentity {
+    param(
+        [string]$EnginePath,
+        [string]$ExpectedDisplayVersionLabel,
+        [string]$ExpectedSourceRevision
+    )
+
+    $displayLabel = Get-CorridorKeyPackagedEngineDisplayLabel -EnginePath $EnginePath
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDisplayVersionLabel) -and
+        $displayLabel -ne $ExpectedDisplayVersionLabel) {
+        throw "Packaged runtime display label mismatch. Expected $ExpectedDisplayVersionLabel, got $displayLabel. Rebuild with the same -DisplayVersionLabel before packaging."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedSourceRevision)) {
+        $normalizedRevision = $ExpectedSourceRevision.Trim()
+        if ($normalizedRevision.StartsWith("g", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $normalizedRevision = $normalizedRevision.Substring(1)
+        }
+
+        $revisionPattern = "(^|-)g$([regex]::Escape($normalizedRevision))($|-)"
+        if ($displayLabel -notmatch $revisionPattern) {
+            throw "Packaged runtime source revision mismatch. Expected source revision $normalizedRevision, got display label $displayLabel. Rebuild from the current commit before packaging."
+        }
+    }
+
+    Write-Host "[PASS] Packaged runtime display label: $displayLabel" -ForegroundColor Green
+}
+
 function Assert-NoForbiddenPathPrefix {
     param([string[]]$Prefixes, [string]$BundleRoot)
 
@@ -134,13 +225,19 @@ New-Item -ItemType Directory -Path $bundleOutputsDir -Force | Out-Null
 
 Write-Host "[2/6] Copying ck-engine.exe..."
 Assert-FileExists -Path $engineSource -Message "ck-engine source not found at $engineSource"
-Copy-Item $engineSource (Join-Path $distDir "ck-engine.exe") -Force
+$packagedEnginePath = Join-Path $distDir "ck-engine.exe"
+Copy-Item $engineSource $packagedEnginePath -Force
 
 Write-Host "[3/6] Copying runtime DLLs..."
 $forbiddenRootDlls = @(Get-CorridorKeyPortableRuntimeForbiddenRootDlls)
 Copy-DllsFromDir -SourceDir (Join-Path $BuildDir "src\cli") -DestinationDir $distDir -ExcludeNames $forbiddenRootDlls
 Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "lib") -DestinationDir $distDir
 Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "bin") -DestinationDir $distDir
+Copy-CudaNppRuntimeDlls -DestinationDir $distDir
+Assert-CorridorKeyPackagedEngineIdentity `
+    -EnginePath $packagedEnginePath `
+    -ExpectedDisplayVersionLabel $ExpectedDisplayVersionLabel `
+    -ExpectedSourceRevision $ExpectedSourceRevision
 
 Write-Host "[4/6] Copying GUI..."
 Assert-FileExists -Path $guiSource -Message "GUI binary not found at $guiSource"
