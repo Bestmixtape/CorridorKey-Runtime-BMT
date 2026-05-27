@@ -21,6 +21,7 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(any(test, debug_assertions))]
 const RUNTIME_PATH_ENV: &str = "CORRIDORKEY_GUI_RUNTIME_PATH";
 const PREVIEW_SOURCE_SAMPLE_BYTES: u64 = 64 * 1024;
 
@@ -137,6 +138,7 @@ fn engine_binary_names() -> &'static [&'static str] {
     &["corridorkey"]
 }
 
+#[cfg(any(test, debug_assertions))]
 fn primary_engine_binary_name() -> &'static str {
     engine_binary_names()[0]
 }
