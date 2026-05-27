@@ -162,12 +162,18 @@ try {
         }
 
         $setupTypeIds = @($suite.setup_types | ForEach-Object { $_.id })
-        foreach ($expectedType in @("greenonly", "blueonly", "recommended", "custom")) {
+        foreach ($expectedType in @("runtimeonly", "greenonly", "blueonly", "recommended", "custom")) {
             Assert-ArrayContains -Values $setupTypeIds -Expected $expectedType -Label "suite setup types"
         }
 
+        $runtimeOnly = @($suite.setup_types | Where-Object { $_.id -eq "runtimeonly" } | Select-Object -First 1)
+        $runtimeOnlyComponents = @($runtimeOnly[0].components)
+        if ($runtimeOnlyComponents.Count -ne 1 -or $runtimeOnlyComponents[0] -ne "runtime-core") {
+            throw "Runtime-only setup type must include only the fixed CLI/runtime core."
+        }
+
         $recommended = @($suite.setup_types | Where-Object { $_.id -eq "recommended" } | Select-Object -First 1)
-        $recommendedComponents = @($recommended.components)
+        $recommendedComponents = @($recommended[0].components)
         foreach ($expectedRecommendedComponent in @(
             "runtime-core",
             "gui",
@@ -178,6 +184,26 @@ try {
             "blue"
         )) {
             Assert-ArrayContains -Values $recommendedComponents -Expected $expectedRecommendedComponent -Label "recommended setup type components"
+        }
+
+        $custom = @($suite.setup_types | Where-Object { $_.id -eq "custom" } | Select-Object -First 1)
+        if (@($custom[0].components).Count -ne 0) {
+            throw "Custom setup type must not preselect optional components."
+        }
+
+        $runtimeCore = @($suite.components | Where-Object { $_.id -eq "runtime-core" } | Select-Object -First 1)
+        if (-not [bool]$runtimeCore[0].fixed) {
+            throw "Runtime core component must be fixed."
+        }
+        foreach ($expectedRuntimeType in @("runtimeonly", "greenonly", "blueonly", "recommended", "custom")) {
+            Assert-ArrayContains -Values @($runtimeCore[0].types) -Expected $expectedRuntimeType -Label "runtime core setup type membership"
+        }
+        foreach ($optionalComponentId in @("gui", "ofx-resolve-fusion", "ofx-nuke", "adobe", "green", "blue")) {
+            $optionalComponent = @($suite.components | Where-Object { $_.id -eq $optionalComponentId } | Select-Object -First 1)
+            if ([bool]$optionalComponent[0].fixed) {
+                throw "Optional suite component must not be fixed: $optionalComponentId"
+            }
+            Assert-ArrayContains -Values @($optionalComponent[0].types) -Expected "custom" -Label "$optionalComponentId setup type membership"
         }
 
         $modelChoiceIds = @($suite.model_choices | ForEach-Object { $_.id })

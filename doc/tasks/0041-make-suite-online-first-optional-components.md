@@ -1,6 +1,6 @@
 # Task `0041`: Make Suite Installer Online-First With Optional Components
 
-**Status:** pending
+**Status:** done
 **Created:** 2026-05-26
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0005-unified-windows-installer.md
@@ -19,17 +19,17 @@ embedded only because they came from local package outputs.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] Generated setup types include a runtime/CLI-only path and keep
+- [x] Generated setup types include a runtime/CLI-only path and keep
       CLI/runtime core fixed.
-- [ ] Custom install can deselect Tauri GUI, OFX Resolve/Fusion, OFX Nuke,
+- [x] Custom install can deselect Tauri GUI, OFX Resolve/Fusion, OFX Nuke,
       Adobe plugins, Green, and Blue while preserving CLI/runtime core.
-- [ ] Online flavor queues downloads for every selected model/runtime pack and
+- [x] Online flavor queues downloads for every selected model/runtime pack and
       every optional GUI/host payload that has a checksummed manifest entry.
-- [ ] Embedded online payloads are limited to the fixed runtime/CLI base or are
+- [x] Embedded online payloads are limited to the fixed runtime/CLI base or are
       reported explicitly as not-yet-externalized in generated inventory.
-- [ ] Offline flavor preserves the same optional component matrix while
+- [x] Offline flavor preserves the same optional component matrix while
       bundling the bytes needed for selected components.
-- [ ] Regression coverage proves component optionality, runtime-only custom
+- [x] Regression coverage proves component optionality, runtime-only custom
       install metadata, and online download entries for selected optional
       payloads.
 
@@ -37,16 +37,16 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
-- [ ] Extend the suite manifest model so component payloads can be described as
+- [x] Extend the suite manifest model so component payloads can be described as
       checksummed online assets, not only model packs.
-- [ ] Update `scripts/package_suite_installer_windows.ps1` to generate a
+- [x] Update `scripts/package_suite_installer_windows.ps1` to generate a
       runtime/CLI-only setup path and optional component download entries.
-- [ ] Keep the staged payload path available for local/offline package
+- [x] Keep the staged payload path available for local/offline package
       assembly, but make online output identify which optional bytes remain
       embedded.
-- [ ] Add regressions for optional component selection and online download
+- [x] Add regressions for optional component selection and online download
       generation.
-- [ ] Run suite installer regressions and fresh-context review.
+- [x] Run suite installer regressions and fresh-context review.
 
 ## Notes
 
@@ -58,11 +58,24 @@ Task created from the packaging rule that everything is optional except the
 CLI/runtime core, and that the online suite should use Inno Setup downloads as
 much as practical for selected payloads.
 
+### 2026-05-27
+
+Implemented a runtime/CLI-only setup type, kept runtime core fixed across all
+setup types, and kept GUI, host plugins, Green, and Blue selectable as optional
+components. The suite manifest now accepts checksummed `component_payloads` for
+optional GUI/host payloads, externalizes those payloads in online Inno output,
+escapes download entries, respects payload subdirectories, and reports optional
+payload components that still remain embedded because the distribution manifest
+does not yet provide external assets for them. Regression coverage was added for
+runtime-only metadata, component optionality, preserved offline/staged behavior,
+online optional payload downloads, non-render online builds with externalized
+optional payloads, and invalid optional payload sizes.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
-- [ ] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
-- [ ] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Local tests pass (or N/A documented in Notes)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [x] No orphan `TODO`/`FIXME` introduced
+- [x] Status updated to `done` and Notes log closes the task

@@ -162,4 +162,11 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_payload_staging.ps1
     )
     set_tests_properties(regression_windows_suite_payload_staging PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_online_optional_payloads
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_online_optional_payloads.ps1
+    )
+    set_tests_properties(regression_windows_suite_online_optional_payloads PROPERTIES LABELS "regression")
 endif()

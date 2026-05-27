@@ -77,6 +77,104 @@ function New-CorridorKeySuiteHost {
     }
 }
 
+function Assert-CorridorKeyDownloadBaseName {
+    param(
+        [string]$Filename,
+        [string]$Label
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Filename)) {
+        throw "$Label is missing filename."
+    }
+    if ($Filename -match '[\\/:*?"<>|\r\n]') {
+        throw "$Label must be a filename only, not a path: $Filename"
+    }
+
+    return $Filename
+}
+
+function Assert-CorridorKeyDownloadUrl {
+    param(
+        [string]$Url,
+        [string]$Label
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        throw "$Label is missing URL."
+    }
+    if ($Url -match '[\r\n]') {
+        throw "$Label URL must not contain line breaks."
+    }
+
+    return $Url
+}
+
+function Assert-CorridorKeyPayloadSizeBytes {
+    param(
+        [object]$SizeBytes,
+        [string]$Label
+    )
+
+    if ($null -eq $SizeBytes) {
+        throw "$Label is missing size_bytes."
+    }
+
+    [Int64]$parsedSize = 0
+    if (-not [Int64]::TryParse(([string]$SizeBytes), [ref]$parsedSize) -or $parsedSize -le 0) {
+        throw "$Label size_bytes must be a positive integer."
+    }
+
+    return $parsedSize
+}
+
+function Assert-CorridorKeyOptionalInstalledSizeBytes {
+    param(
+        [object]$SizeBytes,
+        [string]$Label
+    )
+
+    if ($null -eq $SizeBytes) {
+        return $null
+    }
+
+    [Int64]$parsedSize = 0
+    if (-not [Int64]::TryParse(([string]$SizeBytes), [ref]$parsedSize) -or $parsedSize -le 0) {
+        throw "$Label installed_size_bytes must be a positive integer when present."
+    }
+
+    return $parsedSize
+}
+
+function ConvertTo-CorridorKeyPayloadSubdir {
+    param(
+        [string]$Subdir,
+        [string]$Label
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Subdir)) {
+        return ""
+    }
+
+    $normalized = $Subdir.Replace("/", "\").Trim("\")
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return ""
+    }
+    if ($normalized -match '[\r\n]' -or
+        $normalized -match '[:*?"<>|]' -or
+        $normalized -match '(^|\\)\.\.($|\\)' -or
+        $normalized -match '^[\\/]') {
+        throw "$Label must be a safe relative subdirectory: $Subdir"
+    }
+
+    return $normalized
+}
+
+function ConvertTo-CorridorKeyInnoPascalString {
+    param([string]$Value)
+
+    return $Value -replace "'", "''"
+}
+
 function Get-CorridorKeySuiteModelPacks {
     param([object]$Manifest)
 
@@ -84,7 +182,12 @@ function Get-CorridorKeySuiteModelPacks {
     foreach ($pack in $Manifest.packs.PSObject.Properties) {
         $files = @()
         foreach ($file in $pack.Value.files) {
-            $filename = [string]$file.filename
+            $filename = Assert-CorridorKeyDownloadBaseName `
+                -Filename ([string]$file.filename) `
+                -Label "Distribution manifest file"
+            $url = Assert-CorridorKeyDownloadUrl `
+                -Url ([string]$file.url) `
+                -Label "Distribution manifest file '$filename'"
             if ($filename -match '^corridorkey_fp\d+_768(_ctx)?\.onnx$' -or $filename -match '^corridorkey_fp32_') {
                 throw "Distribution manifest exposes non-product model artifact: $filename"
             }
@@ -98,13 +201,20 @@ function Get-CorridorKeySuiteModelPacks {
             if ($sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
                 throw "Distribution manifest file has invalid SHA-256 for ${filename}: $sha256"
             }
+            $sizeBytes = $null
+            if ($file.PSObject.Properties.Match("size_bytes").Count -gt 0) {
+                $sizeBytes = $file.size_bytes
+            }
+
             $files += [ordered]@{
                 filename = $filename
                 component = [string]$pack.Value.component
                 dest_subdir = [string]$pack.Value.dest_subdir
-                url = [string]$file.url
+                url = $url
                 sha256 = $sha256
-                size_bytes = $file.size_bytes
+                size_bytes = Assert-CorridorKeyPayloadSizeBytes `
+                    -SizeBytes $sizeBytes `
+                    -Label "Distribution manifest file '$filename'"
             }
         }
 
@@ -161,6 +271,83 @@ function Get-CorridorKeySuiteModelChoices {
     return @($choices)
 }
 
+function Get-CorridorKeySuiteOptionalComponentPayloads {
+    param(
+        [object]$Manifest,
+        [string[]]$AllowedComponents
+    )
+
+    if ($Manifest.PSObject.Properties.Match("component_payloads").Count -eq 0 -or $null -eq $Manifest.component_payloads) {
+        return @()
+    }
+
+    $payloads = @()
+    foreach ($payloadProperty in $Manifest.component_payloads.PSObject.Properties) {
+        $payload = $payloadProperty.Value
+        $component = [string]$payload.component
+        if ($AllowedComponents -notcontains $component) {
+            throw "Optional component payload '$($payloadProperty.Name)' targets unsupported component: $component"
+        }
+
+        $files = @()
+        foreach ($file in $payload.files) {
+            $filename = Assert-CorridorKeyDownloadBaseName `
+                -Filename ([string]$file.filename) `
+                -Label "Optional component payload '$($payloadProperty.Name)' file"
+            $url = Assert-CorridorKeyDownloadUrl `
+                -Url ([string]$file.url) `
+                -Label "Optional component payload file '$filename'"
+            $sha256 = ""
+            if ($file.PSObject.Properties.Match("sha256").Count -gt 0) {
+                $sha256 = [string]$file.sha256
+            }
+            if ([string]::IsNullOrWhiteSpace($sha256)) {
+                throw "Optional component payload file is missing SHA-256: $filename"
+            }
+            if ($sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
+                throw "Optional component payload file has invalid SHA-256 for ${filename}: $sha256"
+            }
+
+            $sizeBytes = $null
+            if ($file.PSObject.Properties.Match("size_bytes").Count -gt 0) {
+                $sizeBytes = $file.size_bytes
+            }
+
+            $files += [ordered]@{
+                filename = $filename
+                url = $url
+                sha256 = $sha256
+                size_bytes = Assert-CorridorKeyPayloadSizeBytes `
+                    -SizeBytes $sizeBytes `
+                    -Label "Optional component payload file '$filename'"
+                status = if ($file.PSObject.Properties.Match("status").Count -gt 0) { [string]$file.status } else { "" }
+            }
+        }
+        if ($files.Count -eq 0) {
+            throw "Optional component payload '$($payloadProperty.Name)' must contain at least one file."
+        }
+
+        $payloads += [ordered]@{
+            id = [string]$payloadProperty.Name
+            label = [string]$payload.label
+            component = $component
+            dest_subdir = if ($payload.PSObject.Properties.Match("dest_subdir").Count -gt 0) {
+                ConvertTo-CorridorKeyPayloadSubdir -Subdir ([string]$payload.dest_subdir) -Label "Optional component payload '$($payloadProperty.Name)' dest_subdir"
+            } else { "" }
+            installed_size_bytes = if ($payload.PSObject.Properties.Match("installed_size_bytes").Count -gt 0) {
+                Assert-CorridorKeyOptionalInstalledSizeBytes `
+                    -SizeBytes $payload.installed_size_bytes `
+                    -Label "Optional component payload '$($payloadProperty.Name)'"
+            } else { $null }
+            is_archive = [bool]($payload.PSObject.Properties.Match("is_archive").Count -gt 0 -and $payload.is_archive)
+            extract = [bool]($payload.PSObject.Properties.Match("extract").Count -gt 0 -and $payload.extract)
+            files = @($files)
+        }
+    }
+
+    return @($payloads)
+}
+
 function New-CorridorKeySuiteManifest {
     param(
         [ValidateSet("online", "offline")]
@@ -185,6 +372,30 @@ function New-CorridorKeySuiteManifest {
         "green",
         "blue"
     )
+    $setupTypes = @(
+        [ordered]@{ id = "runtimeonly"; label = "Runtime and CLI only"; components = @("runtime-core") },
+        [ordered]@{ id = "greenonly"; label = "Green only"; components = @("runtime-core", "green") },
+        [ordered]@{ id = "blueonly"; label = "Blue only"; components = @("runtime-core", "blue") },
+        [ordered]@{ id = "recommended"; label = "Recommended Green plus Blue"; components = @($recommendedComponents) },
+        [ordered]@{ id = "custom"; label = "Custom"; components = @() }
+    )
+    $components = @(
+        (New-CorridorKeySuiteComponent -Id "runtime-core" -Label "CLI/runtime core" -Types @("runtimeonly", "greenonly", "blueonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Win64" -Fixed $true),
+        (New-CorridorKeySuiteComponent -Id "gui" -Label "Tauri GUI" -Types @("recommended", "custom") -Destination $guiRoot -Requires @("runtime-core")),
+        (New-CorridorKeySuiteComponent -Id "ofx-resolve-fusion" -Label "OFX Resolve/Fusion" -Types @("recommended", "custom") -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -Requires @("runtime-core")),
+        (New-CorridorKeySuiteComponent -Id "ofx-nuke" -Label "OFX Nuke" -Types @("recommended", "custom") -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -Requires @("runtime-core")),
+        (New-CorridorKeySuiteComponent -Id "adobe" -Label "Adobe plugins" -Types @("recommended", "custom") -Destination "%ProgramFiles%\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey" -Requires @("runtime-core")),
+        (New-CorridorKeySuiteComponent -Id "green" -Label "Green model pack" -Types @("greenonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Resources\models" -Requires @("runtime-core")),
+        (New-CorridorKeySuiteComponent -Id "blue" -Label "Blue model/runtime pack" -Types @("blueonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Resources" -Requires @("runtime-core"))
+    )
+    $optionalComponentPayloadIds = @("gui", "ofx-resolve-fusion", "ofx-nuke", "adobe")
+    $componentPayloads = Get-CorridorKeySuiteOptionalComponentPayloads `
+        -Manifest $distribution `
+        -AllowedComponents $optionalComponentPayloadIds
+    $externalizedComponentPayloadIds = @($componentPayloads | ForEach-Object { [string]$_.component } | Sort-Object -Unique)
+    $embeddedOnlineComponentPayloadIds = @($optionalComponentPayloadIds | Where-Object {
+            $externalizedComponentPayloadIds -notcontains $_
+        })
 
     return [ordered]@{
         schema_version = 1
@@ -195,23 +406,11 @@ function New-CorridorKeySuiteManifest {
         track = $Track
         shared_runtime_root = $sharedRuntimeRoot
         gui_root = $guiRoot
-        setup_types = @(
-            [ordered]@{ id = "greenonly"; label = "Green only"; components = @("runtime-core", "green") },
-            [ordered]@{ id = "blueonly"; label = "Blue only"; components = @("runtime-core", "blue") },
-            [ordered]@{ id = "recommended"; label = "Recommended Green plus Blue"; components = @($recommendedComponents) },
-            [ordered]@{ id = "custom"; label = "Custom"; components = @() }
-        )
-        components = @(
-            (New-CorridorKeySuiteComponent -Id "runtime-core" -Label "CLI/runtime core" -Types @("greenonly", "blueonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Win64" -Fixed $true),
-            (New-CorridorKeySuiteComponent -Id "gui" -Label "Tauri GUI" -Types @("recommended", "custom") -Destination $guiRoot -Requires @("runtime-core")),
-            (New-CorridorKeySuiteComponent -Id "ofx-resolve-fusion" -Label "OFX Resolve/Fusion" -Types @("recommended", "custom") -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -Requires @("runtime-core")),
-            (New-CorridorKeySuiteComponent -Id "ofx-nuke" -Label "OFX Nuke" -Types @("recommended", "custom") -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -Requires @("runtime-core")),
-            (New-CorridorKeySuiteComponent -Id "adobe" -Label "Adobe plugins" -Types @("recommended", "custom") -Destination "%ProgramFiles%\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey" -Requires @("runtime-core")),
-            (New-CorridorKeySuiteComponent -Id "green" -Label "Green model pack" -Types @("greenonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Resources\models" -Requires @("runtime-core")),
-            (New-CorridorKeySuiteComponent -Id "blue" -Label "Blue model/runtime pack" -Types @("blueonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Resources" -Requires @("runtime-core"))
-        )
+        setup_types = @($setupTypes)
+        components = @($components)
         model_choices = @($modelChoices)
         model_packs = @($modelPacks)
+        component_payloads = @($componentPayloads)
         hosts = @(
             (New-CorridorKeySuiteHost -Id "resolve-fusion" -Label "Resolve/Fusion" -Component "ofx-resolve-fusion" -Detection "%ProgramFiles%\Blackmagic Design\DaVinci Resolve\Resolve.exe" -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -CacheDeletes @("%AppData%\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml")),
             (New-CorridorKeySuiteHost -Id "nuke" -Label "Nuke" -Component "ofx-nuke" -Detection "%ProgramFiles%\Nuke*; Nuke*.exe" -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -CacheDeletes @("%LocalAppData%\Temp\nuke\ofxplugincache\ofxplugincache_Nuke*-64.xml")),
@@ -223,11 +422,15 @@ function New-CorridorKeySuiteManifest {
             online = [ordered]@{
                 embeds_model_packs = $false
                 model_choices = @($modelChoiceIds)
+                externalized_component_payloads = @($externalizedComponentPayloadIds)
+                embedded_component_payloads = @($embeddedOnlineComponentPayloadIds)
                 verifies_sha256 = $true
             }
             offline = [ordered]@{
                 embeds_model_packs = $true
                 model_choices = @($modelChoiceIds)
+                embeds_component_payloads = $true
+                embedded_component_payloads = @($optionalComponentPayloadIds)
                 verifies_sha256 = $true
             }
         }
@@ -257,6 +460,33 @@ function ConvertTo-CorridorKeyInnoPath {
     param([string]$Path)
 
     return $Path.Replace("%CommonProgramFiles%", "{commoncf64}").Replace("%ProgramFiles%", "{autopf}")
+}
+
+function Get-CorridorKeySuiteComponentDestDir {
+    param(
+        [object]$SuiteManifest,
+        [string]$ComponentId,
+        [string]$DestSubdir = ""
+    )
+
+    if ($ComponentId -eq "gui") {
+        $destDir = "{#SuiteGuiRoot}"
+    } else {
+        $component = @($SuiteManifest.components | Where-Object { $_.id -eq $ComponentId } | Select-Object -First 1)
+        if ($component.Count -eq 0) {
+            throw "Suite component not found for payload destination: $ComponentId"
+        }
+        $destDir = ConvertTo-CorridorKeyInnoPath -Path ([string]$component[0].destination)
+    }
+
+    $normalizedSubdir = ConvertTo-CorridorKeyPayloadSubdir `
+        -Subdir $DestSubdir `
+        -Label "Optional component payload dest_subdir"
+    if ([string]::IsNullOrWhiteSpace($normalizedSubdir)) {
+        return $destDir
+    }
+
+    return "$destDir\$normalizedSubdir"
 }
 
 function Add-CorridorKeySuiteLine {
@@ -335,6 +565,10 @@ function New-CorridorKeySuiteIss {
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Files]"
+    $externalizedComponentIds = @()
+    if ($Flavor -eq "online") {
+        $externalizedComponentIds = @($SuiteManifest.component_payloads | ForEach-Object { [string]$_.component } | Sort-Object -Unique)
+    }
     $payloadEntries = @(
         @{ Source = "{#SuitePayloadRoot}\runtime\win64\*"; Dest = "{#SharedRuntimeRoot}\Contents\Win64"; Component = "runtime-core" },
         @{ Source = "{#SuitePayloadRoot}\runtime\resources\*"; Dest = "{#SharedRuntimeRoot}\Contents\Resources"; Component = "runtime-core" },
@@ -344,8 +578,33 @@ function New-CorridorKeySuiteIss {
         @{ Source = "{#SuitePayloadRoot}\adobe\*"; Dest = "{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey"; Component = "adobe" }
     )
     foreach ($entry in $payloadEntries) {
+        if ($Flavor -eq "online" -and $externalizedComponentIds -contains [string]$entry.Component) {
+            continue
+        }
         $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$entry.Component)
         Add-CorridorKeySuiteLine -Lines $lines -Value ('Source: "' + $entry.Source + '"; DestDir: "' + $entry.Dest + '"; Components: ' + $componentName + '; Flags: recursesubdirs createallsubdirs ignoreversion')
+    }
+
+    if ($Flavor -eq "online") {
+        foreach ($payload in $SuiteManifest.component_payloads) {
+            $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$payload.component)
+            $destDir = Get-CorridorKeySuiteComponentDestDir `
+                -SuiteManifest $SuiteManifest `
+                -ComponentId ([string]$payload.component) `
+                -DestSubdir ([string]$payload.dest_subdir)
+            foreach ($file in $payload.files) {
+                $flags = "external ignoreversion"
+                $externalSize = $file.size_bytes
+                if ($payload.is_archive -and $payload.extract) {
+                    $flags += " extractarchive recursesubdirs createallsubdirs"
+                    if ($null -ne $payload.installed_size_bytes) {
+                        $externalSize = $payload.installed_size_bytes
+                    }
+                }
+                Add-CorridorKeySuiteLine -Lines $lines -Value ('; Download: ' + $file.url + '; Sha256: ' + $file.sha256 + '; DownloadSize: ' + $file.size_bytes)
+                Add-CorridorKeySuiteLine -Lines $lines -Value ('Source: "{tmp}\' + $file.filename + '"; DestDir: "' + $destDir + '"; Components: ' + $componentName + '; Flags: ' + $flags + '; ExternalSize: ' + $externalSize)
+            }
+        }
     }
 
     foreach ($pack in $SuiteManifest.model_packs) {
@@ -400,7 +659,7 @@ function New-CorridorKeySuiteIss {
         Add-CorridorKeySuiteLine -Lines $lines
         Add-CorridorKeySuiteLine -Lines $lines -Value "procedure InitializeWizard;"
         Add-CorridorKeySuiteLine -Lines $lines -Value "begin"
-        Add-CorridorKeySuiteLine -Lines $lines -Value "  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), 'Downloading selected CorridorKey model packs. SHA-256 is verified for every file.', nil);"
+        Add-CorridorKeySuiteLine -Lines $lines -Value "  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), 'Downloading selected CorridorKey payloads. SHA-256 is verified for every file.', nil);"
         Add-CorridorKeySuiteLine -Lines $lines -Value "  DownloadPage.ShowBaseNameInsteadOfUrl := True;"
         Add-CorridorKeySuiteLine -Lines $lines -Value "end;"
         Add-CorridorKeySuiteLine -Lines $lines
@@ -415,8 +674,20 @@ function New-CorridorKeySuiteIss {
             Add-CorridorKeySuiteLine -Lines $lines -Value ("  if WizardIsComponentSelected('" + $componentName + "') then begin")
             foreach ($pack in $componentPacks) {
                 foreach ($file in $pack.files) {
-                    Add-CorridorKeySuiteLine -Lines $lines -Value ("    DownloadPage.Add('" + $file.url + "', '" + $file.filename + "', '" + $file.sha256 + "');")
+                    $escapedUrl = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$file.url)
+                    $escapedFilename = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$file.filename)
+                    Add-CorridorKeySuiteLine -Lines $lines -Value ("    DownloadPage.Add('" + $escapedUrl + "', '" + $escapedFilename + "', '" + $file.sha256 + "');")
                 }
+            }
+            Add-CorridorKeySuiteLine -Lines $lines -Value "  end;"
+        }
+        foreach ($payload in $SuiteManifest.component_payloads) {
+            $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$payload.component)
+            Add-CorridorKeySuiteLine -Lines $lines -Value ("  if WizardIsComponentSelected('" + $componentName + "') then begin")
+            foreach ($file in $payload.files) {
+                $escapedUrl = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$file.url)
+                $escapedFilename = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$file.filename)
+                Add-CorridorKeySuiteLine -Lines $lines -Value ("    DownloadPage.Add('" + $escapedUrl + "', '" + $escapedFilename + "', '" + $file.sha256 + "');")
             }
             Add-CorridorKeySuiteLine -Lines $lines -Value "  end;"
         }
@@ -885,16 +1156,39 @@ function Assert-CorridorKeyFileSha256 {
 }
 
 function Assert-CorridorKeySuitePayloadRoot {
-    param([string]$Root)
+    param(
+        [string]$Root,
+        [object]$SuiteManifest,
+        [ValidateSet("online", "offline")]
+        [string]$Flavor
+    )
+
+    $externalizedComponentIds = @()
+    if ($Flavor -eq "online") {
+        $externalizedComponentIds = @($SuiteManifest.component_payloads | ForEach-Object { [string]$_.component } | Sort-Object -Unique)
+    }
+
+    $requiredSubdirs = @("runtime\win64", "runtime\resources")
+    foreach ($entry in @(
+            @{ Component = "gui"; Subdir = "gui" },
+            @{ Component = "ofx-resolve-fusion"; Subdir = "ofx-resolve-fusion" },
+            @{ Component = "ofx-nuke"; Subdir = "ofx-nuke" },
+            @{ Component = "adobe"; Subdir = "adobe" }
+        )) {
+        if ($Flavor -eq "online" -and $externalizedComponentIds -contains [string]$entry.Component) {
+            continue
+        }
+        $requiredSubdirs += [string]$entry.Subdir
+    }
 
     if ([string]::IsNullOrWhiteSpace($Root)) {
-        throw "Suite payload root is required. Pass -SuitePayloadRoot with runtime, gui, ofx-resolve-fusion, ofx-nuke, and adobe subdirectories."
+        throw "Suite payload root is required. Pass -SuitePayloadRoot with required subdirectories: $($requiredSubdirs -join ', ')."
     }
     if (-not (Test-Path -LiteralPath $Root)) {
         throw "Suite payload root not found: $Root"
     }
 
-    foreach ($relativeDir in @("runtime\win64", "runtime\resources", "gui", "ofx-resolve-fusion", "ofx-nuke", "adobe")) {
+    foreach ($relativeDir in $requiredSubdirs) {
         $candidate = Join-Path $Root $relativeDir
         if (-not (Test-CorridorKeyDirectoryHasFiles -Path $candidate)) {
             throw "Suite payload subdirectory is missing, not a directory, or empty: $candidate"
@@ -1039,7 +1333,10 @@ if (-not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot)) {
     Write-Host "[suite] Staged suite payload: $SuitePayloadRoot" -ForegroundColor Green
 }
 
-$resolvedSuitePayloadRoot = Assert-CorridorKeySuitePayloadRoot -Root $SuitePayloadRoot
+$resolvedSuitePayloadRoot = Assert-CorridorKeySuitePayloadRoot `
+    -Root $SuitePayloadRoot `
+    -SuiteManifest $suiteManifest `
+    -Flavor $Flavor
 $resolvedModelPayloadDir = ""
 if ($Flavor -eq "offline") {
     $resolvedModelPayloadDir = Assert-CorridorKeySuiteOfflinePayloadRoot -Root $ModelPayloadDir -SuiteManifest $suiteManifest

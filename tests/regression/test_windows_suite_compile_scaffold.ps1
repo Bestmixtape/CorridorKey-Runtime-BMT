@@ -153,6 +153,14 @@ function New-SuitePayloadRoot {
     }
 }
 
+function New-RuntimeOnlySuitePayloadRoot {
+    param([string]$Root)
+
+    foreach ($relativeDir in @("runtime\win64", "runtime\resources")) {
+        New-TextFile -Path (Join-Path $Root (Join-Path $relativeDir "payload.txt"))
+    }
+}
+
 function New-FileBackedSuitePayloadRoot {
     param([string]$Root)
 
@@ -342,6 +350,87 @@ function New-MissingShaDistributionManifest {
     Set-Content -LiteralPath $Path -Value ($missingShaManifest | ConvertTo-Json -Depth 16) -Encoding UTF8
 }
 
+function New-AllExternalizedComponentDistributionManifest {
+    param(
+        [object]$Manifest,
+        [string]$Path
+    )
+
+    $manifestJson = $Manifest | ConvertTo-Json -Depth 24
+    $externalizedManifest = $manifestJson | ConvertFrom-Json
+    $externalizedManifest | Add-Member -NotePropertyName "component_payloads" -NotePropertyValue ([ordered]@{
+            "gui-app" = [ordered]@{
+                label = "GUI fixture payload"
+                component = "gui"
+                dest_subdir = ""
+                files = @(
+                    [ordered]@{
+                        filename = "gui_payload.zip"
+                        url = "https://example.invalid/gui_payload.zip"
+                        sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        size_bytes = 10
+                        status = "ready"
+                    }
+                )
+            }
+            "resolve-fusion-plugin" = [ordered]@{
+                label = "Resolve Fusion OFX fixture payload"
+                component = "ofx-resolve-fusion"
+                dest_subdir = "Contents/Win64"
+                files = @(
+                    [ordered]@{
+                        filename = "resolve_payload.zip"
+                        url = "https://example.invalid/resolve_payload.zip"
+                        sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        size_bytes = 20
+                        status = "ready"
+                    }
+                )
+            }
+            "nuke-plugin" = [ordered]@{
+                label = "Nuke OFX fixture payload"
+                component = "ofx-nuke"
+                files = @(
+                    [ordered]@{
+                        filename = "nuke_payload.zip"
+                        url = "https://example.invalid/nuke_payload.zip"
+                        sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        size_bytes = 30
+                        status = "ready"
+                    }
+                )
+            }
+            "adobe-plugin" = [ordered]@{
+                label = "Adobe fixture payload"
+                component = "adobe"
+                dest_subdir = "Contents/Win64"
+                files = @(
+                    [ordered]@{
+                        filename = "adobe_payload.zip"
+                        url = "https://example.invalid/adobe_payload.zip"
+                        sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                        size_bytes = 40
+                        status = "ready"
+                    }
+                )
+            }
+        }) -Force
+    Set-Content -LiteralPath $Path -Value ($externalizedManifest | ConvertTo-Json -Depth 24) -Encoding UTF8
+    return $externalizedManifest
+}
+
+function New-MissingComponentPayloadSizeDistributionManifest {
+    param(
+        [object]$Manifest,
+        [string]$Path
+    )
+
+    $manifestJson = $Manifest | ConvertTo-Json -Depth 24
+    $missingSizeManifest = $manifestJson | ConvertFrom-Json
+    $missingSizeManifest.component_payloads."gui-app".files[0].PSObject.Properties.Remove("size_bytes")
+    Set-Content -LiteralPath $Path -Value ($missingSizeManifest | ConvertTo-Json -Depth 24) -Encoding UTF8
+}
+
 if (-not (Test-Path -LiteralPath $suitePackageScriptPath)) {
     throw "Expected suite package script not found: $suitePackageScriptPath"
 }
@@ -355,9 +444,14 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 try {
     $fixtureManifestPath = Join-Path $tempRoot "distribution_manifest.json"
     $missingShaManifestPath = Join-Path $tempRoot "distribution_manifest_missing_sha.json"
+    $externalizedManifestPath = Join-Path $tempRoot "distribution_manifest_externalized_components.json"
+    $missingComponentSizeManifestPath = Join-Path $tempRoot "distribution_manifest_missing_component_size.json"
     $manifest = New-TestDistributionManifest -Path $fixtureManifestPath
     New-MissingShaDistributionManifest -Manifest $manifest -Path $missingShaManifestPath
+    $externalizedManifest = New-AllExternalizedComponentDistributionManifest -Manifest $manifest -Path $externalizedManifestPath
+    New-MissingComponentPayloadSizeDistributionManifest -Manifest $externalizedManifest -Path $missingComponentSizeManifestPath
     $suitePayloadRoot = Join-Path $tempRoot "suite_payload"
+    $runtimeOnlySuitePayloadRoot = Join-Path $tempRoot "runtime_only_suite_payload"
     $fileBackedPayloadRoot = Join-Path $tempRoot "file_backed_suite_payload"
     $offlinePayloadRoot = Join-Path $tempRoot "offline_payload"
     $rawArchivePayloadRoot = Join-Path $tempRoot "raw_archive_payload"
@@ -367,6 +461,7 @@ try {
     $failingIscc = Join-Path $tempRoot "failing_iscc.cmd"
     $noOutputIscc = Join-Path $tempRoot "no_output_iscc.ps1"
     New-SuitePayloadRoot -Root $suitePayloadRoot
+    New-RuntimeOnlySuitePayloadRoot -Root $runtimeOnlySuitePayloadRoot
     New-FileBackedSuitePayloadRoot -Root $fileBackedPayloadRoot
     New-OfflinePayloadRoot -Root $offlinePayloadRoot -Manifest $manifest
     New-RawArchiveOfflinePayloadRoot -Root $rawArchivePayloadRoot -Manifest $manifest
@@ -442,6 +537,43 @@ try {
         throw "Compiled offline .iss must contain the concrete offline payload root."
     }
 
+    $externalizedOnlineIss = Join-Path $tempRoot "externalized_online.iss"
+    $externalizedOnlineBaseName = "CorridorKey_Suite_Test_externalized_online"
+    $exitCode = Invoke-SuitePackage -Arguments @(
+        "-Flavor", "online",
+        "-Version", "0.9.0",
+        "-DisplayVersionLabel", "0.9.0-win.0",
+        "-DistributionManifestPath", $externalizedManifestPath,
+        "-SuitePayloadRoot", $runtimeOnlySuitePayloadRoot,
+        "-ISCCPath", $fakeIscc,
+        "-OutputDir", $outputRoot,
+        "-OutputBaseFilename", $externalizedOnlineBaseName,
+        "-OutputIssPath", $externalizedOnlineIss
+    )
+    if ($exitCode -ne 0) {
+        throw "Online suite compile with externalized optional payloads failed."
+    }
+    $externalizedOnlineIssText = Get-Content -Path $externalizedOnlineIss -Raw
+    foreach ($embeddedOptionalPayload in @(
+            "Source: `"{#SuitePayloadRoot}\gui\*`"",
+            "Source: `"{#SuitePayloadRoot}\ofx-resolve-fusion\*`"",
+            "Source: `"{#SuitePayloadRoot}\ofx-nuke\*`"",
+            "Source: `"{#SuitePayloadRoot}\adobe\*`""
+        )) {
+        if ($externalizedOnlineIssText -match [regex]::Escape($embeddedOptionalPayload)) {
+            throw "Externalized online .iss must not require embedded optional payload '$embeddedOptionalPayload'."
+        }
+    }
+    foreach ($requiredToken in @(
+            "Source: `"{#SuitePayloadRoot}\runtime\win64\*`"",
+            "DownloadPage.Add('https://example.invalid/gui_payload.zip', 'gui_payload.zip'",
+            "DestDir: `"{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Win64`"; Components: ofxresolvefusion"
+        )) {
+        if ($externalizedOnlineIssText -notmatch [regex]::Escape($requiredToken)) {
+            throw "Externalized online .iss must contain '$requiredToken'."
+        }
+    }
+
     Assert-SuitePackageFails `
         -Label "raw_archive_payload" `
         -ExpectedMessage "Offline archive payload must be pre-extracted" `
@@ -510,6 +642,28 @@ try {
             $outputRoot,
             "-OutputBaseFilename",
             "missing_manifest_sha"
+        )
+
+    Assert-SuitePackageFails `
+        -Label "missing_component_payload_size" `
+        -ExpectedMessage "Optional component payload file 'gui_payload.zip' is missing size_bytes" `
+        -Arguments @(
+            "-Flavor",
+            "online",
+            "-Version",
+            "0.9.0",
+            "-DisplayVersionLabel",
+            "0.9.0-win.0",
+            "-DistributionManifestPath",
+            $missingComponentSizeManifestPath,
+            "-SuitePayloadRoot",
+            $runtimeOnlySuitePayloadRoot,
+            "-ISCCPath",
+            $fakeIscc,
+            "-OutputDir",
+            $outputRoot,
+            "-OutputBaseFilename",
+            "missing_component_payload_size"
         )
 
     Assert-SuitePackageFails `
