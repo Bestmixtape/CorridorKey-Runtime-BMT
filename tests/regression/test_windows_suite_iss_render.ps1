@@ -29,6 +29,21 @@ function Assert-NotContains {
     }
 }
 
+function Assert-TokenOrder {
+    param(
+        [string]$Content,
+        [string]$First,
+        [string]$Second,
+        [string]$Label
+    )
+
+    $firstIndex = $Content.IndexOf($First, [System.StringComparison]::Ordinal)
+    $secondIndex = $Content.IndexOf($Second, [System.StringComparison]::Ordinal)
+    if ($firstIndex -lt 0 -or $secondIndex -lt 0 -or $firstIndex -ge $secondIndex) {
+        throw "$Label must contain '$First' before '$Second'."
+    }
+}
+
 if (-not (Test-Path -LiteralPath $suitePackageScriptPath)) {
     throw "Expected suite package script not found: $suitePackageScriptPath"
 }
@@ -99,6 +114,8 @@ try {
             "Name: `"adobe`"; Description: `"Adobe plugins`"",
             "Name: `"green`"; Description: `"Green model pack`"",
             "Name: `"blue`"; Description: `"Blue model/runtime pack`"",
+            "[Tasks]",
+            "Name: `"cleaninstall`"; Description: `"Clean install (remove selected CorridorKey payloads before installing)`"; Flags: unchecked",
             "[Dirs]",
             "Name: `"{#SharedRuntimeRoot}\Contents\Win64`"",
             "Name: `"{#SharedRuntimeRoot}\Contents\Resources\models`"",
@@ -138,6 +155,51 @@ try {
             "Filename: `"{#SuiteInventoryPath}`"; Section: `"model_packs`"; Key: `"blue-runtime`"; String: `"blue`"; Components: blue",
             "Filename: `"{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources\corridorkey_runtime.ini`"; Section: `"runtime`"; Key: `"shared_root`"; String: `"{#SharedRuntimeRoot}`"; Components: ofxresolvefusion",
             "Filename: `"{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey\Contents\Resources\corridorkey_runtime.ini`"; Section: `"runtime`"; Key: `"shared_root`"; String: `"{#SharedRuntimeRoot}`"; Components: adobe",
+            "[Code]",
+            "function CorridorKeyPreviousInventoryValue(const Section, Key: String): String;",
+            "GetIniString(Section, Key, '', ExpandConstant('{#SuiteInventoryPath}'))",
+            "function CorridorKeyWasPreviouslyInstalled(const Section, Key: String): Boolean;",
+            "Result := CorridorKeyPreviousInventoryValue(Section, Key) <> '';",
+            "procedure CorridorKeyDeleteTreeIfPresent(const Path: String);",
+            "RaiseException('Unable to remove CorridorKey path: ' + Path);",
+            "if not DelTree(Path, True, True, True) then begin",
+            "procedure CorridorKeyDeleteFileIfPresent(const Path: String);",
+            "RaiseException('Unable to remove CorridorKey file: ' + Path);",
+            "if not DeleteFile(Path) then begin",
+            "procedure CorridorKeyApplySuiteLifecycleCleanup;",
+            "if WizardIsTaskSelected('cleaninstall') then begin",
+            "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Win64'));",
+            "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources'));",
+            "if WizardIsComponentSelected('gui') then begin",
+            "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{#SuiteGuiRoot}'));",
+            "if WizardIsComponentSelected('ofxresolvefusion') or WizardIsComponentSelected('ofxnuke') then begin",
+            "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle'));",
+            "if WizardIsComponentSelected('adobe') then begin",
+            "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey'));",
+            "if not WizardIsComponentSelected('gui') then begin",
+            "if CorridorKeyWasPreviouslyInstalled('components', 'gui') then begin",
+            "if (not WizardIsComponentSelected('ofxresolvefusion')) and (not WizardIsComponentSelected('ofxnuke')) then begin",
+            "if CorridorKeyWasPreviouslyInstalled('components', 'ofx-resolve-fusion') or CorridorKeyWasPreviouslyInstalled('components', 'ofx-nuke') then begin",
+            "if not WizardIsComponentSelected('adobe') then begin",
+            "if CorridorKeyWasPreviouslyInstalled('components', 'adobe') then begin",
+            "if not WizardIsComponentSelected('green') then begin",
+            "if CorridorKeyWasPreviouslyInstalled('components', 'green') then begin",
+            "CorridorKeyDeleteFileIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\models\corridorkey_fp16_512.onnx'));",
+            "CorridorKeyDeleteFileIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\models\.cache.green-models.sha256'));",
+            "if not WizardIsComponentSelected('blue') then begin",
+            "if CorridorKeyWasPreviouslyInstalled('components', 'blue') then begin",
+            "CorridorKeyDeleteFileIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\models\corridorkey_dynamic_blue_fp16.ts'));",
+            "CorridorKeyDeleteFileIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\models\.cache.blue-models.sha256'));",
+            "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\torchtrt-runtime\bin'));",
+            "CorridorKeyDeleteFileIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\torchtrt-runtime\bin\.cache.blue-runtime.sha256'));",
+            "procedure CorridorKeyApplySuiteDeselectionCleanup;",
+            "procedure CorridorKeyApplySuiteCleanInstallCleanup;",
+            "procedure CorridorKeyApplySuiteLifecycleCleanup;",
+            "CorridorKeyApplySuiteDeselectionCleanup;",
+            "CorridorKeyApplySuiteCleanInstallCleanup;",
+            "procedure CurStepChanged(CurStep: TSetupStep);",
+            "if CurStep = ssInstall then begin",
+            "CorridorKeyApplySuiteLifecycleCleanup;",
             "corridorkey_fp16_512.onnx",
             "corridorkey_dynamic_blue_fp16.ts",
             "corridorkey_blue_torchtrt_runtime.7z"
@@ -148,6 +210,11 @@ try {
         Assert-NotContains -Content $content -Needle "corridorkey_fp16_768.onnx" -Label $issPath
         Assert-NotContains -Content $content -Needle "corridorkey_fp16_768_ctx.onnx" -Label $issPath
         Assert-NotContains -Content $content -Needle "corridorkey_fp32_" -Label $issPath
+        Assert-TokenOrder `
+            -Content $content `
+            -First "  CorridorKeyApplySuiteDeselectionCleanup;" `
+            -Second "  CorridorKeyApplySuiteCleanInstallCleanup;" `
+            -Label $issPath
     }
 
     $onlineContent = Get-Content -Path $onlineIssPath -Raw

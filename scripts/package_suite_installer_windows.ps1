@@ -238,7 +238,9 @@ function Get-CorridorKeySuiteModelPacks {
             id = $packId
             label = [string]$pack.Value.label
             component = [string]$pack.Value.component
-            dest_subdir = [string]$pack.Value.dest_subdir
+            dest_subdir = ConvertTo-CorridorKeyPayloadSubdir `
+                -Subdir ([string]$pack.Value.dest_subdir) `
+                -Label "Distribution manifest pack '$packId' dest_subdir"
             installed_size_bytes = if ($pack.Value.PSObject.Properties.Match("installed_size_bytes").Count -gt 0) { $pack.Value.installed_size_bytes } else { $null }
             installed_file_count = if ($pack.Value.PSObject.Properties.Match("installed_file_count").Count -gt 0) { $pack.Value.installed_file_count } else { $null }
             is_archive = [bool]($pack.Value.PSObject.Properties.Match("is_archive").Count -gt 0 -and $pack.Value.is_archive)
@@ -542,6 +544,177 @@ function New-CorridorKeySuiteIniLine {
     return $line
 }
 
+function Add-CorridorKeySuitePascalLine {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        [string]$Value = ""
+    )
+
+    $Lines.Add($Value) | Out-Null
+}
+
+function Add-CorridorKeySuiteDeleteTreeCall {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        [string]$Path,
+        [string]$Indent = "  "
+    )
+
+    $escapedPath = ConvertTo-CorridorKeyInnoPascalString -Value $Path
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value ($Indent + "CorridorKeyDeleteTreeIfPresent(ExpandConstant('" + $escapedPath + "'));")
+}
+
+function Add-CorridorKeySuiteDeleteFileCall {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        [string]$Path,
+        [string]$Indent = "  "
+    )
+
+    $escapedPath = ConvertTo-CorridorKeyInnoPascalString -Value $Path
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value ($Indent + "CorridorKeyDeleteFileIfPresent(ExpandConstant('" + $escapedPath + "'));")
+}
+
+function Add-CorridorKeySuiteModelCleanupCalls {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        [object]$SuiteManifest,
+        [string]$Component,
+        [string]$Indent = "    "
+    )
+
+    foreach ($pack in @($SuiteManifest.model_packs | Where-Object { $_.component -eq $Component })) {
+        $destSubdir = ([string]$pack.dest_subdir).Replace("/", "\")
+        $destRoot = "{#SharedRuntimeRoot}\Contents\Resources\$destSubdir"
+        Add-CorridorKeySuiteDeleteFileCall `
+            -Lines $Lines `
+            -Path ($destRoot + "\.cache." + [string]$pack.id + ".sha256") `
+            -Indent $Indent
+        if ($pack.is_archive -and $pack.extract) {
+            Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path $destRoot -Indent $Indent
+            continue
+        }
+        foreach ($file in $pack.files) {
+            Add-CorridorKeySuiteDeleteFileCall `
+                -Lines $Lines `
+                -Path ($destRoot + "\" + [string]$file.filename) `
+                -Indent $Indent
+        }
+    }
+}
+
+function Get-CorridorKeySuiteHostCleanupPath {
+    param(
+        [object]$SuiteManifest,
+        [string]$HostId
+    )
+
+    $hostEntry = @($SuiteManifest.hosts | Where-Object { $_.id -eq $HostId } | Select-Object -First 1)
+    if ($hostEntry.Count -eq 0) {
+        throw "Suite host not found for cleanup path: $HostId"
+    }
+
+    return ConvertTo-CorridorKeySuiteInventoryPath -SuiteManifest $SuiteManifest -Path ([string]$hostEntry[0].destination)
+}
+
+function Add-CorridorKeySuiteLifecycleCode {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        [object]$SuiteManifest
+    )
+
+    $ofxRoot = Get-CorridorKeySuiteHostCleanupPath -SuiteManifest $SuiteManifest -HostId "resolve-fusion"
+    $adobeRoot = Get-CorridorKeySuiteHostCleanupPath -SuiteManifest $SuiteManifest -HostId "adobe"
+
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeyPreviousInventoryValue(const Section, Key: String): String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := GetIniString(Section, Key, '', ExpandConstant('{#SuiteInventoryPath}'));"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeyWasPreviouslyInstalled(const Section, Key: String): Boolean;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := CorridorKeyPreviousInventoryValue(Section, Key) <> '';"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyDeleteTreeIfPresent(const Path: String);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if DirExists(Path) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if not DelTree(Path, True, True, True) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      RaiseException('Unable to remove CorridorKey path: ' + Path);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyDeleteFileIfPresent(const Path: String);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if FileExists(Path) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if not DeleteFile(Path) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      RaiseException('Unable to remove CorridorKey file: ' + Path);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyApplySuiteDeselectionCleanup;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if not WizardIsComponentSelected('gui') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if CorridorKeyWasPreviouslyInstalled('components', 'gui') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path "{#SuiteGuiRoot}" -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if (not WizardIsComponentSelected('ofxresolvefusion')) and (not WizardIsComponentSelected('ofxnuke')) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if CorridorKeyWasPreviouslyInstalled('components', 'ofx-resolve-fusion') or CorridorKeyWasPreviouslyInstalled('components', 'ofx-nuke') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path $ofxRoot -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if not WizardIsComponentSelected('adobe') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if CorridorKeyWasPreviouslyInstalled('components', 'adobe') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path $adobeRoot -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if not WizardIsComponentSelected('green') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if CorridorKeyWasPreviouslyInstalled('components', 'green') then begin"
+    Add-CorridorKeySuiteModelCleanupCalls -Lines $Lines -SuiteManifest $SuiteManifest -Component "green" -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if not WizardIsComponentSelected('blue') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if CorridorKeyWasPreviouslyInstalled('components', 'blue') then begin"
+    Add-CorridorKeySuiteModelCleanupCalls -Lines $Lines -SuiteManifest $SuiteManifest -Component "blue" -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyApplySuiteCleanInstallCleanup;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if WizardIsTaskSelected('cleaninstall') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path "{#SharedRuntimeRoot}\Contents\Win64" -Indent "    "
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path "{#SharedRuntimeRoot}\Contents\Resources" -Indent "    "
+    Add-CorridorKeySuiteDeleteFileCall -Lines $Lines -Path "{#SuiteInventoryPath}" -Indent "    "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if WizardIsComponentSelected('gui') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path "{#SuiteGuiRoot}" -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if WizardIsComponentSelected('ofxresolvefusion') or WizardIsComponentSelected('ofxnuke') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path $ofxRoot -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    if WizardIsComponentSelected('adobe') then begin"
+    Add-CorridorKeySuiteDeleteTreeCall -Lines $Lines -Path $adobeRoot -Indent "      "
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyApplySuiteLifecycleCleanup;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyApplySuiteDeselectionCleanup;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyApplySuiteCleanInstallCleanup;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CurStepChanged(CurStep: TSetupStep);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if CurStep = ssInstall then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyApplySuiteLifecycleCleanup;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+}
+
 function Add-CorridorKeySuiteLine {
     param(
         [System.Collections.Generic.List[string]]$Lines,
@@ -601,6 +774,10 @@ function New-CorridorKeySuiteIss {
         }
         Add-CorridorKeySuiteLine -Lines $lines -Value $line
     }
+    Add-CorridorKeySuiteLine -Lines $lines
+
+    Add-CorridorKeySuiteLine -Lines $lines -Value "[Tasks]"
+    Add-CorridorKeySuiteLine -Lines $lines -Value 'Name: "cleaninstall"; Description: "Clean install (remove selected CorridorKey payloads before installing)"; Flags: unchecked'
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Dirs]"
@@ -755,11 +932,16 @@ function New-CorridorKeySuiteIss {
         Add-CorridorKeySuiteLine -Lines $lines -Value ('Filename: "' + $iniEntry.Filename + '"; Section: "runtime"; Key: "shared_root"; String: "{#SharedRuntimeRoot}"; Components: ' + $componentName)
     }
 
+    Add-CorridorKeySuiteLine -Lines $lines
+    Add-CorridorKeySuiteLine -Lines $lines -Value "[Code]"
     if ($Flavor -eq "online") {
-        Add-CorridorKeySuiteLine -Lines $lines
-        Add-CorridorKeySuiteLine -Lines $lines -Value "[Code]"
         Add-CorridorKeySuiteLine -Lines $lines -Value "var"
         Add-CorridorKeySuiteLine -Lines $lines -Value "  DownloadPage: TDownloadWizardPage;"
+        Add-CorridorKeySuiteLine -Lines $lines
+    }
+    Add-CorridorKeySuiteLifecycleCode -Lines $lines -SuiteManifest $SuiteManifest
+
+    if ($Flavor -eq "online") {
         Add-CorridorKeySuiteLine -Lines $lines
         Add-CorridorKeySuiteLine -Lines $lines -Value "procedure InitializeWizard;"
         Add-CorridorKeySuiteLine -Lines $lines -Value "begin"

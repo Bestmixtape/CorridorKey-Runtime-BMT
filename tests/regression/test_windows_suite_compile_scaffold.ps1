@@ -445,6 +445,18 @@ function New-InvalidPackIdDistributionManifest {
     Set-Content -LiteralPath $Path -Value ($invalidManifest | ConvertTo-Json -Depth 24) -Encoding UTF8
 }
 
+function New-InvalidPackSubdirDistributionManifest {
+    param(
+        [object]$Manifest,
+        [string]$Path
+    )
+
+    $manifestJson = $Manifest | ConvertTo-Json -Depth 24
+    $invalidManifest = $manifestJson | ConvertFrom-Json
+    $invalidManifest.packs."green-models".dest_subdir = "..\models"
+    Set-Content -LiteralPath $Path -Value ($invalidManifest | ConvertTo-Json -Depth 24) -Encoding UTF8
+}
+
 if (-not (Test-Path -LiteralPath $suitePackageScriptPath)) {
     throw "Expected suite package script not found: $suitePackageScriptPath"
 }
@@ -461,11 +473,13 @@ try {
     $externalizedManifestPath = Join-Path $tempRoot "distribution_manifest_externalized_components.json"
     $missingComponentSizeManifestPath = Join-Path $tempRoot "distribution_manifest_missing_component_size.json"
     $invalidPackIdManifestPath = Join-Path $tempRoot "distribution_manifest_invalid_pack_id.json"
+    $invalidPackSubdirManifestPath = Join-Path $tempRoot "distribution_manifest_invalid_pack_subdir.json"
     $manifest = New-TestDistributionManifest -Path $fixtureManifestPath
     New-MissingShaDistributionManifest -Manifest $manifest -Path $missingShaManifestPath
     $externalizedManifest = New-AllExternalizedComponentDistributionManifest -Manifest $manifest -Path $externalizedManifestPath
     New-MissingComponentPayloadSizeDistributionManifest -Manifest $externalizedManifest -Path $missingComponentSizeManifestPath
     New-InvalidPackIdDistributionManifest -Manifest $manifest -Path $invalidPackIdManifestPath
+    New-InvalidPackSubdirDistributionManifest -Manifest $manifest -Path $invalidPackSubdirManifestPath
     $suitePayloadRoot = Join-Path $tempRoot "suite_payload"
     $runtimeOnlySuitePayloadRoot = Join-Path $tempRoot "runtime_only_suite_payload"
     $fileBackedPayloadRoot = Join-Path $tempRoot "file_backed_suite_payload"
@@ -702,6 +716,28 @@ try {
             $outputRoot,
             "-OutputBaseFilename",
             "invalid_pack_id"
+        )
+
+    Assert-SuitePackageFails `
+        -Label "invalid_pack_subdir" `
+        -ExpectedMessage "Distribution manifest pack 'green-models' dest_subdir must be a safe relative subdirectory" `
+        -Arguments @(
+            "-Flavor",
+            "online",
+            "-Version",
+            "0.9.0",
+            "-DisplayVersionLabel",
+            "0.9.0-win.0",
+            "-DistributionManifestPath",
+            $invalidPackSubdirManifestPath,
+            "-SuitePayloadRoot",
+            $suitePayloadRoot,
+            "-ISCCPath",
+            $fakeIscc,
+            "-OutputDir",
+            $outputRoot,
+            "-OutputBaseFilename",
+            "invalid_pack_subdir"
         )
 
     Assert-SuitePackageFails `
