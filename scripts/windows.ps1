@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "package-suite", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "package-suite", "validate-suite", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -17,6 +17,19 @@ param(
     [string]$Flavor = "",
     [switch]$RenderOnly,
     [string]$OutputManifestPath = "",
+    [Alias("RuntimeRoot")]
+    [string]$SuiteRuntimeRoot = "",
+    [Alias("DistributionManifestPath")]
+    [string]$SuiteDistributionManifestPath = "",
+    [Alias("ReportPath")]
+    [string]$SuiteReadinessReportPath = "",
+    [Alias("RunRuntimeCommands")]
+    [switch]$RunSuiteRuntimeCommands,
+    [Alias("RuntimeCommandPath")]
+    [string]$SuiteRuntimeCommandPath = "",
+    [Alias("RuntimeCommandTimeoutSeconds")]
+    [ValidateRange(1, 3600)]
+    [int]$SuiteRuntimeCommandTimeoutSeconds = 30,
     [switch]$EnableAdobePlugin,
     [string]$AdobeSdkRoot = "",
     [string[]]$ForwardArguments = @()
@@ -33,6 +46,16 @@ if ($Task -ne "build" -and ($EnableAdobePlugin -or -not [string]::IsNullOrWhiteS
 }
 if ($Task -ne "package-suite" -and ($RenderOnly -or -not [string]::IsNullOrWhiteSpace($OutputManifestPath))) {
     throw "-RenderOnly and -OutputManifestPath are supported only with -Task package-suite."
+}
+if ($Task -ne "validate-suite" -and (
+        -not [string]::IsNullOrWhiteSpace($SuiteRuntimeRoot) -or
+        -not [string]::IsNullOrWhiteSpace($SuiteDistributionManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($SuiteReadinessReportPath) -or
+        $RunSuiteRuntimeCommands -or
+        -not [string]::IsNullOrWhiteSpace($SuiteRuntimeCommandPath) -or
+        $PSBoundParameters.ContainsKey("SuiteRuntimeCommandTimeoutSeconds")
+    )) {
+    throw "Suite readiness arguments are supported only with -Task validate-suite."
 }
 
 function Assert-CorridorKeyWindowsReleaseLabelFormat {
@@ -101,10 +124,17 @@ if ($Task -eq "package-suite" -and $resolvedTrack -ne "rtx") {
 
 $syncGuiMetadata = $Task -in @("package-runtime", "release", "sync-version")
 $additionalArguments = @($ForwardArguments)
-$resolvedVersion = Initialize-CorridorKeyVersion `
-    -RepoRoot $repoRoot `
-    -Version $Version `
-    -SyncGuiMetadata:$syncGuiMetadata
+$resolvedVersion = $Version
+if ($Task -eq "validate-suite") {
+    if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
+        $resolvedVersion = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
+    }
+} else {
+    $resolvedVersion = Initialize-CorridorKeyVersion `
+        -RepoRoot $repoRoot `
+        -Version $Version `
+        -SyncGuiMetadata:$syncGuiMetadata
+}
 
 $publishGithubRequested = $additionalArguments | Where-Object { $_ -eq "-PublishGithub" -or $_ -eq "/PublishGithub" }
 if ($Task -eq "release" -and $publishGithubRequested -and $Flavor -ne "online") {
@@ -136,7 +166,7 @@ if ($Task -eq "package-suite" -and [string]::IsNullOrWhiteSpace($Flavor)) {
     $Flavor = "online"
 }
 
-if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+if ($Task -ne "validate-suite" -and [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     if ($stableGithubReleaseRequested) {
         Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
     } elseif ($Task -in @("package-ofx", "package-adobe", "package-suite", "smoke-adobe-host")) {
@@ -373,6 +403,30 @@ switch ($Task) {
         }
         $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "package_suite_installer_windows.ps1" -Arguments $arguments
+        break
+    }
+    "validate-suite" {
+        $arguments = @()
+        if (-not [string]::IsNullOrWhiteSpace($SuiteRuntimeRoot)) {
+            $arguments += @("-RuntimeRoot", $SuiteRuntimeRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuiteDistributionManifestPath)) {
+            $arguments += @("-DistributionManifestPath", $SuiteDistributionManifestPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuiteReadinessReportPath)) {
+            $arguments += @("-ReportPath", $SuiteReadinessReportPath)
+        }
+        if ($RunSuiteRuntimeCommands) {
+            $arguments += @("-RunRuntimeCommands")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuiteRuntimeCommandPath)) {
+            $arguments += @("-RuntimeCommandPath", $SuiteRuntimeCommandPath)
+        }
+        if ($PSBoundParameters.ContainsKey("SuiteRuntimeCommandTimeoutSeconds")) {
+            $arguments += @("-RuntimeCommandTimeoutSeconds", [string]$SuiteRuntimeCommandTimeoutSeconds)
+        }
+        $arguments += $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "validate_suite_install_windows.ps1" -Arguments $arguments
         break
     }
     "release" {

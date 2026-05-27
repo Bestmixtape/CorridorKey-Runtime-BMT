@@ -176,4 +176,11 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_install_readiness.ps1
     )
     set_tests_properties(regression_windows_suite_install_readiness PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_readiness_wrapper
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_readiness_wrapper.ps1
+    )
+    set_tests_properties(regression_windows_suite_readiness_wrapper PROPERTIES LABELS "regression")
 endif()
