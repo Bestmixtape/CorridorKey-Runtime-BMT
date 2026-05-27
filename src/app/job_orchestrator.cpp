@@ -503,6 +503,18 @@ std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& repo
         return {any_models, !any_models || all_found};
     }
 
+    const auto windows_universal =
+        report.contains("windows_universal") ? report["windows_universal"] : nlohmann::json::object();
+    if (windows_universal.contains("packaged_models") &&
+        windows_universal["packaged_models"].is_array()) {
+        const auto& packaged_models = windows_universal["packaged_models"];
+        const bool any_models = !packaged_models.empty();
+        const bool all_found = std::all_of(
+            packaged_models.begin(), packaged_models.end(),
+            [](const auto& entry) { return entry.value("usable", entry.value("found", false)); });
+        return {any_models, !any_models || all_found};
+    }
+
     bool packaged_windows_models_present = true;
     bool any_packaged_windows_model = false;
     for (const auto& entry : models) {
@@ -1012,6 +1024,10 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     nlohmann::json summary;
     const auto platform = report["system"]["capabilities"].value("platform", "");
     const bool bundle_healthy = report_flag(report, "bundle", "healthy", false);
+    const bool packaged_bundle_layout =
+        report_flag(report, "bundle", "packaged_layout_detected", false);
+    const bool bundle_health_required = platform != "windows" || packaged_bundle_layout;
+    const bool bundle_requirement_healthy = !bundle_health_required || bundle_healthy;
     const bool video_healthy = report_flag(report, "video", "healthy", false);
     const bool cache_healthy = report_flag(report, "cache", "healthy", false);
     const bool coreml_healthy = !report_flag(report, "coreml", "applicable", false) ||
@@ -1078,7 +1094,7 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     summary["windows_universal_healthy"] =
         !report_flag(report, "windows_universal", "applicable", false) ||
         report_flag(report, "windows_universal", "healthy", false);
-    summary["healthy"] = bundle_healthy && video_healthy && cache_healthy && apple_healthy &&
+    summary["healthy"] = bundle_requirement_healthy && video_healthy && cache_healthy && apple_healthy &&
                          summary["windows_universal_healthy"].get<bool>() &&
                          validated_models_present &&
                          summary["bundle_inventory_contract_healthy"].get<bool>() &&

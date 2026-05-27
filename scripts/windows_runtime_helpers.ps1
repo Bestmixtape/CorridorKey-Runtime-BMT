@@ -1442,6 +1442,14 @@ function Get-CorridorKeyExpectedCompiledContextModels {
     )
 }
 
+function Get-CorridorKeyTensorRtContextCompileModels {
+    param(
+        [string[]]$TargetModels
+    )
+
+    return @($TargetModels | Where-Object { $_ -match '^corridorkey_fp16_[0-9]+\.onnx$' })
+}
+
 function Get-CorridorKeyWindowsOfxReleaseVariants {
     param(
         [ValidateSet("rtx", "dml", "all")]
@@ -1472,7 +1480,14 @@ function Get-CorridorKeyWindowsOfxReleaseVariants {
 }
 
 function Get-CorridorKeyPortableRuntimeTargetModels {
-    return @(Get-CorridorKeyWindowsRtxInstallableModelList)
+    $installableModels = @(Get-CorridorKeyPreparedModelList -Variant green)
+    $compiledContextModels = @(
+        Get-CorridorKeyExpectedCompiledContextModels `
+            -PresentModels $installableModels `
+            -ModelProfile "windows-rtx"
+    )
+
+    return @($installableModels + $compiledContextModels)
 }
 
 function Get-CorridorKeyModelInventory {

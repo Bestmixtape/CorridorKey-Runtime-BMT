@@ -102,20 +102,72 @@ Copy-Item $guiSource (Join-Path $distDir "CorridorKey_Runtime.exe") -Force
 
 Write-Host "[5/6] Copying models..."
 $targetModels = Get-CorridorKeyPortableRuntimeTargetModels
-$modelInventory = Get-CorridorKeyModelInventory -ModelsDir $modelsSource -ExpectedModels $targetModels
-foreach ($model in $modelInventory.present_models) {
+$sourceModelInventory = Get-CorridorKeyModelInventory -ModelsDir $modelsSource -ExpectedModels $targetModels
+foreach ($model in $sourceModelInventory.present_models) {
     $sourcePath = Join-Path $modelsSource $model
     Copy-Item $sourcePath $bundleModelsDir -Force
 }
 
+if ($CompileContexts.IsPresent) {
+    Write-Host "[5.5/6] Compiling TensorRT contexts..."
+    $modelsToCompile = @(Get-CorridorKeyTensorRtContextCompileModels -TargetModels $targetModels)
+    foreach ($model in $modelsToCompile) {
+        $modelPath = Join-Path $bundleModelsDir $model
+        if (-not (Test-Path $modelPath)) {
+            continue
+        }
+
+        $compiledContextName = ([System.IO.Path]::GetFileNameWithoutExtension($model)) + "_ctx.onnx"
+        $compiledContextPath = Join-Path $bundleModelsDir $compiledContextName
+        if (Test-Path $compiledContextPath) {
+            continue
+        }
+
+        & (Join-Path $distDir "ck-engine.exe") compile-context --model $modelPath --device tensorrt
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to compile TensorRT context for $model"
+        }
+    }
+}
+
+$modelInventory = Get-CorridorKeyModelInventory -ModelsDir $bundleModelsDir -ExpectedModels $targetModels
+$expectedCompiledContextModels = @(
+    Get-CorridorKeyExpectedCompiledContextModels `
+        -PresentModels $targetModels `
+        -ModelProfile "windows-rtx"
+)
+$compiledContextModels = @(
+    $modelInventory.present_models |
+        Where-Object { $expectedCompiledContextModels -contains $_ }
+)
+$missingCompiledContextModels = @(
+    $expectedCompiledContextModels |
+        Where-Object { $compiledContextModels -notcontains $_ }
+)
+$profileContract = Get-CorridorKeyModelProfileContract -ModelProfile "windows-rtx"
+
 $inventoryPayload = [ordered]@{
     package_type = "runtime_bundle"
-    models_dir = [System.IO.Path]::GetFullPath($modelsSource)
+    model_profile = $profileContract.model_profile
+    bundle_track = $profileContract.bundle_track
+    release_label = $profileContract.release_label
+    optimization_profile_id = $profileContract.optimization_profile_id
+    optimization_profile_label = $profileContract.optimization_profile_label
+    backend_intent = $profileContract.backend_intent
+    fallback_policy = $profileContract.fallback_policy
+    warmup_policy = $profileContract.warmup_policy
+    certification_tier = $profileContract.certification_tier
+    unrestricted_quality_attempt = $profileContract.unrestricted_quality_attempt
+    models_dir = [System.IO.Path]::GetFullPath($bundleModelsDir)
     expected_models = @($modelInventory.expected_models)
     present_models = @($modelInventory.present_models)
     missing_models = @($modelInventory.missing_models)
     present_count = $modelInventory.present_count
     missing_count = $modelInventory.missing_count
+    compiled_context_models = @($compiledContextModels)
+    expected_compiled_context_models = @($expectedCompiledContextModels)
+    missing_compiled_context_models = @($missingCompiledContextModels)
+    compiled_context_complete = @($missingCompiledContextModels).Count -eq 0
 }
 Write-CorridorKeyJsonFile -Path $modelInventoryPath -Payload $inventoryPayload
 
@@ -124,17 +176,6 @@ if ($modelInventory.missing_count -gt 0) {
     Write-Host "[INFO] Wrote model inventory: $modelInventoryPath" -ForegroundColor Cyan
 } else {
     Write-Host "[PASS] All targeted runtime models were packaged." -ForegroundColor Green
-}
-
-if ($CompileContexts.IsPresent) {
-    Write-Host "[5.5/6] Compiling TensorRT contexts..."
-    foreach ($model in $targetModels) {
-        $modelPath = Join-Path $bundleModelsDir $model
-        & (Join-Path $distDir "ck-engine.exe") compile-context --model $modelPath --device tensorrt
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to compile TensorRT context for $model"
-        }
-    }
 }
 
 Write-Host "[6/6] Writing README and smoke test..."
