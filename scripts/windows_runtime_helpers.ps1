@@ -1490,6 +1490,19 @@ function Get-CorridorKeyPortableRuntimeTargetModels {
     return @($installableModels + $compiledContextModels)
 }
 
+function Get-CorridorKeyPortableRuntimeForbiddenRootDlls {
+    return @(
+        "c10.dll",
+        "c10_cuda.dll",
+        "torch.dll",
+        "torch_cpu.dll",
+        "torch_cuda.dll",
+        "torch_global_deps.dll",
+        "torchtrt.dll",
+        "corridorkey_torchtrt.dll"
+    )
+}
+
 function Get-CorridorKeyModelInventory {
     param(
         [string]$ModelsDir,

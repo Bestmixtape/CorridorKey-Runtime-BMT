@@ -92,9 +92,9 @@ Diagnostics and packaging alignment closed for the GUI/runtime contract.
 TorchTRT runtime DLLs as required when the packaged inventory expects
 `corridorkey_dynamic_blue_fp16.ts`. `Get-CorridorKeyPortableRuntimeTargetModels`
 now targets the installable Windows RTX set: Green 512/1024/1536/2048 plus
-Blue dynamic TorchScript. `stage_tauri_runtime_windows.ps1` also stages a
-`torchtrt-runtime` directory when the portable package provides one. The
-larger component picker installer remains tracked separately in
+Blue dynamic TorchScript. The portable runtime package also stages a
+`torchtrt-runtime` directory when the package provides one. The larger
+component picker installer remains tracked separately in
 `doc/tasks/0028-plan-unified-windows-installer.md`.
 
 Fresh-context review findings were addressed before closure: do not expose a

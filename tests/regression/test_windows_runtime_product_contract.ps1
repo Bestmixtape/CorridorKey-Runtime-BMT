@@ -73,6 +73,13 @@ Assert-SequenceEqual `
     ) `
     -Label "TensorRT context compile model list"
 
+$forbiddenRootDlls = @(Get-CorridorKeyPortableRuntimeForbiddenRootDlls)
+foreach ($forbiddenRootDll in @("torch_cuda.dll", "torch_cpu.dll", "torchtrt.dll", "corridorkey_torchtrt.dll")) {
+    if ($forbiddenRootDlls -notcontains $forbiddenRootDll) {
+        throw "Portable runtime forbidden root DLL list must include '$forbiddenRootDll'."
+    }
+}
+
 $tempRoot = Join-Path $env:TEMP ("corridorkey_runtime_contract_test_" + [System.Guid]::NewGuid().ToString("N"))
 $modelsDir = Join-Path $tempRoot "models"
 try {

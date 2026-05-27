@@ -30,6 +30,18 @@ param(
     [Alias("RuntimeCommandTimeoutSeconds")]
     [ValidateRange(1, 3600)]
     [int]$SuiteRuntimeCommandTimeoutSeconds = 30,
+    [string]$SuitePayloadRoot = "",
+    [string]$SuitePayloadOutputRoot = "",
+    [string]$RuntimePackageRoot = "",
+    [string]$OfxPackageRoot = "",
+    [string]$AdobePackageRoot = "",
+    [string]$ModelPayloadDir = "",
+    [string]$ISCCPath = "",
+    [string]$SuitePackageDistributionManifestPath = "",
+    [string]$SuitePackageOutputDir = "",
+    [string]$SuitePackageOutputBaseFilename = "",
+    [string]$SuitePackageOutputIssPath = "",
+    [string]$FfmpegPath = "",
     [switch]$EnableAdobePlugin,
     [string]$AdobeSdkRoot = "",
     [string[]]$ForwardArguments = @()
@@ -46,6 +58,24 @@ if ($Task -ne "build" -and ($EnableAdobePlugin -or -not [string]::IsNullOrWhiteS
 }
 if ($Task -ne "package-suite" -and ($RenderOnly -or -not [string]::IsNullOrWhiteSpace($OutputManifestPath))) {
     throw "-RenderOnly and -OutputManifestPath are supported only with -Task package-suite."
+}
+if ($Task -ne "package-suite" -and (
+        -not [string]::IsNullOrWhiteSpace($SuitePayloadRoot) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot) -or
+        -not [string]::IsNullOrWhiteSpace($RuntimePackageRoot) -or
+        -not [string]::IsNullOrWhiteSpace($OfxPackageRoot) -or
+        -not [string]::IsNullOrWhiteSpace($AdobePackageRoot) -or
+        -not [string]::IsNullOrWhiteSpace($ModelPayloadDir) -or
+        -not [string]::IsNullOrWhiteSpace($ISCCPath) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageDistributionManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageOutputDir) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageOutputBaseFilename) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageOutputIssPath)
+    )) {
+    throw "Suite package payload arguments are supported only with -Task package-suite."
+}
+if ($Task -ne "package-runtime" -and -not [string]::IsNullOrWhiteSpace($FfmpegPath)) {
+    throw "-FfmpegPath is supported only with -Task package-runtime."
 }
 if ($Task -ne "validate-suite" -and (
         -not [string]::IsNullOrWhiteSpace($SuiteRuntimeRoot) -or
@@ -115,7 +145,7 @@ function Invoke-CorridorKeyScript {
 }
 
 $resolvedTrack = $Track
-if ($Task -in @("package-suite", "release") -and -not $PSBoundParameters.ContainsKey("Track")) {
+if ($Task -in @("package-suite", "package-runtime", "release") -and -not $PSBoundParameters.ContainsKey("Track")) {
     $resolvedTrack = "rtx"
 }
 if ($Task -eq "package-suite" -and $resolvedTrack -ne "rtx") {
@@ -382,6 +412,9 @@ switch ($Task) {
         }
         foreach ($suffix in $runtimeSuffixes) {
             $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
+            if (-not [string]::IsNullOrWhiteSpace($FfmpegPath)) {
+                $arguments += @("-FfmpegPath", $FfmpegPath)
+            }
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
         break
@@ -400,6 +433,39 @@ switch ($Task) {
         }
         if (-not [string]::IsNullOrWhiteSpace($OutputManifestPath)) {
             $arguments += @("-OutputManifestPath", $OutputManifestPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePayloadRoot)) {
+            $arguments += @("-SuitePayloadRoot", $SuitePayloadRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot)) {
+            $arguments += @("-SuitePayloadOutputRoot", $SuitePayloadOutputRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($RuntimePackageRoot)) {
+            $arguments += @("-RuntimePackageRoot", $RuntimePackageRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($OfxPackageRoot)) {
+            $arguments += @("-OfxPackageRoot", $OfxPackageRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($AdobePackageRoot)) {
+            $arguments += @("-AdobePackageRoot", $AdobePackageRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ModelPayloadDir)) {
+            $arguments += @("-ModelPayloadDir", $ModelPayloadDir)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ISCCPath)) {
+            $arguments += @("-ISCCPath", $ISCCPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageDistributionManifestPath)) {
+            $arguments += @("-DistributionManifestPath", $SuitePackageDistributionManifestPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageOutputDir)) {
+            $arguments += @("-OutputDir", $SuitePackageOutputDir)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageOutputBaseFilename)) {
+            $arguments += @("-OutputBaseFilename", $SuitePackageOutputBaseFilename)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageOutputIssPath)) {
+            $arguments += @("-OutputIssPath", $SuitePackageOutputIssPath)
         }
         $arguments += $additionalArguments
         Invoke-CorridorKeyScript -ScriptName "package_suite_installer_windows.ps1" -Arguments $arguments

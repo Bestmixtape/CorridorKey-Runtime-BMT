@@ -15,8 +15,8 @@ packaging, backend, and model-pack problems until the workflow is already
 broken.
 
 This task establishes the first useful GUI slice: runtime readiness and
-diagnostics driven by the embedded runtime contract, with smoke coverage against
-a fake runtime binary.
+diagnostics driven by the packaged runtime contract, with smoke coverage
+against a fake runtime binary.
 
 ## Acceptance Criteria
 

@@ -10,7 +10,7 @@ CorridorKey-Runtime provides three product surfaces:
 - **CLI** (`corridorkey`) for local processing, diagnostics, and automation
 - **GUI** (Tauri-based desktop app) for users who prefer a graphical workflow over the CLI
 
-The OFX plugin and the CLI ship in the same installer: the OFX bundle places `corridorkey.exe` next to `CorridorKey.ofx` and registers it on the system `PATH`, so the CLI is available after the OFX install. The GUI is distributed as a separate desktop installer that embeds its own copy of the runtime payload.
+The OFX plugin and the CLI ship in the same installer: the OFX bundle places `corridorkey.exe` next to `CorridorKey.ofx` and registers it on the system `PATH`, so the CLI is available after the OFX install. The GUI is distributed either as an optional suite component that points at the shared runtime root or as a portable Runtime bundle that carries the GUI and local runtime package together.
 
 Adobe After Effects and Premiere plugins are packaged implementation targets,
 but they are not supported public surfaces until host validation passes.
@@ -51,7 +51,7 @@ The OFX installer ships the `corridorkey` CLI alongside the plugin and registers
 
 ### GUI (Tauri desktop app)
 
-A Tauri-based desktop application is available as a separate installer for users who prefer a graphical workflow over the CLI. The GUI embeds its own copy of the runtime payload, so it does not require the OFX bundle to be installed.
+A Tauri-based desktop application is available for users who prefer a graphical workflow over the CLI. It can be installed from the suite installer or launched from the portable Runtime bundle, so it does not require the OFX bundle to be installed.
 
 ## Documentation
 

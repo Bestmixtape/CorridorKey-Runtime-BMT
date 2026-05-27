@@ -95,7 +95,7 @@ try {
             "#define InstallerSurface `"suite`"",
             "#define SharedRuntimeRoot `"{autopf}\CorridorKey\Runtime`"",
             "#define SuiteGuiRoot `"{autopf}\CorridorKey\GUI`"",
-            "#define SuiteInventoryPath `"{#SharedRuntimeRoot}\Contents\Resources\suite_inventory.ini`"",
+            "#define SuiteInventoryPath `"{autopf}\CorridorKey\Runtime\Contents\Resources\suite_inventory.ini`"",
             "[Setup]",
             "AppId={{7C93E726-017B-45ED-931B-78436F7612A8}",
             "ArchiveExtraction=full",
@@ -166,6 +166,13 @@ try {
             "procedure CorridorKeyDeleteFileIfPresent(const Path: String);",
             "RaiseException('Unable to remove CorridorKey file: ' + Path);",
             "if not DeleteFile(Path) then begin",
+            "function CorridorKeySuitePackMarkerPath(const DestSubdir, PackName: String): String;",
+            "procedure CorridorKeyWriteSuitePackMarker(const DestSubdir, PackName, MarkerValue: String);",
+            "function CorridorKeySuitePackMarkerValid(const DestSubdir, PackName, MarkerValue: String): Boolean;",
+            "procedure CorridorKeyWriteSelectedSuitePackMarkers;",
+            "CorridorKeyWriteSuitePackMarker('models', 'green-models',",
+            "CorridorKeyWriteSuitePackMarker('models', 'blue-models',",
+            "CorridorKeyWriteSuitePackMarker('torchtrt-runtime\bin', 'blue-runtime',",
             "procedure CorridorKeyApplySuiteLifecycleCleanup;",
             "if WizardIsTaskSelected('cleaninstall') then begin",
             "CorridorKeyDeleteTreeIfPresent(ExpandConstant('{#SharedRuntimeRoot}\Contents\Win64'));",
@@ -200,6 +207,8 @@ try {
             "procedure CurStepChanged(CurStep: TSetupStep);",
             "if CurStep = ssInstall then begin",
             "CorridorKeyApplySuiteLifecycleCleanup;",
+            "if CurStep = ssPostInstall then begin",
+            "CorridorKeyWriteSelectedSuitePackMarkers;",
             "corridorkey_fp16_512.onnx",
             "corridorkey_dynamic_blue_fp16.ts",
             "corridorkey_blue_torchtrt_runtime.7z"
@@ -223,16 +232,21 @@ try {
     Assert-Contains -Content $onlineContent -Needle "function NextButtonClick(CurPageID: Integer): Boolean;" -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle "if WizardIsComponentSelected('green') then begin" -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle "if WizardIsComponentSelected('blue') then begin" -Label "online suite .iss"
+    Assert-Contains -Content $onlineContent -Needle "Check: WizardIsTaskSelected('cleaninstall') or not CorridorKeySuitePackMarkerValid('models', 'green-models'," -Label "online suite .iss"
+    Assert-Contains -Content $onlineContent -Needle "if WizardIsTaskSelected('cleaninstall') or not CorridorKeySuitePackMarkerValid('models', 'green-models'," -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle ("DownloadPage.Add('" + $green512.url + "', '" + $green512.filename + "', '" + $green512.sha256 + "');") -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle ("DownloadSize: " + $green512.size_bytes) -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle ("ExternalSize: " + $green512.size_bytes) -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle ("DownloadPage.Add('" + $blueRuntimeFile.url + "', '" + $blueRuntimeFile.filename + "', '" + $blueRuntimeFile.sha256 + "');") -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle ("ExternalSize: " + $blueRuntimeInstalledSize) -Label "online suite .iss"
+    Assert-NotContains -Content $onlineContent -Needle 'DestName: "corridorkey_blue_torchtrt_runtime.7z"' -Label "online suite .iss"
 
     $offlineContent = Get-Content -Path $offlineIssPath -Raw
     Assert-Contains -Content $offlineContent -Needle "Source: `"{#OfflinePayloadRoot}\models\corridorkey_fp16_512.onnx`"" -Label "offline suite .iss"
     Assert-Contains -Content $offlineContent -Needle "Source: `"{#OfflinePayloadRoot}\torchtrt-runtime\bin\*`"" -Label "offline suite .iss"
     Assert-Contains -Content $offlineContent -Needle "Flags: recursesubdirs createallsubdirs ignoreversion" -Label "offline suite .iss"
+    Assert-NotContains -Content $onlineContent -Needle "#define SuiteInventoryPath `"{#SharedRuntimeRoot}" -Label "online suite .iss"
+    Assert-NotContains -Content $offlineContent -Needle "#define SuiteInventoryPath `"{#SharedRuntimeRoot}" -Label "offline suite .iss"
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force

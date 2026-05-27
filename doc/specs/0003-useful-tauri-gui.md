@@ -32,7 +32,7 @@ the declared elevation token.
   - Given a user opens the desktop GUI after installing the Runtime package
   - When the GUI starts
   - Then the user sees runtime, model-pack, backend, and prerequisite status
-    from the embedded runtime instead of a fabricated healthy fallback
+    from the packaged runtime instead of a fabricated healthy fallback
 
 - **Scenario 2:** A non-CLI user processes one clip
   - Given a user has a video file or image sequence and an optional alpha hint
@@ -94,8 +94,8 @@ the declared elevation token.
 - The GUI must provide a diagnostics view that includes model-pack presence,
   backend availability, packaged runtime path, supported tracks, and the last
   `doctor` summary.
-- The GUI must use the canonical package-runtime staging flow for embedded
-  runtime resources and must report missing runtime files as package errors.
+- The GUI must use the canonical packaged-runtime discovery flow and must
+  report missing runtime files as package errors.
 - The GUI must preserve App/Core ownership of processing behavior. The
   TypeScript and Tauri Rust layers may adapt command arguments and event
   payloads, but must not reimplement model selection, fallback policy, output
@@ -150,8 +150,9 @@ Per-criterion progress tracking lives in per-Spec tasks.
   read/write access.
 - The GUI smoke test passes with a fake runtime covering `info`, `models`,
   `presets`, `doctor`, progress events, completion, failure, and cancellation.
-- The Windows package-runtime flow stages the embedded runtime under the Tauri
-  resource layout and the GUI resolves that runtime in an installed bundle.
+- The Windows package-runtime flow emits a portable runtime/GUI package, and
+  the GUI resolves either a suite-provided shared runtime root or its
+  side-by-side packaged runtime.
 - A design-system audit confirms changed GUI surfaces use the `DESIGN.md`
   tokens and do not introduce a second accent palette, external font, ad hoc
   shadow, or ad hoc radius.
@@ -238,4 +239,4 @@ EZ-CorridorKey's visual identity, palette, typography, or component styling.
 - Supersedes / Depends on: depends on `ARCHITECTURE.md`, `DESIGN.md`,
   `docs/SPEC.md`, `docs/FRONTEND.md`, `src/gui/`,
   `src/gui/src/index.css`, `scripts/windows.ps1`, and
-  `scripts/stage_tauri_runtime_windows.ps1`
+  `scripts/package_runtime_installer_windows.ps1`

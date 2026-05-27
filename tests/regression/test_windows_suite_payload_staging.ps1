@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $suitePackageScriptPath = Join-Path $repoRoot "scripts\package_suite_installer_windows.ps1"
+$windowsWrapperPath = Join-Path $repoRoot "scripts\windows.ps1"
 
 function New-TextFile {
     param(
@@ -94,6 +95,10 @@ function New-FakeRuntimePackageRoot {
     New-TextFile -Path (Join-Path $Root "ck-engine.exe") -Content "engine"
     New-TextFile -Path (Join-Path $Root "onnxruntime.dll") -Content "ort"
     New-TextFile -Path (Join-Path $Root "CorridorKey_Runtime.exe") -Content "gui"
+    New-TextFile -Path (Join-Path $Root "ffmpeg.exe") -Content "ffmpeg"
+    New-TextFile -Path (Join-Path $Root "torch_cuda.dll") -Content "blue runtime"
+    New-TextFile -Path (Join-Path $Root "torchtrt.dll") -Content "blue runtime"
+    New-TextFile -Path (Join-Path $Root "corridorkey_torchtrt.dll") -Content "blue wrapper"
     New-TextFile -Path (Join-Path $Root "model_inventory.json") -Content "{}"
     New-TextFile -Path (Join-Path $Root "README.txt") -Content "readme"
     New-TextFile -Path (Join-Path $Root "smoke_test.bat") -Content "smoke"
@@ -258,7 +263,9 @@ try {
     $ofxRoot = Join-Path $tempRoot "ofx_package"
     $adobeRoot = Join-Path $tempRoot "adobe_package"
     $suitePayloadOutputRoot = Join-Path $tempRoot "suite_payload"
+    $wrapperSuitePayloadOutputRoot = Join-Path $tempRoot "wrapper_suite_payload"
     $outputRoot = Join-Path $tempRoot "out"
+    $wrapperOutputRoot = Join-Path $tempRoot "wrapper_out"
     $outputIssPath = Join-Path $tempRoot "suite.iss"
     $fakeIscc = Join-Path $tempRoot "fake_iscc.ps1"
 
@@ -294,6 +301,7 @@ try {
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll") -Label "staged TorchTRT wrapper"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\model_inventory.json") -Label "staged runtime model inventory"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "gui\CorridorKey.exe") -Label "staged GUI exe"
+    Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "gui\ffmpeg.exe") -Label "staged GUI ffmpeg"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "ofx-resolve-fusion\Contents\Win64\CorridorKey.ofx") -Label "staged Resolve/Fusion OFX payload"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "ofx-nuke\Contents\Win64\CorridorKey.ofx") -Label "staged Nuke OFX payload"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "adobe\Contents\Win64\corridorkey_adobe_green.aex") -Label "staged Adobe payload"
@@ -301,6 +309,9 @@ try {
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\CorridorKey_Runtime.exe") -Label "portable GUI executable in runtime payload"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\README.txt") -Label "portable readme"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\smoke_test.bat") -Label "portable smoke test"
+    Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\torch_cuda.dll") -Label "blue runtime root DLL in runtime core"
+    Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\torchtrt.dll") -Label "blue runtime root DLL in runtime core"
+    Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\corridorkey_torchtrt.dll") -Label "blue wrapper root DLL in runtime core"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\torchtrt-runtime\bin\corridorkey_torchtrt.dll") -Label "runtime TorchTRT wrapper under Win64 payload"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\models\green_fixture.onnx") -Label "runtime model duplicate"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\outputs\scratch.tmp") -Label "runtime output scratch"
@@ -331,6 +342,26 @@ try {
         -Path $outputIssPath `
         -Expected 'Filename: "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources\corridorkey_runtime.ini"; Section: "runtime"; Key: "shared_root"; String: "{#SharedRuntimeRoot}"; Components: ofxresolvefusion' `
         -Label "generated suite .iss"
+
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $windowsWrapperPath `
+        -Task package-suite `
+        -Version "0.9.0" `
+        -DisplayVersionLabel "0.9.0-win.0" `
+        -SuitePayloadOutputRoot $wrapperSuitePayloadOutputRoot `
+        -RuntimePackageRoot $runtimeRoot `
+        -OfxPackageRoot $ofxRoot `
+        -AdobePackageRoot $adobeRoot `
+        -ISCCPath $fakeIscc `
+        -SuitePackageDistributionManifestPath $manifestPath `
+        -SuitePackageOutputDir $wrapperOutputRoot `
+        -SuitePackageOutputBaseFilename "CorridorKey_Suite_Test_wrapper"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Suite package staging through scripts/windows.ps1 failed."
+    }
+    Assert-PathExists -Path (Join-Path $wrapperOutputRoot "CorridorKey_Suite_Test_wrapper.exe") -Label "wrapper compiled installer"
+    Assert-PathExists -Path (Join-Path $wrapperSuitePayloadOutputRoot "runtime\win64\ck-engine.exe") -Label "wrapper staged runtime engine"
+    Assert-PathExists -Path (Join-Path $wrapperSuitePayloadOutputRoot "gui\CorridorKey.exe") -Label "wrapper staged GUI executable"
+    Assert-PathExists -Path (Join-Path $wrapperSuitePayloadOutputRoot "gui\ffmpeg.exe") -Label "wrapper staged GUI ffmpeg"
 
     Assert-SuitePackageFails `
         -Label "conflict" `

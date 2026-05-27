@@ -348,6 +348,13 @@ The Windows wrapper tasks are intentionally different:
   - package the Adobe Common Plug-ins MediaCore payload from an Adobe-enabled
     build. The task uses the modern Inno Setup installer flow and defaults to
     the online flavor unless `-Flavor offline` is selected.
+- `package-runtime`
+  - package the portable Windows runtime/GUI bundle and ZIP. The default track
+    is RTX; DirectML is packaged only when explicitly requested.
+- `package-suite`
+  - package the top-level online/offline Windows suite installer. Runtime/CLI
+    core is fixed, while GUI, host plugins, Green, and Blue are optional
+    components.
 - `release`
   - package the official Windows release tracks from the currently staged,
     validated inputs
@@ -390,8 +397,9 @@ Component selection differs by transport. The online flavor keeps component
 selection so an operator can install Green only, Blue only, or Recommended
 (Green + Blue), while the offline flavor is complete by construction: every
 available pack is bundled and fixed for install. The same model-pack behavior
-applies to OFX and Adobe installers. The Tauri GUI is a separate desktop
-installer surface and is not an OFX or Adobe installer component.
+applies to OFX and Adobe installers. The suite installer also exposes the
+Tauri GUI as an optional desktop component that points at the shared runtime
+root.
 
 The modern installer treats selected model packs and the blue runtime DLL
 pack as immutable caches keyed by the manifest SHA256. When a selected
@@ -748,13 +756,11 @@ every example into a broken local link.
 
 This release track ships the Tauri-based desktop GUI defined in
 `src/gui`. The historical name "Runtime" is preserved on the release
-title and on the asset filename
-(`CorridorKey_Runtime_v<label>_<Platform>_<Track>_Installer.exe`)
-because changing it would break the auto-updater for users already on
-this track. The product surface is the GUI; the embedded runtime
-payload it ships is a copy of the same artifacts the OFX installer
-ships (see Section 1 "What This Is" in `docs/SPEC.md` for the full
-three-surface breakdown).
+title and on the portable Windows asset filename
+(`CorridorKey_Runtime_v<label>_<Platform>_<Track>.zip`). The product
+surface is the GUI plus the local runtime package; suite installs may
+instead install the GUI as an optional component that points at the shared
+runtime root.
 
 - Windows only: `CorridorKey Runtime vX.Y.Z (Windows)`
 - macOS only: `CorridorKey Runtime vX.Y.Z (macOS)`

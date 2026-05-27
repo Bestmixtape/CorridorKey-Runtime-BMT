@@ -34,9 +34,9 @@ The product currently provides three released surfaces:
   install time, so a single OFX install delivers both the OFX plugin and the
   CLI. The CLI is also available standalone in the portable runtime bundle.
 - A **GUI** (Tauri-based desktop app) for users who prefer a graphical
-  workflow over the CLI. The GUI is distributed as a separate desktop
-  installer that embeds its own copy of the runtime payload; it is not bundled
-  into the OFX installer.
+  workflow over the CLI. The GUI is distributed through the suite installer or
+  portable Runtime bundle and resolves the shared or side-by-side packaged
+  runtime payload; it is not bundled into the OFX installer.
 
 Adobe After Effects and Premiere plugins are an accepted implementation track,
 but they are not a supported release surface until the host plugin, package,
@@ -214,8 +214,8 @@ processing begins.
   Windows, and Linux
 - Adobe After Effects SDK effect plugin implementation for After Effects and
   Premiere validation
-- Tauri desktop GUI distributed as an independent installer that embeds the
-  runtime payload
+- Tauri desktop GUI distributed as a suite component or portable desktop
+  package that resolves the packaged or shared runtime payload
 - Green and blue screen color model variants, distributed as independent
   selectable packs
 - Alpha hint ingestion and rough-matte fallback generation

@@ -99,9 +99,9 @@ User-facing surfaces. Each is a thin consumer of App/Core contracts.
   host logging. Shared inference, model selection, diagnostics, runtime policy,
   and frame transport stay in App/Core or shared common infrastructure.
 - **Tauri GUI** (`src/gui`): Tauri 2 + React desktop application. Distributed
-  as a separate desktop installer that embeds its own copy of the runtime
-  payload (the staged output of `package_windows.ps1`); does not require the
-  OFX bundle to be installed.
+  as an optional suite component or portable Runtime bundle. It resolves either
+  the suite shared runtime root or the side-by-side packaged runtime and does
+  not require the OFX bundle to be installed.
 
 ---
 

@@ -4,6 +4,7 @@ param(
     [string]$OrtRoot = "",
     [string]$ReleaseSuffix = "",
     [switch]$CompileContexts,
+    [string]$FfmpegPath = "",
     [string[]]$ForbiddenPathPrefix = @()
 )
 
@@ -41,10 +42,54 @@ function Assert-FileExists {
     }
 }
 
+function Test-CorridorKeyFfmpegExecutable {
+    param([string]$CandidatePath)
+
+    if ([string]::IsNullOrWhiteSpace($CandidatePath)) {
+        throw "FFmpeg source path is empty."
+    }
+    $candidateItem = Get-Item -LiteralPath $CandidatePath -ErrorAction Stop
+    if ($candidateItem.PSIsContainer) {
+        throw "FFmpeg source must point to ffmpeg.exe, not a directory: $CandidatePath"
+    }
+    if ($candidateItem.Name -ne "ffmpeg.exe") {
+        throw "FFmpeg source must be named ffmpeg.exe: $CandidatePath"
+    }
+
+    $versionOutput = & $candidateItem.FullName -version 2>&1
+    $exitCode = if (Test-Path Variable:LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+    if ($exitCode -ne 0) {
+        throw "FFmpeg source did not pass '-version': $($candidateItem.FullName)`n$versionOutput"
+    }
+
+    return $candidateItem.FullName
+}
+
+function Resolve-CorridorKeyFfmpegSource {
+    param([string]$ExplicitPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return Test-CorridorKeyFfmpegExecutable -CandidatePath $ExplicitPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:CORRIDORKEY_FFMPEG_PATH)) {
+        return Test-CorridorKeyFfmpegExecutable -CandidatePath $env:CORRIDORKEY_FFMPEG_PATH
+    }
+
+    throw "ffmpeg.exe is required for GUI result previews. Pass -FfmpegPath or set CORRIDORKEY_FFMPEG_PATH to the reviewed ffmpeg.exe."
+}
+
 function Copy-DllsFromDir {
-    param([string]$SourceDir, [string]$DestinationDir)
+    param(
+        [string]$SourceDir,
+        [string]$DestinationDir,
+        [string[]]$ExcludeNames = @()
+    )
     if (Test-Path $SourceDir) {
-        Copy-Item (Join-Path $SourceDir "*.dll") $DestinationDir -Force
+        Get-ChildItem -Path $SourceDir -Filter "*.dll" -File |
+            Where-Object { $ExcludeNames -notcontains $_.Name } |
+            ForEach-Object {
+                Copy-Item $_.FullName $DestinationDir -Force
+            }
     }
 }
 
@@ -92,13 +137,18 @@ Assert-FileExists -Path $engineSource -Message "ck-engine source not found at $e
 Copy-Item $engineSource (Join-Path $distDir "ck-engine.exe") -Force
 
 Write-Host "[3/6] Copying runtime DLLs..."
-Copy-DllsFromDir -SourceDir (Join-Path $BuildDir "src\cli") -DestinationDir $distDir
+$forbiddenRootDlls = @(Get-CorridorKeyPortableRuntimeForbiddenRootDlls)
+Copy-DllsFromDir -SourceDir (Join-Path $BuildDir "src\cli") -DestinationDir $distDir -ExcludeNames $forbiddenRootDlls
 Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "lib") -DestinationDir $distDir
 Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "bin") -DestinationDir $distDir
 
 Write-Host "[4/6] Copying GUI..."
 Assert-FileExists -Path $guiSource -Message "GUI binary not found at $guiSource"
 Copy-Item $guiSource (Join-Path $distDir "CorridorKey_Runtime.exe") -Force
+
+Write-Host "[4.5/6] Copying preview ffmpeg..."
+$ffmpegSource = Resolve-CorridorKeyFfmpegSource -ExplicitPath $FfmpegPath
+Copy-Item -LiteralPath $ffmpegSource -Destination (Join-Path $distDir "ffmpeg.exe") -Force
 
 Write-Host "[5/6] Copying models..."
 $targetModels = Get-CorridorKeyPortableRuntimeTargetModels
@@ -195,6 +245,7 @@ Quick start:
 
 Notes:
 - Lossless output is the default. Use --video-encode balanced for lossy output.
+- ffmpeg.exe is packaged for GUI result preview proxies.
 - The models folder must remain next to ck-engine.exe.
 - model_inventory.json records any packaged models that are absent from this bundle.
 "@ | Set-Content -Path $readmePath -Encoding ASCII

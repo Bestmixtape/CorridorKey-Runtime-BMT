@@ -14,10 +14,10 @@ scripts. Leaving those as unrelated install experiences makes first setup,
 repair, offline installation, and support harder than the product needs to be.
 
 The feature is a top-level Windows suite installer that coordinates existing
-packaged payloads. It must preserve standalone CLI/runtime and standalone GUI
-paths where those remain useful for support, smoke testing, or minimal
-installs. It must not duplicate multi-GB runtime or model payloads when a user
-selects more than one host surface.
+packaged payloads. It must preserve portable CLI/runtime and GUI package paths
+where those remain useful for support, smoke testing, or minimal installs. It
+must not duplicate multi-GB runtime or model payloads when a user selects more
+than one host surface.
 
 ## User Scenarios
 
@@ -61,8 +61,8 @@ selects more than one host surface.
   cache strategy used by selected host and GUI surfaces.
 - The installer must reuse existing package outputs where possible and define
   which Windows wrapper tasks stage those payloads.
-- Standalone CLI/runtime and standalone GUI packaging must remain available
-  for support, smoke testing, and minimal installs.
+- Portable CLI/runtime and GUI packaging must remain available for support,
+  smoke testing, and minimal installs.
 - Online and offline installer behavior must include checksum verification,
   repair behavior, clean install behavior, and deselection behavior for
   previously installed components.
@@ -102,8 +102,8 @@ Per-criterion progress tracking lives in per-Spec tasks.
   covered by generated-installer regression tests.
 - Host install destinations for Resolve/Fusion, Nuke, Adobe, CLI/runtime, and
   GUI are documented in the suite installer plan.
-- Standalone CLI/runtime and standalone GUI package flows still build after
-  the suite installer is added.
+- Portable CLI/runtime and GUI package flows still build after the suite
+  installer is added.
 
 ## Edge Cases
 
@@ -124,9 +124,9 @@ Per-criterion progress tracking lives in per-Spec tasks.
 
 This spec does not require changing the native runtime processing contract,
 changing model formats, replacing existing standalone package flows, or
-building macOS/Linux installers. It does not require the Tauri NSIS app
-installer to become the suite installer if a top-level Inno Setup installer is
-the better fit for multi-surface component selection.
+building macOS/Linux installers. It does not require the Tauri app packager to
+embed the full RTX runtime payload; the suite installer owns multi-surface
+component selection.
 
 ## Open Questions
 
@@ -138,7 +138,9 @@ the better fit for multi-surface component selection.
   does not overload `package-ofx`, `package-adobe`, or `package-runtime`,
   because those remain standalone support and release surfaces.
 - Installer shell: the suite installer uses the existing Inno Setup packaging
-  family. Tauri/NSIS remains the standalone GUI app installer.
+  family. The Windows `package-runtime` support path emits the portable
+  runtime/GUI package; a full-payload Tauri/NSIS installer is not a supported
+  Windows RTX artifact.
 - Shared runtime root: suite installs use one shared product root under
   `{autopf}\CorridorKey\Runtime` for CLI/runtime binaries and
   `Contents\Resources`. Host destinations receive only the surface payload

@@ -129,11 +129,11 @@ if(WIN32)
     set_tests_properties(regression_windows_runtime_product_contract PROPERTIES LABELS "regression")
 
     add_test(
-        NAME regression_tauri_runtime_staging_ffmpeg_source
+        NAME regression_windows_runtime_package_wrapper
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-                ${CMAKE_CURRENT_SOURCE_DIR}/test_tauri_runtime_staging_ffmpeg_source.ps1
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_runtime_package_wrapper.ps1
     )
-    set_tests_properties(regression_tauri_runtime_staging_ffmpeg_source PROPERTIES LABELS "regression")
+    set_tests_properties(regression_windows_runtime_package_wrapper PROPERTIES LABELS "regression")
 
     add_test(
         NAME regression_windows_suite_installer_scaffold

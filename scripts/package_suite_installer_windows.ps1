@@ -575,6 +575,86 @@ function Add-CorridorKeySuiteDeleteFileCall {
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value ($Indent + "CorridorKeyDeleteFileIfPresent(ExpandConstant('" + $escapedPath + "'));")
 }
 
+function Get-CorridorKeySuitePackMarkerValue {
+    param([object]$Pack)
+
+    $files = @($Pack.files | Sort-Object filename)
+    if ($files.Count -eq 0) {
+        return ""
+    }
+
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($file in $files) {
+        [void]$builder.AppendLine(([string]$file.sha256).ToLowerInvariant())
+    }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($builder.ToString())
+        return -join ($sha256.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") })
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function Add-CorridorKeySuitePackMarkerCode {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        [object]$SuiteManifest
+    )
+
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeySuitePackMarkerPath(const DestSubdir, PackName: String): String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if DestSubdir = '' then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    Result := ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\.cache.' + PackName + '.sha256');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end else begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    Result := ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\' + DestSubdir + '\.cache.' + PackName + '.sha256');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyWriteSuitePackMarker(const DestSubdir, PackName, MarkerValue: String);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "var"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MarkerPath: String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MarkerPath := CorridorKeySuitePackMarkerPath(DestSubdir, PackName);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if not ForceDirectories(ExtractFileDir(MarkerPath)) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    RaiseException('Unable to create CorridorKey pack marker directory: ' + ExtractFileDir(MarkerPath));"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  SaveStringToFile(MarkerPath, MarkerValue, False);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeySuitePackMarkerValid(const DestSubdir, PackName, MarkerValue: String): Boolean;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "var"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MarkerPath: String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  ExistingValue: AnsiString;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MarkerPath := CorridorKeySuitePackMarkerPath(DestSubdir, PackName);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := LoadStringFromFile(MarkerPath, ExistingValue) and (ExistingValue = MarkerValue);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyWriteSelectedSuitePackMarkers;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    foreach ($component in @("green", "blue")) {
+        $packs = @($SuiteManifest.model_packs | Where-Object { $_.component -eq $component })
+        if ($packs.Count -eq 0) {
+            continue
+        }
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id $component
+        Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("  if WizardIsComponentSelected('" + $componentName + "') then begin")
+        foreach ($pack in $packs) {
+            $destSubdir = ([string]$pack.dest_subdir).Replace("/", "\")
+            $markerValue = Get-CorridorKeySuitePackMarkerValue -Pack $pack
+            $escapedDestSubdir = ConvertTo-CorridorKeyInnoPascalString -Value $destSubdir
+            $escapedPackId = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$pack.id)
+            $escapedMarkerValue = ConvertTo-CorridorKeyInnoPascalString -Value $markerValue
+            Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("    CorridorKeyWriteSuitePackMarker('" + $escapedDestSubdir + "', '" + $escapedPackId + "', '" + $escapedMarkerValue + "');")
+        }
+        Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    }
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+}
+
 function Add-CorridorKeySuiteModelCleanupCalls {
     param(
         [System.Collections.Generic.List[string]]$Lines,
@@ -712,6 +792,9 @@ function Add-CorridorKeySuiteLifecycleCode {
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if CurStep = ssInstall then begin"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyApplySuiteLifecycleCleanup;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if CurStep = ssPostInstall then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyWriteSelectedSuitePackMarkers;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
 }
 
@@ -738,7 +821,7 @@ function New-CorridorKeySuiteIss {
     Add-CorridorKeySuiteLine -Lines $lines -Value '#define OfflinePayloadRoot "@@OFFLINE_PAYLOAD_ROOT@@"'
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SharedRuntimeRoot "' + $SuiteManifest.shared_runtime_root + '"')
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SuiteGuiRoot "' + $SuiteManifest.gui_root + '"')
-    Add-CorridorKeySuiteLine -Lines $lines -Value '#define SuiteInventoryPath "{#SharedRuntimeRoot}\Contents\Resources\suite_inventory.ini"'
+    Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SuiteInventoryPath "' + $SuiteManifest.shared_runtime_root + '\Contents\Resources\suite_inventory.ini"')
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Setup]"
@@ -866,8 +949,13 @@ function New-CorridorKeySuiteIss {
                         $externalSize = $pack.installed_size_bytes
                     }
                 }
+                $markerValue = Get-CorridorKeySuitePackMarkerValue -Pack $pack
+                $escapedDestSubdir = ConvertTo-CorridorKeyInnoPascalString -Value $destSubdir
+                $escapedPackId = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$pack.id)
+                $escapedMarkerValue = ConvertTo-CorridorKeyInnoPascalString -Value $markerValue
+                $cacheCheck = "WizardIsTaskSelected('cleaninstall') or not CorridorKeySuitePackMarkerValid('$escapedDestSubdir', '$escapedPackId', '$escapedMarkerValue')"
                 Add-CorridorKeySuiteLine -Lines $lines -Value ('; Download: ' + $file.url + '; Sha256: ' + $file.sha256 + '; DownloadSize: ' + $file.size_bytes)
-                Add-CorridorKeySuiteLine -Lines $lines -Value ('Source: "{tmp}\' + $file.filename + '"; DestDir: "' + $destDir + '"; DestName: "' + $file.filename + '"; Components: ' + $componentName + '; Flags: ' + $flags + '; ExternalSize: ' + $externalSize)
+                Add-CorridorKeySuiteLine -Lines $lines -Value ('Source: "{tmp}\' + $file.filename + '"; DestDir: "' + $destDir + '"; Components: ' + $componentName + '; Flags: ' + $flags + '; ExternalSize: ' + $externalSize + '; Check: ' + $cacheCheck)
             } else {
                 Add-CorridorKeySuiteLine -Lines $lines -Value ('Source: "' + $offlinePackRoot + '\' + $file.filename + '"; DestDir: "' + $destDir + '"; Components: ' + $componentName + '; Flags: ignoreversion')
             }
@@ -939,6 +1027,7 @@ function New-CorridorKeySuiteIss {
         Add-CorridorKeySuiteLine -Lines $lines -Value "  DownloadPage: TDownloadWizardPage;"
         Add-CorridorKeySuiteLine -Lines $lines
     }
+    Add-CorridorKeySuitePackMarkerCode -Lines $lines -SuiteManifest $SuiteManifest
     Add-CorridorKeySuiteLifecycleCode -Lines $lines -SuiteManifest $SuiteManifest
 
     if ($Flavor -eq "online") {
@@ -959,11 +1048,18 @@ function New-CorridorKeySuiteIss {
             $componentName = ConvertTo-CorridorKeyInnoComponentName -Id $component
             Add-CorridorKeySuiteLine -Lines $lines -Value ("  if WizardIsComponentSelected('" + $componentName + "') then begin")
             foreach ($pack in $componentPacks) {
+                $destSubdir = ([string]$pack.dest_subdir).Replace("/", "\")
+                $markerValue = Get-CorridorKeySuitePackMarkerValue -Pack $pack
+                $escapedDestSubdir = ConvertTo-CorridorKeyInnoPascalString -Value $destSubdir
+                $escapedPackId = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$pack.id)
+                $escapedMarkerValue = ConvertTo-CorridorKeyInnoPascalString -Value $markerValue
+                Add-CorridorKeySuiteLine -Lines $lines -Value ("    if WizardIsTaskSelected('cleaninstall') or not CorridorKeySuitePackMarkerValid('" + $escapedDestSubdir + "', '" + $escapedPackId + "', '" + $escapedMarkerValue + "') then begin")
                 foreach ($file in $pack.files) {
                     $escapedUrl = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$file.url)
                     $escapedFilename = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$file.filename)
-                    Add-CorridorKeySuiteLine -Lines $lines -Value ("    DownloadPage.Add('" + $escapedUrl + "', '" + $escapedFilename + "', '" + $file.sha256 + "');")
+                    Add-CorridorKeySuiteLine -Lines $lines -Value ("      DownloadPage.Add('" + $escapedUrl + "', '" + $escapedFilename + "', '" + $file.sha256 + "');")
                 }
+                Add-CorridorKeySuiteLine -Lines $lines -Value "    end;"
             }
             Add-CorridorKeySuiteLine -Lines $lines -Value "  end;"
         }
@@ -1195,6 +1291,26 @@ function Copy-CorridorKeyDirectoryContents {
     }
 }
 
+function Get-CorridorKeySuiteRuntimeCoreExcludedNames {
+    return @(
+        "CorridorKey_Runtime.exe",
+        "README.txt",
+        "smoke_test.bat",
+        "models",
+        "outputs",
+        "torchtrt-runtime",
+        "model_inventory.json",
+        "c10.dll",
+        "c10_cuda.dll",
+        "torch.dll",
+        "torch_cpu.dll",
+        "torch_cuda.dll",
+        "torch_global_deps.dll",
+        "torchtrt.dll",
+        "corridorkey_torchtrt.dll"
+    )
+}
+
 function Copy-CorridorKeySuiteRuntimePayload {
     param(
         [string]$RuntimeRoot,
@@ -1220,7 +1336,7 @@ function Copy-CorridorKeySuiteRuntimePayload {
     Copy-CorridorKeyDirectoryContents `
         -Source $resolvedRuntimeRoot `
         -Destination $win64Destination `
-        -ExcludeNames @("CorridorKey_Runtime.exe", "README.txt", "smoke_test.bat", "models", "outputs", "torchtrt-runtime", "model_inventory.json")
+        -ExcludeNames @(Get-CorridorKeySuiteRuntimeCoreExcludedNames)
 
     $sourceCliPath = if (Test-Path -LiteralPath $cliPath -PathType Leaf) { $cliPath } else { $enginePath }
     $cliAliasPath = Join-Path $win64Destination "corridorkey.exe"
@@ -1296,9 +1412,14 @@ function Copy-CorridorKeySuiteGuiPayload {
     if (-not (Test-Path -LiteralPath $guiExecutablePath -PathType Leaf)) {
         throw "Runtime package root is missing CorridorKey_Runtime.exe for suite GUI staging: $resolvedRuntimeRoot"
     }
+    $ffmpegPath = Join-Path $resolvedRuntimeRoot "ffmpeg.exe"
+    if (-not (Test-Path -LiteralPath $ffmpegPath -PathType Leaf)) {
+        throw "Runtime package root is missing ffmpeg.exe for suite GUI previews: $resolvedRuntimeRoot"
+    }
 
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     Copy-Item -LiteralPath $guiExecutablePath -Destination (Join-Path $Destination "CorridorKey.exe") -Force
+    Copy-Item -LiteralPath $ffmpegPath -Destination (Join-Path $Destination "ffmpeg.exe") -Force
 }
 
 function Resolve-CorridorKeyOfxBundleRoot {

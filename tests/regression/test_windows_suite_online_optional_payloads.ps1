@@ -62,7 +62,7 @@ try {
             "green-models" = [ordered]@{
                 label = "Green pack"
                 component = "green"
-                dest_subdir = "models"
+                dest_subdir = "model's"
                 files = @(
                     [ordered]@{
                         filename = "corridorkey_fp16_512.onnx"
@@ -155,6 +155,9 @@ try {
     $onlineContent = Get-Content -Path $onlineIssPath -Raw
     Assert-Contains -Content $onlineContent -Needle "if WizardIsComponentSelected('gui') then begin" -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle "DownloadPage.Add('https://downloads.example.invalid/corridorkey_gui_payload''s.zip', 'corridorkey_gui_payload''s.zip', '$guiSha256');" -Label "online suite .iss"
+    Assert-Contains -Content $onlineContent -Needle "CorridorKeyWriteSuitePackMarker('model''s', 'green-models'" -Label "online suite .iss"
+    Assert-Contains -Content $onlineContent -Needle "CorridorKeySuitePackMarkerValid('model''s', 'green-models'" -Label "online suite .iss"
+    Assert-NotContains -Content $onlineContent -Needle "CorridorKeyWriteSuitePackMarker('model's', 'green-models'" -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle "Source: `"{tmp}\corridorkey_gui_payload's.zip`"; DestDir: `"{#SuiteGuiRoot}\Contents\Resources`"; Components: gui; Flags: external ignoreversion extractarchive recursesubdirs createallsubdirs; ExternalSize: 123456" -Label "online suite .iss"
     Assert-Contains -Content $onlineContent -Needle "Source: `"{#SuitePayloadRoot}\runtime\win64\*`"; DestDir: `"{#SharedRuntimeRoot}\Contents\Win64`"; Components: runtimecore" -Label "online suite .iss"
     Assert-NotContains -Content $onlineContent -Needle "Source: `"{#SuitePayloadRoot}\gui\*`"; DestDir: `"{#SuiteGuiRoot}`"; Components: gui" -Label "online suite .iss"

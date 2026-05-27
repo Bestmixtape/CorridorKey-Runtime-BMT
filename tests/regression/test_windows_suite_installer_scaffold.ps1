@@ -58,6 +58,21 @@ Assert-Contains -Content $windowsWrapper -Needle '"package-suite"' -Label "scrip
 Assert-Contains -Content $windowsWrapper -Needle "package_suite_installer_windows.ps1" -Label "scripts/windows.ps1"
 Assert-Contains -Content $windowsWrapper -Needle '$arguments += @("-Flavor", $Flavor)' -Label "scripts/windows.ps1"
 Assert-Contains -Content $windowsWrapper -Needle '$arguments += @("-RenderOnly")' -Label "scripts/windows.ps1"
+foreach ($suitePackageArgument in @(
+    "SuitePayloadRoot",
+    "SuitePayloadOutputRoot",
+    "RuntimePackageRoot",
+    "OfxPackageRoot",
+    "AdobePackageRoot",
+    "ModelPayloadDir",
+    "ISCCPath",
+    "SuitePackageDistributionManifestPath",
+    "SuitePackageOutputDir",
+    "SuitePackageOutputBaseFilename",
+    "SuitePackageOutputIssPath"
+)) {
+    Assert-Contains -Content $windowsWrapper -Needle $suitePackageArgument -Label "scripts/windows.ps1 package-suite payload arguments"
+}
 
 foreach ($standaloneTask in @("package-ofx", "package-adobe", "package-runtime")) {
     Assert-Contains -Content $windowsWrapper -Needle "`"$standaloneTask`"" -Label "scripts/windows.ps1"

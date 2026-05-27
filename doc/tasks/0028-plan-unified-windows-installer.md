@@ -34,8 +34,8 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       payloads unnecessarily.
 - [x] The plan decides which existing package outputs are reused by the suite
       installer and which scripts must become staging steps.
-- [x] The plan preserves standalone CLI/runtime and standalone GUI packaging
-      where those are useful for support, smoke testing, or minimal installs.
+- [x] The plan preserves portable CLI/runtime and GUI packaging where those
+      are useful for support, smoke testing, or minimal installs.
 - [x] Online and offline installer behavior is defined, including checksum
       verification, repair/clean install behavior, and behavior when a user
       deselects a previously installed pack.
@@ -75,11 +75,10 @@ Task created from user request for a single installer that can select host
 surfaces and Green/Blue packs. Existing repo evidence supports feasibility:
 the Inno Setup template already has component selection for Green, Blue, and
 recommended Green plus Blue; Adobe and OFX packaging both route through the
-canonical Windows wrapper; the Tauri runtime package currently builds through
-Tauri/NSIS and stages a packaged runtime. The recommended architecture is a
-top-level Inno suite installer that coordinates existing staged payloads,
-because Tauri bundling is app-centric while this product needs a multi-surface
-component installer.
+canonical Windows wrapper; the Runtime package provides a portable GUI/runtime
+bundle. The recommended architecture is a top-level Inno suite installer that
+coordinates existing staged payloads, because Tauri bundling is app-centric
+while this product needs a multi-surface component installer.
 
 Grounding result: official Inno Setup documentation supports the component
 model needed here:
@@ -96,8 +95,8 @@ model needed here:
   and archive extraction, matching the existing online/offline model-pack
   template: https://jrsoftware.org/ishelp/topic_filessection.htm.
 - Tauri documents Windows app installers as app-centric WiX or NSIS bundles,
-  which supports keeping Tauri/NSIS as the standalone GUI installer rather than
-  making it own the multi-surface suite:
+  which supports keeping Tauri app packaging separate from the multi-surface
+  suite instead of making it own component selection:
   https://v2.tauri.app/distribute/windows-installer/.
 
 Repository inventory:
@@ -122,9 +121,10 @@ Repository inventory:
 - `scripts/package_adobe_plugins_windows.ps1` stages Adobe MediaCore payloads,
   validates clean and upgrade smoke paths, and already delegates modern
   installer output to the shared Inno builder.
-- `scripts/package_runtime_installer_windows.ps1` and
-  `scripts/stage_tauri_runtime_windows.ps1` build the standalone Tauri/NSIS
-  GUI installer by staging the runtime under Tauri resources.
+- `scripts/package_runtime_installer_windows.ps1` builds the Tauri GUI
+  executable without bundling and delegates the portable runtime/GUI package to
+  `scripts/package_windows.ps1`. The former full-payload Tauri/NSIS path is
+  not a supported Windows RTX artifact.
 
 Plan decision: add a new `scripts/windows.ps1 -Task package-suite` in the
 implementation task. Do not overload `package-ofx`, `package-adobe`, or
@@ -142,9 +142,9 @@ Suite component matrix:
   installed when any GUI or host surface is selected, and can also be selected
   alone for support.
 - Tauri GUI: installs the GUI app payload and points it at the shared runtime
-  root. The existing Tauri/NSIS installer remains available as the standalone
-  GUI package; the suite implementation must add a staged GUI payload path
-  instead of nesting the NSIS installer inside Inno.
+  root. The portable Runtime bundle remains available as the GUI support
+  package; the suite implementation stages the GUI payload directly instead of
+  nesting another installer inside Inno.
 - OFX Resolve/Fusion: installs the OFX host-discovery payload to
   `{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle`, reuses Resolve cache
   cleanup, and points runtime execution at the shared root.
@@ -243,6 +243,15 @@ passed with only the repository's expected LF-to-CRLF working-copy warnings.
 spec and task files found only the standard Definition of Done checklist text.
 The follow-up implementation task remains open as
 `doc/tasks/0037-implement-windows-suite-installer-scaffold.md`.
+
+### 2026-05-27
+
+Runtime package grounding found the full-payload Tauri/NSIS installer path is
+not a supported Windows RTX artifact because it embeds multi-GB runtime bytes
+and fails real NSIS compilation. `package-runtime` remains the standalone
+support path by emitting the portable runtime/GUI bundle and ZIP. The suite
+installer remains the installable Windows surface for optional GUI, host,
+Green, and Blue components.
 
 ## Definition of Done
 
