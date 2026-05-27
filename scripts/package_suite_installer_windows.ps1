@@ -127,6 +127,19 @@ function Assert-CorridorKeyPayloadSizeBytes {
     return $parsedSize
 }
 
+function Assert-CorridorKeyInventoryKey {
+    param(
+        [string]$Value,
+        [string]$Label
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch '^[A-Za-z0-9._-]+$') {
+        throw "$Label must be a safe inventory key: $Value"
+    }
+
+    return $Value
+}
+
 function Assert-CorridorKeyOptionalInstalledSizeBytes {
     param(
         [object]$SizeBytes,
@@ -180,6 +193,9 @@ function Get-CorridorKeySuiteModelPacks {
 
     $packs = @()
     foreach ($pack in $Manifest.packs.PSObject.Properties) {
+        $packId = Assert-CorridorKeyInventoryKey `
+            -Value ([string]$pack.Name) `
+            -Label "Distribution manifest pack id"
         $files = @()
         foreach ($file in $pack.Value.files) {
             $filename = Assert-CorridorKeyDownloadBaseName `
@@ -219,7 +235,7 @@ function Get-CorridorKeySuiteModelPacks {
         }
 
         $packs += [ordered]@{
-            id = [string]$pack.Name
+            id = $packId
             label = [string]$pack.Value.label
             component = [string]$pack.Value.component
             dest_subdir = [string]$pack.Value.dest_subdir
@@ -489,6 +505,43 @@ function Get-CorridorKeySuiteComponentDestDir {
     return "$destDir\$normalizedSubdir"
 }
 
+function ConvertTo-CorridorKeySuiteInventoryPath {
+    param(
+        [object]$SuiteManifest,
+        [string]$Path
+    )
+
+    return (ConvertTo-CorridorKeyInnoPath -Path $Path).
+        Replace([string]$SuiteManifest.shared_runtime_root, "{#SharedRuntimeRoot}").
+        Replace([string]$SuiteManifest.gui_root, "{#SuiteGuiRoot}")
+}
+
+function ConvertTo-CorridorKeyInnoDoubleQuotedString {
+    param([string]$Value)
+
+    return $Value -replace '"', '""'
+}
+
+function New-CorridorKeySuiteIniLine {
+    param(
+        [string]$Filename,
+        [string]$Section,
+        [string]$Key,
+        [string]$String,
+        [string]$ComponentName = ""
+    )
+
+    $line = 'Filename: "' + $Filename +
+        '"; Section: "' + (ConvertTo-CorridorKeyInnoDoubleQuotedString -Value $Section) +
+        '"; Key: "' + (ConvertTo-CorridorKeyInnoDoubleQuotedString -Value $Key) +
+        '"; String: "' + (ConvertTo-CorridorKeyInnoDoubleQuotedString -Value $String) + '"'
+    if (-not [string]::IsNullOrWhiteSpace($ComponentName)) {
+        $line += "; Components: $ComponentName"
+    }
+    $line += "; Flags: uninsdeleteentry uninsdeletesectionifempty"
+    return $line
+}
+
 function Add-CorridorKeySuiteLine {
     param(
         [System.Collections.Generic.List[string]]$Lines,
@@ -512,6 +565,7 @@ function New-CorridorKeySuiteIss {
     Add-CorridorKeySuiteLine -Lines $lines -Value '#define OfflinePayloadRoot "@@OFFLINE_PAYLOAD_ROOT@@"'
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SharedRuntimeRoot "' + $SuiteManifest.shared_runtime_root + '"')
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SuiteGuiRoot "' + $SuiteManifest.gui_root + '"')
+    Add-CorridorKeySuiteLine -Lines $lines -Value '#define SuiteInventoryPath "{#SharedRuntimeRoot}\Contents\Resources\suite_inventory.ini"'
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Setup]"
@@ -562,6 +616,10 @@ function New-CorridorKeySuiteIss {
     )) {
         Add-CorridorKeySuiteLine -Lines $lines -Value ('Name: "' + $dir + '"')
     }
+    Add-CorridorKeySuiteLine -Lines $lines
+
+    Add-CorridorKeySuiteLine -Lines $lines -Value "[InstallDelete]"
+    Add-CorridorKeySuiteLine -Lines $lines -Value 'Type: files; Name: "{#SuiteInventoryPath}"'
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Files]"
@@ -641,6 +699,52 @@ function New-CorridorKeySuiteIss {
 
     Add-CorridorKeySuiteLine -Lines $lines
     Add-CorridorKeySuiteLine -Lines $lines -Value "[INI]"
+    foreach ($inventoryEntry in @(
+        @{ Section = "suite"; Key = "installer_surface"; String = "suite"; Component = "" },
+        @{ Section = "suite"; Key = "version"; String = [string]$SuiteManifest.version; Component = "" },
+        @{ Section = "suite"; Key = "display_version_label"; String = [string]$SuiteManifest.display_version_label; Component = "" },
+        @{ Section = "suite"; Key = "flavor"; String = [string]$SuiteManifest.flavor; Component = "" },
+        @{ Section = "paths"; Key = "shared_runtime_root"; String = "{#SharedRuntimeRoot}"; Component = "" },
+        @{ Section = "paths"; Key = "gui_root"; String = "{#SuiteGuiRoot}"; Component = "" }
+    )) {
+        Add-CorridorKeySuiteLine -Lines $lines -Value (New-CorridorKeySuiteIniLine `
+                -Filename "{#SuiteInventoryPath}" `
+                -Section ([string]$inventoryEntry.Section) `
+                -Key ([string]$inventoryEntry.Key) `
+                -String ([string]$inventoryEntry.String))
+    }
+
+    foreach ($component in $SuiteManifest.components) {
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$component.id)
+        Add-CorridorKeySuiteLine -Lines $lines -Value (New-CorridorKeySuiteIniLine `
+                -Filename "{#SuiteInventoryPath}" `
+                -Section "components" `
+                -Key ([string]$component.id) `
+                -String "installed" `
+                -ComponentName $componentName)
+    }
+
+    foreach ($hostEntry in $SuiteManifest.hosts) {
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$hostEntry.component)
+        $destination = ConvertTo-CorridorKeySuiteInventoryPath -SuiteManifest $SuiteManifest -Path ([string]$hostEntry.destination)
+        Add-CorridorKeySuiteLine -Lines $lines -Value (New-CorridorKeySuiteIniLine `
+                -Filename "{#SuiteInventoryPath}" `
+                -Section "hosts" `
+                -Key ([string]$hostEntry.id) `
+                -String $destination `
+                -ComponentName $componentName)
+    }
+
+    foreach ($pack in $SuiteManifest.model_packs) {
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$pack.component)
+        Add-CorridorKeySuiteLine -Lines $lines -Value (New-CorridorKeySuiteIniLine `
+                -Filename "{#SuiteInventoryPath}" `
+                -Section "model_packs" `
+                -Key ([string]$pack.id) `
+                -String ([string]$pack.component) `
+                -ComponentName $componentName)
+    }
+
     foreach ($iniEntry in @(
         @{ Filename = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources\corridorkey_runtime.ini"; Component = "ofx-resolve-fusion" },
         @{ Filename = "{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle\Contents\Resources\corridorkey_runtime.ini"; Component = "ofx-nuke" },

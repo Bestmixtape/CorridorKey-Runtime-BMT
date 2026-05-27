@@ -431,6 +431,20 @@ function New-MissingComponentPayloadSizeDistributionManifest {
     Set-Content -LiteralPath $Path -Value ($missingSizeManifest | ConvertTo-Json -Depth 24) -Encoding UTF8
 }
 
+function New-InvalidPackIdDistributionManifest {
+    param(
+        [object]$Manifest,
+        [string]$Path
+    )
+
+    $manifestJson = $Manifest | ConvertTo-Json -Depth 24
+    $invalidManifest = $manifestJson | ConvertFrom-Json
+    $invalidPack = $invalidManifest.packs."green-models"
+    $invalidManifest.packs.PSObject.Properties.Remove("green-models")
+    $invalidManifest.packs | Add-Member -NotePropertyName "green`"models" -NotePropertyValue $invalidPack -Force
+    Set-Content -LiteralPath $Path -Value ($invalidManifest | ConvertTo-Json -Depth 24) -Encoding UTF8
+}
+
 if (-not (Test-Path -LiteralPath $suitePackageScriptPath)) {
     throw "Expected suite package script not found: $suitePackageScriptPath"
 }
@@ -446,10 +460,12 @@ try {
     $missingShaManifestPath = Join-Path $tempRoot "distribution_manifest_missing_sha.json"
     $externalizedManifestPath = Join-Path $tempRoot "distribution_manifest_externalized_components.json"
     $missingComponentSizeManifestPath = Join-Path $tempRoot "distribution_manifest_missing_component_size.json"
+    $invalidPackIdManifestPath = Join-Path $tempRoot "distribution_manifest_invalid_pack_id.json"
     $manifest = New-TestDistributionManifest -Path $fixtureManifestPath
     New-MissingShaDistributionManifest -Manifest $manifest -Path $missingShaManifestPath
     $externalizedManifest = New-AllExternalizedComponentDistributionManifest -Manifest $manifest -Path $externalizedManifestPath
     New-MissingComponentPayloadSizeDistributionManifest -Manifest $externalizedManifest -Path $missingComponentSizeManifestPath
+    New-InvalidPackIdDistributionManifest -Manifest $manifest -Path $invalidPackIdManifestPath
     $suitePayloadRoot = Join-Path $tempRoot "suite_payload"
     $runtimeOnlySuitePayloadRoot = Join-Path $tempRoot "runtime_only_suite_payload"
     $fileBackedPayloadRoot = Join-Path $tempRoot "file_backed_suite_payload"
@@ -664,6 +680,28 @@ try {
             $outputRoot,
             "-OutputBaseFilename",
             "missing_component_payload_size"
+        )
+
+    Assert-SuitePackageFails `
+        -Label "invalid_pack_id" `
+        -ExpectedMessage "Distribution manifest pack id must be a safe inventory key" `
+        -Arguments @(
+            "-Flavor",
+            "online",
+            "-Version",
+            "0.9.0",
+            "-DisplayVersionLabel",
+            "0.9.0-win.0",
+            "-DistributionManifestPath",
+            $invalidPackIdManifestPath,
+            "-SuitePayloadRoot",
+            $suitePayloadRoot,
+            "-ISCCPath",
+            $fakeIscc,
+            "-OutputDir",
+            $outputRoot,
+            "-OutputBaseFilename",
+            "invalid_pack_id"
         )
 
     Assert-SuitePackageFails `
