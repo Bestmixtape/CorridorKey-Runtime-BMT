@@ -530,4 +530,61 @@ TEST_CASE("bundle diagnostics expose RTX inventory contract metadata",
 #endif
 }
 
+TEST_CASE("bundle diagnostics derive selected model packs from suite inventory",
+          "[unit][doctor][regression]") {
+#if !defined(_WIN32)
+    SUCCEED("Windows suite diagnostics are only applicable on Windows.");
+#else
+    const auto temp_root =
+        std::filesystem::temp_directory_path() / "corridorkey-suite-inventory-fixture";
+    std::filesystem::remove_all(temp_root);
+
+    const auto bundle_root = temp_root / "CorridorKey.ofx.bundle";
+    const auto win64_dir = bundle_root / "Contents" / "Win64";
+    const auto resources_dir = bundle_root / "Contents" / "Resources";
+    const auto models_dir = resources_dir / "models";
+
+    touch_file(win64_dir / "corridorkey.exe");
+    touch_file(win64_dir / "corridorkey_host_plugin_runtime_server.exe");
+    touch_file(win64_dir / "CorridorKey.ofx");
+    touch_file(win64_dir / "onnxruntime.dll");
+    touch_file(win64_dir / "onnxruntime_providers_shared.dll");
+    touch_file(win64_dir / "onnxruntime_providers_nv_tensorrt_rtx.dll");
+    touch_file(win64_dir / "tensorrt_rtx_1.dll");
+    touch_file(win64_dir / "tensorrt_onnxparser_rtx_1.dll");
+    touch_file(win64_dir / "cudart64_12.dll");
+
+    for (const auto& filename :
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx",
+          "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx",
+          "corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
+          "corridorkey_fp16_1536_ctx.onnx", "corridorkey_fp16_2048_ctx.onnx"}) {
+        touch_file(models_dir / filename);
+    }
+    touch_file(resources_dir / "suite_inventory.ini",
+               "[suite]\n"
+               "installer_surface=suite\n"
+               "display_version_label=0.9.0-win.0\n"
+               "[model_packs]\n"
+               "green-models=green\n");
+
+    const auto diagnostics =
+        inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
+    const auto packaged_models =
+        diagnostics["packaged_models"].get<std::vector<nlohmann::json>>();
+
+    REQUIRE(diagnostics["model_inventory"]["package_type"] == "windows_suite");
+    REQUIRE(diagnostics["bundle_track"] == "rtx");
+    REQUIRE(diagnostics["model_inventory_contract_complete"].get<bool>());
+    REQUIRE(diagnostics["blue_runtime"]["required"] == false);
+    REQUIRE(diagnostics["compiled_context_complete"].get<bool>());
+    REQUIRE(packaged_models.size() == 4);
+    REQUIRE(std::ranges::none_of(packaged_models, [](const nlohmann::json& entry) {
+        return entry["filename"] == "corridorkey_dynamic_blue_fp16.ts";
+    }));
+
+    std::filesystem::remove_all(temp_root);
+#endif
+}
+
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-designated-initializers,readability-uppercase-literal-suffix,readability-math-missing-parentheses,modernize-use-ranges,modernize-use-starts-ends-with,modernize-use-emplace,modernize-use-auto,modernize-loop-convert,modernize-avoid-c-style-cast,modernize-return-braced-init-list,readability-implicit-bool-conversion,readability-container-contains,readability-redundant-member-init,readability-redundant-string-init,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,readability-avoid-nested-conditional-operator,modernize-use-nodiscard,readability-make-member-function-const,cppcoreguidelines-pro-type-reinterpret-cast,bugprone-implicit-widening-of-multiplication-result,readability-redundant-inline-specifier,cppcoreguidelines-prefer-member-initializer,performance-unnecessary-value-param,readability-use-concise-preprocessor-directives,readability-else-after-return,readability-string-compare,bugprone-exception-escape,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,bugprone-branch-clone,cert-err33-c,readability-redundant-declaration,readability-qualified-auto,modernize-use-scoped-lock,modernize-use-bool-literals,cppcoreguidelines-init-variables,cppcoreguidelines-special-member-functions,cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,performance-enum-size,performance-avoid-endl,bugprone-unchecked-optional-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)

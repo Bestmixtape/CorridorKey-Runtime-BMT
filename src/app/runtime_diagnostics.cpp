@@ -698,8 +698,138 @@ std::vector<std::filesystem::path> packaged_model_inventory_candidates(
     return candidates;
 }
 
+std::string trim_ascii(std::string value) {
+    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.front()))) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.back()))) {
+        value.pop_back();
+    }
+    return value;
+}
+
+struct SuiteInventorySelection {
+    std::vector<std::string> model_packs;
+    std::string release_label;
+};
+
+std::optional<SuiteInventorySelection> load_suite_inventory_selection(
+    const std::filesystem::path& models_dir) {
+    if (models_dir.filename() != "models") {
+        return std::nullopt;
+    }
+
+    const auto suite_inventory_path = models_dir.parent_path() / "suite_inventory.ini";
+    std::ifstream stream(suite_inventory_path);
+    if (!stream.is_open()) {
+        return std::nullopt;
+    }
+
+    SuiteInventorySelection selection;
+    std::string section;
+    std::string line;
+    while (std::getline(stream, line)) {
+        auto trimmed = trim_ascii(line);
+        if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') {
+            continue;
+        }
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            section = trim_ascii(trimmed.substr(1, trimmed.size() - 2));
+            continue;
+        }
+        const auto separator = trimmed.find('=');
+        if (separator == std::string::npos) {
+            continue;
+        }
+        auto key = trim_ascii(trimmed.substr(0, separator));
+        auto value = trim_ascii(trimmed.substr(separator + 1));
+        if (section == "suite" && key == "display_version_label") {
+            selection.release_label = value;
+        } else if (section == "suite" && key == "version" && selection.release_label.empty()) {
+            selection.release_label = value;
+        } else if (section == "model_packs") {
+            selection.model_packs.push_back(key);
+        }
+    }
+
+    if (selection.model_packs.empty()) {
+        return std::nullopt;
+    }
+    if (selection.release_label.empty()) {
+        selection.release_label = "CorridorKey Suite";
+    }
+    return selection;
+}
+
+bool suite_pack_selected(const SuiteInventorySelection& selection, std::string_view pack_id) {
+    return std::find(selection.model_packs.begin(), selection.model_packs.end(), pack_id) !=
+           selection.model_packs.end();
+}
+
+std::optional<PackagedModelInventory> load_suite_model_inventory(
+    const std::filesystem::path& models_dir) {
+    auto selection = load_suite_inventory_selection(models_dir);
+    if (!selection.has_value()) {
+        return std::nullopt;
+    }
+
+    const bool green_selected = suite_pack_selected(*selection, "green-models");
+    const bool blue_selected = suite_pack_selected(*selection, "blue-models");
+
+    PackagedModelInventory inventory;
+    inventory.package_type = "windows_suite";
+    inventory.model_profile = "windows-rtx";
+    inventory.bundle_track = "rtx";
+    inventory.release_label = selection->release_label;
+    inventory.optimization_profile_id = "windows-rtx";
+    inventory.optimization_profile_label = "Windows RTX";
+    inventory.backend_intent = "tensorrt_rtx";
+    inventory.fallback_policy = "suite_selected_model_packs";
+    inventory.warmup_policy = "provider_specific_session_warmup";
+    inventory.certification_tier = "suite_selected_components";
+    inventory.unrestricted_quality_attempt = true;
+    inventory.unrestricted_quality_attempt_set = true;
+
+    for (const auto& model : model_catalog()) {
+        if (!model.packaged_for_windows) {
+            continue;
+        }
+        if (green_selected && model.screen_color != "blue") {
+            inventory.expected_models.push_back(model.filename);
+        } else if (blue_selected && model.screen_color == "blue") {
+            inventory.expected_models.push_back(model.filename);
+        }
+    }
+
+    if (green_selected) {
+        inventory.expected_compiled_context_models = {
+            "corridorkey_fp16_512_ctx.onnx",
+            "corridorkey_fp16_1024_ctx.onnx",
+            "corridorkey_fp16_1536_ctx.onnx",
+            "corridorkey_fp16_2048_ctx.onnx",
+        };
+    }
+    for (const auto& filename : inventory.expected_compiled_context_models) {
+        std::error_code error;
+        if (std::filesystem::exists(models_dir / filename, error) && !error) {
+            inventory.compiled_context_models.push_back(filename);
+        } else {
+            inventory.missing_compiled_context_models.push_back(filename);
+        }
+    }
+    inventory.compiled_context_complete = inventory.missing_compiled_context_models.empty();
+    inventory.compiled_context_complete_set = true;
+
+    return inventory;
+}
+
 std::optional<PackagedModelInventory> load_packaged_model_inventory(
     const std::filesystem::path& models_dir) {
+    if (auto suite_inventory = load_suite_model_inventory(models_dir); suite_inventory.has_value()) {
+        return suite_inventory;
+    }
+
     for (const auto& candidate : packaged_model_inventory_candidates(models_dir)) {
         std::error_code error;
         if (!std::filesystem::exists(candidate, error) || error) {
