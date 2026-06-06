@@ -651,7 +651,7 @@ function Add-CorridorKeySuitePackMarkerCode {
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if FindFirst(Path + '\*', FindRec) then begin"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    try"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      repeat"
-    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and (Copy(FindRec.Name, 1, 7) <> '.cache.') then begin"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          ChildPath := Path + '\' + FindRec.Name;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          if DirExists(ChildPath) then begin"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "            Result := Result + CorridorKeySuiteDirectoryFileCount(ChildPath);"
@@ -1150,6 +1150,24 @@ function New-CorridorKeySuiteIss {
                 -Key ([string]$pack.id) `
                 -String ([string]$pack.component) `
                 -ComponentName $componentName)
+    }
+
+    foreach ($pack in $SuiteManifest.model_packs) {
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$pack.component)
+        $destSubdir = ([string]$pack.dest_subdir).Replace("/", "\")
+        if ($destSubdir -ne "models") {
+            continue
+        }
+        foreach ($file in @($pack.files)) {
+            $filename = [string]$file.filename
+            $section = if ($filename -match '_ctx\.onnx$') { "compiled_context_models" } else { "model_files" }
+            Add-CorridorKeySuiteLine -Lines $lines -Value (New-CorridorKeySuiteIniLine `
+                    -Filename "{#SuiteInventoryPath}" `
+                    -Section $section `
+                    -Key $filename `
+                    -String ([string]$pack.id) `
+                    -ComponentName $componentName)
+        }
     }
 
     foreach ($iniEntry in @(

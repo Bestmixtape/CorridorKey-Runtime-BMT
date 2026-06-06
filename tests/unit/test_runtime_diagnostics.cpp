@@ -555,10 +555,7 @@ TEST_CASE("bundle diagnostics derive selected model packs from suite inventory",
     touch_file(win64_dir / "cudart64_12.dll");
 
     for (const auto& filename :
-         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_1024.onnx",
-          "corridorkey_fp16_1536.onnx", "corridorkey_fp16_2048.onnx",
-          "corridorkey_fp16_512_ctx.onnx", "corridorkey_fp16_1024_ctx.onnx",
-          "corridorkey_fp16_1536_ctx.onnx", "corridorkey_fp16_2048_ctx.onnx"}) {
+         {"corridorkey_fp16_512.onnx", "corridorkey_fp16_512_ctx.onnx"}) {
         touch_file(models_dir / filename);
     }
     touch_file(resources_dir / "suite_inventory.ini",
@@ -566,7 +563,11 @@ TEST_CASE("bundle diagnostics derive selected model packs from suite inventory",
                "installer_surface=suite\n"
                "display_version_label=0.9.0-win.0\n"
                "[model_packs]\n"
-               "green-models=green\n");
+               "green-models=green\n"
+               "[model_files]\n"
+               "corridorkey_fp16_512.onnx=green-models\n"
+               "[compiled_context_models]\n"
+               "corridorkey_fp16_512_ctx.onnx=green-models\n");
 
     const auto diagnostics =
         inspect_bundle_for_diagnostics(models_dir, win64_dir / "corridorkey.exe");
@@ -578,7 +579,9 @@ TEST_CASE("bundle diagnostics derive selected model packs from suite inventory",
     REQUIRE(diagnostics["model_inventory_contract_complete"].get<bool>());
     REQUIRE(diagnostics["blue_runtime"]["required"] == false);
     REQUIRE(diagnostics["compiled_context_complete"].get<bool>());
-    REQUIRE(packaged_models.size() == 4);
+    REQUIRE(packaged_models.size() == 1);
+    REQUIRE(diagnostics["model_inventory"]["expected_compiled_context_models"].size() == 1);
+    REQUIRE(packaged_models[0]["filename"] == "corridorkey_fp16_512.onnx");
     REQUIRE(std::ranges::none_of(packaged_models, [](const nlohmann::json& entry) {
         return entry["filename"] == "corridorkey_dynamic_blue_fp16.ts";
     }));

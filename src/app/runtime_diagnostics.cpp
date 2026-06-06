@@ -711,6 +711,8 @@ std::string trim_ascii(std::string value) {
 
 struct SuiteInventorySelection {
     std::vector<std::string> model_packs;
+    std::vector<std::string> expected_models;
+    std::vector<std::string> expected_compiled_context_models;
     std::string release_label;
 };
 
@@ -750,12 +752,13 @@ std::optional<SuiteInventorySelection> load_suite_inventory_selection(
             selection.release_label = value;
         } else if (section == "model_packs") {
             selection.model_packs.push_back(key);
+        } else if (section == "model_files") {
+            selection.expected_models.push_back(key);
+        } else if (section == "compiled_context_models") {
+            selection.expected_compiled_context_models.push_back(key);
         }
     }
 
-    if (selection.model_packs.empty()) {
-        return std::nullopt;
-    }
     if (selection.release_label.empty()) {
         selection.release_label = "CorridorKey Suite";
     }
@@ -791,24 +794,30 @@ std::optional<PackagedModelInventory> load_suite_model_inventory(
     inventory.unrestricted_quality_attempt = true;
     inventory.unrestricted_quality_attempt_set = true;
 
-    for (const auto& model : model_catalog()) {
-        if (!model.packaged_for_windows) {
-            continue;
+    if (!selection->expected_models.empty() ||
+        !selection->expected_compiled_context_models.empty()) {
+        inventory.expected_models = selection->expected_models;
+        inventory.expected_compiled_context_models = selection->expected_compiled_context_models;
+    } else {
+        for (const auto& model : model_catalog()) {
+            if (!model.packaged_for_windows) {
+                continue;
+            }
+            if (green_selected && model.screen_color != "blue") {
+                inventory.expected_models.push_back(model.filename);
+            } else if (blue_selected && model.screen_color == "blue") {
+                inventory.expected_models.push_back(model.filename);
+            }
         }
-        if (green_selected && model.screen_color != "blue") {
-            inventory.expected_models.push_back(model.filename);
-        } else if (blue_selected && model.screen_color == "blue") {
-            inventory.expected_models.push_back(model.filename);
-        }
-    }
 
-    if (green_selected) {
-        inventory.expected_compiled_context_models = {
-            "corridorkey_fp16_512_ctx.onnx",
-            "corridorkey_fp16_1024_ctx.onnx",
-            "corridorkey_fp16_1536_ctx.onnx",
-            "corridorkey_fp16_2048_ctx.onnx",
-        };
+        if (green_selected) {
+            inventory.expected_compiled_context_models = {
+                "corridorkey_fp16_512_ctx.onnx",
+                "corridorkey_fp16_1024_ctx.onnx",
+                "corridorkey_fp16_1536_ctx.onnx",
+                "corridorkey_fp16_2048_ctx.onnx",
+            };
+        }
     }
     for (const auto& filename : inventory.expected_compiled_context_models) {
         std::error_code error;

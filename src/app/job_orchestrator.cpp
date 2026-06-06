@@ -1120,8 +1120,29 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["mlx"] = health["mlx"];
     report["windows_universal"] = health["windows_universal"];
 
+    std::vector<std::string> suite_model_filter;
+    const auto& bundle = report["bundle"];
+    if (bundle.contains("model_inventory") && bundle["model_inventory"].is_object() &&
+        bundle["model_inventory"].value("package_type", "") == "windows_suite" &&
+        bundle.contains("packaged_models") && bundle["packaged_models"].is_array()) {
+        for (const auto& model : bundle["packaged_models"]) {
+            if (model.contains("filename") && model["filename"].is_string()) {
+                suite_model_filter.push_back(model["filename"].get<std::string>());
+            }
+        }
+    }
+    const bool filter_doctor_models_for_suite = bundle.contains("model_inventory") &&
+                                                bundle["model_inventory"].is_object() &&
+                                                bundle["model_inventory"].value("package_type", "") ==
+                                                    "windows_suite";
+
     nlohmann::json models = nlohmann::json::array();
     for (const auto& model : model_catalog()) {
+        if (filter_doctor_models_for_suite &&
+            std::find(suite_model_filter.begin(), suite_model_filter.end(), model.filename) ==
+                suite_model_filter.end()) {
+            continue;
+        }
         std::filesystem::path path = models_dir / model.filename;
         const auto artifact = common::inspect_model_artifact(path);
         nlohmann::json entry = to_json(model);
