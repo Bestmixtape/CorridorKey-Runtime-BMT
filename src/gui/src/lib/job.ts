@@ -38,6 +38,7 @@ export interface JobProgress {
   phase?: string;
   backend?: string;
   artifact_path?: string;
+  preview_artifact_path?: string;
   error?: {
     code?: number;
     message?: string;
@@ -52,6 +53,10 @@ export interface JobProgress {
     sample_count?: number;
   }>;
   metrics?: JobMetrics;
+}
+
+export function artifactPreviewPathFromProgress(payload: JobProgress): string | null {
+  return payload.preview_artifact_path || payload.artifact_path || null;
 }
 
 export interface JobRecord {
@@ -387,7 +392,7 @@ export const useJobStore = create<JobState>((set, get) => ({
             break;
           case "artifact_written":
             set({
-              artifactPath: payload.artifact_path || null,
+              artifactPath: artifactPreviewPathFromProgress(payload),
               statusMessage: payload.message || "Artifact written"
             });
             break;

@@ -12,7 +12,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
@@ -24,6 +24,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 #[cfg(any(test, debug_assertions))]
 const RUNTIME_PATH_ENV: &str = "CORRIDORKEY_GUI_RUNTIME_PATH";
 const PREVIEW_SOURCE_SAMPLE_BYTES: u64 = 64 * 1024;
+const PREVIEW_FFMPEG_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -279,12 +280,10 @@ fn runtime_root_from_config(config_path: &Path) -> Option<PathBuf> {
 }
 
 fn push_suite_runtime_roots(runtime_roots: &mut Vec<PathBuf>, config_dir: &Path) {
-    if let Some(runtime_root) = runtime_root_from_config(&config_dir.join("corridorkey_runtime.ini"))
+    if let Some(runtime_root) =
+        runtime_root_from_config(&config_dir.join("corridorkey_runtime.ini"))
     {
-        push_runtime_root(
-            runtime_roots,
-            runtime_root.join("Contents").join("Win64"),
-        );
+        push_runtime_root(runtime_roots, runtime_root.join("Contents").join("Win64"));
     }
 }
 
@@ -319,6 +318,16 @@ fn candidate_preview_ffmpeg_paths(exe_dir: &Path, resource_dir: Option<&Path>) -
     let mut candidates = Vec::new();
     let binary_name = preview_ffmpeg_binary_name();
 
+    if let Some(runtime_root) = runtime_root_from_config(&exe_dir.join("corridorkey_runtime.ini")) {
+        push_runtime_root(
+            &mut candidates,
+            runtime_root
+                .join("Contents")
+                .join("Win64")
+                .join(binary_name),
+        );
+    }
+
     push_runtime_root(&mut candidates, exe_dir.join(binary_name));
     push_runtime_root(&mut candidates, exe_dir.join("runtime").join(binary_name));
     push_runtime_root(&mut candidates, exe_dir.join("resources").join(binary_name));
@@ -328,6 +337,17 @@ fn candidate_preview_ffmpeg_paths(exe_dir: &Path, resource_dir: Option<&Path>) -
     );
 
     if let Some(resource_dir) = resource_dir {
+        if let Some(runtime_root) =
+            runtime_root_from_config(&resource_dir.join("corridorkey_runtime.ini"))
+        {
+            push_runtime_root(
+                &mut candidates,
+                runtime_root
+                    .join("Contents")
+                    .join("Win64")
+                    .join(binary_name),
+            );
+        }
         push_runtime_root(&mut candidates, resource_dir.join(binary_name));
         push_runtime_root(
             &mut candidates,
@@ -595,6 +615,35 @@ fn runtime_working_dir_for_engine(
     Ok(engine_dir)
 }
 
+fn runtime_models_dir_for_engine(
+    engine_path: &Path,
+    command_name: &str,
+) -> Result<PathBuf, RuntimeCommandError> {
+    let engine_dir = runtime_binary_dir(engine_path, command_name)?;
+    if engine_dir.file_name().is_some_and(|name| name == "Win64") {
+        if let Some(contents_dir) = engine_dir.parent() {
+            let suite_models_dir = contents_dir.join("Resources").join("models");
+            if suite_models_dir.is_dir() {
+                return Ok(suite_models_dir);
+            }
+        }
+    }
+
+    if engine_dir.join("models").is_dir() {
+        return Ok(engine_dir.join("models"));
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    if let Some(repo_root) = find_repo_root_from_exe_dir(&engine_dir) {
+        let repo_models_dir = repo_root.join("models");
+        if repo_models_dir.is_dir() {
+            return Ok(repo_models_dir);
+        }
+    }
+
+    Ok(engine_dir.join("models"))
+}
+
 fn run_runtime_json(engine_path: &Path, command_name: &str) -> RuntimeCommandResult {
     run_runtime_json_args(engine_path, command_name, &[command_name, "--json"])
 }
@@ -795,15 +844,15 @@ fn resolve_selected_model_path(
         return Ok(model_path);
     }
 
-    let working_dir = runtime_working_dir_for_engine(engine_path, "process")?;
-
     let has_parent = model_path
         .parent()
         .is_some_and(|parent| !parent.as_os_str().is_empty());
     if has_parent {
+        let working_dir = runtime_working_dir_for_engine(engine_path, "process")?;
         Ok(working_dir.join(model_path))
     } else {
-        Ok(working_dir.join("models").join(model_path))
+        let models_dir = runtime_models_dir_for_engine(engine_path, "process")?;
+        Ok(models_dir.join(model_path))
     }
 }
 
@@ -980,7 +1029,7 @@ fn kill_active_child(active: &ActiveJob) -> Result<bool, RuntimeCommandError> {
         Ok(Some(_status)) => Ok(false),
         Ok(None) => {
             active.cancelled.store(true, Ordering::SeqCst);
-            child.kill().map_err(|error| {
+            terminate_child_process_tree(&mut child).map_err(|error| {
                 runtime_command_error(
                     RuntimeCommandErrorKind::PrerequisiteFailed,
                     "process",
@@ -997,10 +1046,28 @@ fn kill_active_child(active: &ActiveJob) -> Result<bool, RuntimeCommandError> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn terminate_child_process_tree(child: &mut Child) -> std::io::Result<()> {
+    let mut command = Command::new("taskkill.exe");
+    command.args(["/PID", &child.id().to_string(), "/T", "/F"]);
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::null());
+    command.creation_flags(CREATE_NO_WINDOW);
+    match command.status() {
+        Ok(status) if status.success() => Ok(()),
+        _ => child.kill(),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn terminate_child_process_tree(child: &mut Child) -> std::io::Result<()> {
+    child.kill()
+}
+
 fn kill_child_without_cancel(child: &Arc<Mutex<Child>>) {
     let mut child = child.lock().expect("runtime child mutex poisoned");
     if matches!(child.try_wait(), Ok(None)) {
-        let _ = child.kill();
+        let _ = terminate_child_process_tree(&mut child);
     }
 }
 
@@ -1059,8 +1126,9 @@ fn process_stdout_line(
             if is_terminal_job_event_type(&event_type) {
                 set_terminal_payload(terminal_payload, line);
             } else {
-                allow_artifact_from_job_event(app, &line);
-                let _ = app.emit("engine-event", line);
+                let gui_line = enrich_job_event_for_gui(&line);
+                allow_artifact_from_job_event(app, &gui_line);
+                let _ = app.emit("engine-event", gui_line);
             }
         }
         Ok(None) => {
@@ -1091,16 +1159,68 @@ fn allow_artifact_from_job_event(app: &AppHandle, line: &str) {
     }
 }
 
+fn preview_candidate_from_output_directory(path: &Path) -> Option<PathBuf> {
+    if !path.is_dir() {
+        return None;
+    }
+
+    let mut candidates = fs::read_dir(path)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|candidate| candidate.is_file() && is_preview_file_path(candidate))
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.into_iter().next()
+}
+
+fn is_preview_file_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "mp4" | "mov" | "m4v" | "webm" | "mkv" | "avi" | "png" | "jpg" | "jpeg" | "webp"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn preview_artifact_path_from_job_event(line: &str) -> Option<PathBuf> {
     let value: Value = serde_json::from_str(line).ok()?;
     if value.get("type").and_then(Value::as_str) != Some("artifact_written") {
         return None;
     }
-    let path = value.get("artifact_path").and_then(Value::as_str)?.trim();
+    let path = value
+        .get("preview_artifact_path")
+        .or_else(|| value.get("artifact_path"))
+        .and_then(Value::as_str)?
+        .trim();
     if path.is_empty() {
         return None;
     }
-    Some(PathBuf::from(path))
+    let path = PathBuf::from(path);
+    preview_candidate_from_output_directory(&path).or(Some(path))
+}
+
+fn enrich_job_event_for_gui(line: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(line) else {
+        return line.to_string();
+    };
+    if value.get("type").and_then(Value::as_str) != Some("artifact_written") {
+        return line.to_string();
+    }
+    if value.get("preview_artifact_path").is_some() {
+        return line.to_string();
+    }
+    let Some(path) = value.get("artifact_path").and_then(Value::as_str) else {
+        return line.to_string();
+    };
+    let Some(preview_path) = preview_candidate_from_output_directory(Path::new(path.trim())) else {
+        return line.to_string();
+    };
+    value["preview_artifact_path"] = Value::String(path_to_string(&preview_path));
+    value.to_string()
 }
 
 fn supervise_runtime_process(
@@ -1656,6 +1776,22 @@ fn run_preview_ffmpeg(
     proxy_path: &Path,
     encoder: &str,
 ) -> std::io::Result<std::process::Output> {
+    run_preview_ffmpeg_with_timeout(
+        ffmpeg_path,
+        source_path,
+        proxy_path,
+        encoder,
+        PREVIEW_FFMPEG_TIMEOUT,
+    )
+}
+
+fn run_preview_ffmpeg_with_timeout(
+    ffmpeg_path: &Path,
+    source_path: &Path,
+    proxy_path: &Path,
+    encoder: &str,
+    timeout: Duration,
+) -> std::io::Result<std::process::Output> {
     let mut command = Command::new(ffmpeg_path);
     let source_arg = path_to_string(source_path);
     let proxy_arg = path_to_string(proxy_path);
@@ -1683,11 +1819,36 @@ fn run_preview_ffmpeg(
     }
 
     command.args(["-movflags", "+faststart", proxy_arg.as_str()]);
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    command.output()
+    run_command_with_timeout(command, timeout)
+}
+
+fn run_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> std::io::Result<std::process::Output> {
+    let mut child = command.spawn()?;
+    let started_at = Instant::now();
+
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("Preview FFmpeg timed out after {}s.", timeout.as_secs()),
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[tauri::command]
@@ -1781,14 +1942,17 @@ pub fn run() {
 mod tests {
     use super::{
         build_process_args, candidate_preview_ffmpeg_paths, candidate_runtime_roots,
-        collect_runtime_readiness_for_path, engine_binary_names, is_preview_asset_allowed,
-        is_terminal_job_event_type, job_event_type_from_line, kill_active_child,
+        collect_runtime_readiness_for_path, engine_binary_names, enrich_job_event_for_gui,
+        is_preview_asset_allowed, is_terminal_job_event_type, job_event_type_from_line,
+        kill_active_child, path_to_string, preview_artifact_path_from_job_event,
         preview_ffmpeg_binary_name, preview_proxy_path, preview_source_sample_offsets,
-        registered_preview_asset_path, remember_preview_asset, resolve_preview_ffmpeg_candidate,
-        resolve_selected_model_path, runtime_exit_failure_payload, runtime_root_from_config,
+        primary_engine_binary_name, registered_preview_asset_path, remember_preview_asset,
+        resolve_preview_ffmpeg_candidate, resolve_selected_model_path,
+        run_preview_ffmpeg_with_timeout, runtime_exit_failure_payload, runtime_root_from_config,
         runtime_working_dir_for_engine, shutdown_active_job, ActiveJob, JobProcessState,
         PreviewAssetScope, ProcessCommandOptions, RuntimeCommandErrorKind, RuntimeReadinessStatus,
     };
+    use serde_json::Value;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command};
@@ -1796,7 +1960,14 @@ mod tests {
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     };
+    use std::thread;
+    use std::time::{Duration, Instant};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(target_os = "windows")]
+    use super::CREATE_NO_WINDOW;
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
 
     #[test]
     fn candidate_runtime_roots_covers_installed_windows_resources_layout() {
@@ -1910,6 +2081,34 @@ mod tests {
                 .join("runtime")
                 .join(preview_ffmpeg_binary_name())
         ));
+    }
+
+    #[test]
+    fn preview_ffmpeg_candidates_read_suite_shared_runtime_config() {
+        let root = unique_test_dir("suite-ffmpeg-config");
+        let gui_dir = root.join("GUI");
+        let shared_runtime = root.join("Runtime");
+        fs::create_dir_all(&gui_dir).expect("create fake gui dir");
+        fs::write(
+            gui_dir.join("corridorkey_runtime.ini"),
+            format!(
+                "[runtime]\nshared_root={}\n",
+                shared_runtime.to_string_lossy()
+            ),
+        )
+        .expect("write suite runtime config");
+
+        let candidates = candidate_preview_ffmpeg_paths(&gui_dir, None);
+
+        assert_eq!(
+            candidates.first(),
+            Some(
+                &shared_runtime
+                    .join("Contents")
+                    .join("Win64")
+                    .join(preview_ffmpeg_binary_name())
+            )
+        );
     }
 
     #[test]
@@ -2034,6 +2233,22 @@ mod tests {
     }
 
     #[test]
+    fn selected_model_filename_resolves_under_suite_resources_models_dir() {
+        let suite_root = unique_test_dir("suite-model-path");
+        let win64_dir = suite_root.join("Contents").join("Win64");
+        let models_dir = suite_root.join("Contents").join("Resources").join("models");
+        fs::create_dir_all(&win64_dir).expect("create suite win64 dir");
+        fs::create_dir_all(&models_dir).expect("create suite models dir");
+        let runtime = win64_dir.join(primary_engine_binary_name());
+        fs::write(&runtime, "").expect("write fake suite runtime");
+
+        let model_path =
+            resolve_selected_model_path(&runtime, "corridorkey_fp16_1024.onnx").unwrap();
+
+        assert_eq!(model_path, models_dir.join("corridorkey_fp16_1024.onnx"));
+    }
+
+    #[test]
     fn selected_model_absolute_path_is_preserved() {
         let dir = unique_test_dir("absolute-model-path");
         let runtime = fake_runtime_path(&dir);
@@ -2153,6 +2368,57 @@ mod tests {
     }
 
     #[test]
+    fn preview_ffmpeg_times_out_instead_of_hanging() {
+        let dir = unique_test_dir("preview-ffmpeg-timeout");
+        let source = dir.join("source.mov");
+        let proxy = dir.join("proxy.mp4");
+        fs::write(&source, "source").expect("write source");
+        let ffmpeg = fake_sleeping_ffmpeg(&dir);
+
+        let error = run_preview_ffmpeg_with_timeout(
+            &ffmpeg,
+            &source,
+            &proxy,
+            "libx264",
+            Duration::from_millis(100),
+        )
+        .expect_err("sleeping ffmpeg should time out");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn artifact_written_directory_event_exposes_previewable_result_asset() {
+        let dir = unique_test_dir("artifact-directory-preview");
+        let output_dir = dir.join("sequence");
+        fs::create_dir_all(&output_dir).expect("create output dir");
+        fs::write(output_dir.join("frame_0001.exr"), "exr").expect("write unsupported frame");
+        let preview = output_dir.join("comp_0001.png");
+        fs::write(&preview, "png").expect("write preview frame");
+
+        let event = serde_json::json!({
+            "type": "artifact_written",
+            "artifact_path": output_dir,
+        })
+        .to_string();
+
+        let enriched = enrich_job_event_for_gui(&event);
+        let value: Value = serde_json::from_str(&enriched).expect("enriched event json");
+        let preview_string = path_to_string(&preview);
+
+        assert_eq!(
+            value
+                .get("preview_artifact_path")
+                .and_then(serde_json::Value::as_str),
+            Some(preview_string.as_str())
+        );
+        assert_eq!(
+            preview_artifact_path_from_job_event(&enriched),
+            Some(preview)
+        );
+    }
+
+    #[test]
     fn preview_asset_scope_rejects_paths_not_registered_by_native_flow() {
         let dir = unique_test_dir("preview-asset-scope");
         let selected = dir.join("selected.mov");
@@ -2236,6 +2502,29 @@ mod tests {
         assert!(cancelled);
         assert!(active.cancelled.load(Ordering::SeqCst));
         assert!(!status.success());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn cancel_active_child_kills_descendant_process_tree() {
+        let dir = unique_test_dir("process-tree-cancel");
+        let pid_file = dir.join("child.pid");
+        let parent = spawn_parent_with_sleeping_child(&dir, &pid_file);
+        let child_pid = read_pid_file(&pid_file);
+        let active = ActiveJob {
+            id: 10,
+            child: Arc::new(Mutex::new(parent)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+
+        let cancelled = kill_active_child(&active).expect("cancel process tree");
+        let _ = active.child.lock().expect("runtime child mutex").wait();
+
+        assert!(cancelled);
+        assert!(wait_for_windows_process_exit(
+            child_pid,
+            Duration::from_secs(5)
+        ));
     }
 
     #[test]
@@ -2357,6 +2646,31 @@ mod tests {
     }
 
     #[cfg(target_os = "windows")]
+    fn fake_sleeping_ffmpeg(dir: &Path) -> PathBuf {
+        let path = dir.join("ffmpeg.cmd");
+        fs::write(
+            &path,
+            "@echo off\r\npowershell.exe -NoProfile -Command \"Start-Sleep -Seconds 5\"\r\n",
+        )
+        .expect("write fake sleeping ffmpeg");
+        path
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn fake_sleeping_ffmpeg(dir: &Path) -> PathBuf {
+        let path = dir.join("ffmpeg");
+        fs::write(&path, "#!/bin/sh\nsleep 5\n").expect("write fake sleeping ffmpeg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("ffmpeg metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("fake ffmpeg permissions");
+        }
+        path
+    }
+
+    #[cfg(target_os = "windows")]
     fn spawn_sleeping_child() -> Child {
         use std::os::windows::process::CommandExt;
 
@@ -2372,6 +2686,75 @@ mod tests {
             .args(["-c", "sleep 30"])
             .spawn()
             .expect("spawn sleeping child")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn spawn_parent_with_sleeping_child(dir: &Path, pid_file: &Path) -> Child {
+        let script_path = dir.join("spawn_child.ps1");
+        let pid_file_arg = pid_file.to_string_lossy().replace('\'', "''");
+        fs::write(
+            &script_path,
+            format!(
+                r#"$child = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 30") -WindowStyle Hidden -PassThru
+Set-Content -LiteralPath '{pid_file_arg}' -Value $child.Id
+Start-Sleep -Seconds 30
+"#
+            ),
+        )
+        .expect("write process tree script");
+
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script_path.to_str().expect("script path utf-8"),
+        ]);
+        command.creation_flags(CREATE_NO_WINDOW);
+        command.spawn().expect("spawn parent with child")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn read_pid_file(pid_file: &Path) -> u32 {
+        let deadline = SystemTime::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(contents) = fs::read_to_string(pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    return pid;
+                }
+            }
+            assert!(
+                SystemTime::now() < deadline,
+                "timed out waiting for child pid file"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn wait_for_windows_process_exit(pid: u32, timeout: Duration) -> bool {
+        let started_at = Instant::now();
+        while started_at.elapsed() < timeout {
+            let mut command = Command::new("powershell.exe");
+            command.args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
+                ),
+            ]);
+            command.creation_flags(CREATE_NO_WINDOW);
+            let running = command
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+            if !running {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        false
     }
 
     #[cfg(target_os = "windows")]
