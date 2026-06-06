@@ -40,7 +40,7 @@ export function ProcessFlow() {
     currentProgress, statusMessage,
     startedAtMs, finishedAtMs,
     error, activeBackend,
-    artifactPath, warnings,
+    artifactPath, previewArtifactPath, warnings,
     timings, metrics, logs,
     reset
   } = useJobStore();
@@ -70,6 +70,7 @@ export function ProcessFlow() {
   const hasRunnableSelection = Boolean(selectedPresetId || selectedModelId);
   const canStart = Boolean(inputPath && outputReady && runtimeUsable && hasRunnableSelection && artifactOption.enabled);
   const canRetry = terminalStatus === "completed" || terminalStatus === "failed" || terminalStatus === "cancelled";
+  const viewerArtifactPath = previewArtifactPath || artifactPath;
 
   const [showLogs, setShowLogs] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -338,7 +339,7 @@ export function ProcessFlow() {
           inputPath={inputPath}
           hintPath={hintPath}
           outputPath={outputPath}
-          artifactPath={artifactPath}
+          artifactPath={viewerArtifactPath}
           terminalStatus={terminalStatus}
           activeBackend={activeBackend}
           resetCount={resetCount}

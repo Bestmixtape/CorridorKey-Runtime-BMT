@@ -1084,7 +1084,7 @@ fn terminate_active_child(active: &ActiveJob) {
     active.cancelled.store(true, Ordering::SeqCst);
     let mut child = active.child.lock().expect("runtime child mutex poisoned");
     if matches!(child.try_wait(), Ok(None)) {
-        let _ = child.kill();
+        let _ = terminate_child_process_tree(&mut child);
     }
     let _ = child.wait();
 }
@@ -1124,7 +1124,9 @@ fn process_stdout_line(
     match job_event_type_from_line(&line) {
         Ok(Some(event_type)) => {
             if is_terminal_job_event_type(&event_type) {
-                set_terminal_payload(terminal_payload, line);
+                let gui_line = enrich_job_event_for_gui(&line);
+                allow_artifact_from_job_event(app, &gui_line);
+                set_terminal_payload(terminal_payload, gui_line);
             } else {
                 let gui_line = enrich_job_event_for_gui(&line);
                 allow_artifact_from_job_event(app, &gui_line);
@@ -1188,7 +1190,7 @@ fn is_preview_file_path(path: &Path) -> bool {
 
 fn preview_artifact_path_from_job_event(line: &str) -> Option<PathBuf> {
     let value: Value = serde_json::from_str(line).ok()?;
-    if value.get("type").and_then(Value::as_str) != Some("artifact_written") {
+    if !job_event_type_can_carry_artifact(&value) {
         return None;
     }
     let path = value
@@ -1207,7 +1209,7 @@ fn enrich_job_event_for_gui(line: &str) -> String {
     let Ok(mut value) = serde_json::from_str::<Value>(line) else {
         return line.to_string();
     };
-    if value.get("type").and_then(Value::as_str) != Some("artifact_written") {
+    if !job_event_type_can_carry_artifact(&value) {
         return line.to_string();
     }
     if value.get("preview_artifact_path").is_some() {
@@ -1221,6 +1223,13 @@ fn enrich_job_event_for_gui(line: &str) -> String {
     };
     value["preview_artifact_path"] = Value::String(path_to_string(&preview_path));
     value.to_string()
+}
+
+fn job_event_type_can_carry_artifact(value: &Value) -> bool {
+    matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("artifact_written" | "completed")
+    )
 }
 
 fn supervise_runtime_process(
@@ -1631,10 +1640,12 @@ fn create_preview_proxy_in_cache(
     })?;
 
     let proxy_path = preview_proxy_path(source_path, cache_root)?;
+    let marker_path = preview_proxy_marker_path(&proxy_path);
     if proxy_path.is_file()
         && proxy_path
             .metadata()
             .is_ok_and(|metadata| metadata.len() > 0)
+        && marker_path.is_file()
     {
         return Ok(PreviewProxy {
             source_path: path_to_string(source_path),
@@ -1643,11 +1654,45 @@ fn create_preview_proxy_in_cache(
         });
     }
 
+    let _ = fs::remove_file(&proxy_path);
+    let _ = fs::remove_file(&marker_path);
+
     let mut last_error = String::new();
     for encoder in ["libx264", "h264_mf", "h264_nvenc", "h264"] {
-        let output = run_preview_ffmpeg(ffmpeg_path, source_path, &proxy_path, encoder);
+        let temp_path = preview_proxy_temp_path(&proxy_path, encoder);
+        let _ = fs::remove_file(&temp_path);
+        let output = run_preview_ffmpeg(ffmpeg_path, source_path, &temp_path, encoder);
         match output {
             Ok(output) if output.status.success() => {
+                if temp_path
+                    .metadata()
+                    .map_or(true, |metadata| metadata.len() == 0)
+                {
+                    last_error =
+                        "Preview FFmpeg finished without writing a proxy file.".to_string();
+                    let _ = fs::remove_file(&temp_path);
+                    continue;
+                }
+                fs::rename(&temp_path, &proxy_path).map_err(|error| {
+                    runtime_command_error(
+                        RuntimeCommandErrorKind::PrerequisiteFailed,
+                        "create_preview_proxy",
+                        format!(
+                            "Could not finalize preview proxy {}: {error}",
+                            proxy_path.display()
+                        ),
+                    )
+                })?;
+                fs::write(&marker_path, "ok").map_err(|error| {
+                    runtime_command_error(
+                        RuntimeCommandErrorKind::PrerequisiteFailed,
+                        "create_preview_proxy",
+                        format!(
+                            "Could not write preview cache marker {}: {error}",
+                            marker_path.display()
+                        ),
+                    )
+                })?;
                 return Ok(PreviewProxy {
                     source_path: path_to_string(source_path),
                     path: path_to_string(&proxy_path),
@@ -1656,13 +1701,18 @@ fn create_preview_proxy_in_cache(
             }
             Ok(output) => {
                 last_error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let _ = fs::remove_file(&temp_path);
             }
             Err(error) => {
                 last_error = error.to_string();
+                let _ = fs::remove_file(&temp_path);
                 break;
             }
         }
     }
+
+    let _ = fs::remove_file(&proxy_path);
+    let _ = fs::remove_file(&marker_path);
 
     let mut error = runtime_command_error(
         RuntimeCommandErrorKind::PrerequisiteFailed,
@@ -1676,6 +1726,15 @@ fn create_preview_proxy_in_cache(
         error.stderr = Some(last_error);
     }
     Err(error)
+}
+
+fn preview_proxy_marker_path(proxy_path: &Path) -> PathBuf {
+    proxy_path.with_extension("mp4.ok")
+}
+
+fn preview_proxy_temp_path(proxy_path: &Path, encoder: &str) -> PathBuf {
+    let suffix = encoder.replace(|value: char| !value.is_ascii_alphanumeric(), "_");
+    proxy_path.with_extension(format!("mp4.{suffix}.tmp"))
 }
 
 fn preview_proxy_path(
@@ -1833,15 +1892,23 @@ fn run_command_with_timeout(
     timeout: Duration,
 ) -> std::io::Result<std::process::Output> {
     let mut child = command.spawn()?;
+    let stdout_reader = child.stdout.take().map(read_pipe_to_end);
+    let stderr_reader = child.stderr.take().map(read_pipe_to_end);
     let started_at = Instant::now();
 
     loop {
-        if child.try_wait()?.is_some() {
-            return child.wait_with_output();
+        if let Some(status) = child.try_wait()? {
+            return Ok(std::process::Output {
+                status,
+                stdout: join_pipe_reader(stdout_reader),
+                stderr: join_pipe_reader(stderr_reader),
+            });
         }
         if started_at.elapsed() >= timeout {
-            let _ = child.kill();
+            let _ = terminate_child_process_tree(&mut child);
             let _ = child.wait();
+            let _ = join_pipe_reader(stdout_reader);
+            let _ = join_pipe_reader(stderr_reader);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!("Preview FFmpeg timed out after {}s.", timeout.as_secs()),
@@ -1849,6 +1916,23 @@ fn run_command_with_timeout(
         }
         thread::sleep(Duration::from_millis(25));
     }
+}
+
+fn read_pipe_to_end<Pipe>(mut pipe: Pipe) -> thread::JoinHandle<Vec<u8>>
+where
+    Pipe: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        bytes
+    })
+}
+
+fn join_pipe_reader(reader: Option<thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    reader
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1942,12 +2026,12 @@ pub fn run() {
 mod tests {
     use super::{
         build_process_args, candidate_preview_ffmpeg_paths, candidate_runtime_roots,
-        collect_runtime_readiness_for_path, engine_binary_names, enrich_job_event_for_gui,
-        is_preview_asset_allowed, is_terminal_job_event_type, job_event_type_from_line,
-        kill_active_child, path_to_string, preview_artifact_path_from_job_event,
-        preview_ffmpeg_binary_name, preview_proxy_path, preview_source_sample_offsets,
-        primary_engine_binary_name, registered_preview_asset_path, remember_preview_asset,
-        resolve_preview_ffmpeg_candidate, resolve_selected_model_path,
+        collect_runtime_readiness_for_path, create_preview_proxy_in_cache, engine_binary_names,
+        enrich_job_event_for_gui, is_preview_asset_allowed, is_terminal_job_event_type,
+        job_event_type_from_line, kill_active_child, path_to_string,
+        preview_artifact_path_from_job_event, preview_ffmpeg_binary_name, preview_proxy_path,
+        preview_source_sample_offsets, primary_engine_binary_name, registered_preview_asset_path,
+        remember_preview_asset, resolve_preview_ffmpeg_candidate, resolve_selected_model_path,
         run_preview_ffmpeg_with_timeout, runtime_exit_failure_payload, runtime_root_from_config,
         runtime_working_dir_for_engine, shutdown_active_job, ActiveJob, JobProcessState,
         PreviewAssetScope, ProcessCommandOptions, RuntimeCommandErrorKind, RuntimeReadinessStatus,
@@ -2388,6 +2472,64 @@ mod tests {
     }
 
     #[test]
+    fn preview_ffmpeg_drains_large_failure_output_before_timeout() {
+        let dir = unique_test_dir("preview-ffmpeg-chatty-failure");
+        let source = dir.join("source.mov");
+        let proxy = dir.join("proxy.mp4");
+        fs::write(&source, "source").expect("write source");
+        let ffmpeg = fake_chatty_failing_ffmpeg(&dir);
+
+        let output = run_preview_ffmpeg_with_timeout(
+            &ffmpeg,
+            &source,
+            &proxy,
+            "libx264",
+            Duration::from_secs(5),
+        )
+        .expect("chatty ffmpeg should exit instead of timing out");
+
+        assert!(!output.status.success());
+        assert!(output.stderr.len() > 128 * 1024);
+    }
+
+    #[test]
+    fn preview_proxy_failure_removes_partial_cache_artifact() {
+        let dir = unique_test_dir("preview-proxy-failure-cache");
+        let cache = dir.join("cache");
+        let source = dir.join("result.mov");
+        fs::write(&source, "source").expect("write source");
+        let proxy = preview_proxy_path(&source, &cache).expect("preview proxy path");
+        let ffmpeg = fake_preview_ffmpeg(&dir, false);
+
+        let error = create_preview_proxy_in_cache(&source, &cache, &ffmpeg)
+            .expect_err("failing ffmpeg should fail preview proxy creation");
+
+        assert_eq!(error.kind, RuntimeCommandErrorKind::PrerequisiteFailed);
+        assert!(!proxy.exists());
+    }
+
+    #[test]
+    fn preview_proxy_cache_requires_successful_prior_transcode() {
+        let dir = unique_test_dir("preview-proxy-success-marker");
+        let cache = dir.join("cache");
+        let source = dir.join("result.mov");
+        fs::write(&source, "source").expect("write source");
+        fs::create_dir_all(&cache).expect("create cache");
+        let proxy = preview_proxy_path(&source, &cache).expect("preview proxy path");
+        fs::write(&proxy, "partial").expect("write stale partial proxy");
+        let ffmpeg = fake_preview_ffmpeg(&dir, true);
+
+        let result = create_preview_proxy_in_cache(&source, &cache, &ffmpeg)
+            .expect("successful ffmpeg should create proxy");
+
+        assert!(!result.reused);
+        assert_eq!(
+            fs::read_to_string(&proxy).expect("read proxy").trim(),
+            "preview"
+        );
+    }
+
+    #[test]
     fn artifact_written_directory_event_exposes_previewable_result_asset() {
         let dir = unique_test_dir("artifact-directory-preview");
         let output_dir = dir.join("sequence");
@@ -2398,6 +2540,36 @@ mod tests {
 
         let event = serde_json::json!({
             "type": "artifact_written",
+            "artifact_path": output_dir,
+        })
+        .to_string();
+
+        let enriched = enrich_job_event_for_gui(&event);
+        let value: Value = serde_json::from_str(&enriched).expect("enriched event json");
+        let preview_string = path_to_string(&preview);
+
+        assert_eq!(
+            value
+                .get("preview_artifact_path")
+                .and_then(serde_json::Value::as_str),
+            Some(preview_string.as_str())
+        );
+        assert_eq!(
+            preview_artifact_path_from_job_event(&enriched),
+            Some(preview)
+        );
+    }
+
+    #[test]
+    fn completed_directory_event_exposes_previewable_result_asset() {
+        let dir = unique_test_dir("completed-directory-preview");
+        let output_dir = dir.join("sequence");
+        fs::create_dir_all(&output_dir).expect("create output dir");
+        let preview = output_dir.join("comp_0001.png");
+        fs::write(&preview, "png").expect("write preview frame");
+
+        let event = serde_json::json!({
+            "type": "completed",
             "artifact_path": output_dir,
         })
         .to_string();
@@ -2557,6 +2729,30 @@ mod tests {
             .is_none());
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn shutdown_active_job_kills_descendant_process_tree() {
+        let dir = unique_test_dir("process-tree-shutdown");
+        let pid_file = dir.join("child.pid");
+        let parent = spawn_parent_with_sleeping_child(&dir, &pid_file);
+        let child_pid = read_pid_file(&pid_file);
+        let state = JobProcessState::default();
+        {
+            let mut inner = state.inner.lock().expect("job state mutex");
+            inner.active = Some(ActiveJob {
+                id: 11,
+                child: Arc::new(Mutex::new(parent)),
+                cancelled: Arc::new(AtomicBool::new(false)),
+            });
+        }
+
+        assert!(shutdown_active_job(&state));
+        assert!(wait_for_windows_process_exit(
+            child_pid,
+            Duration::from_secs(5)
+        ));
+    }
+
     #[test]
     fn malformed_stdout_failure_kills_running_process() {
         let terminal_payload = Arc::new(Mutex::new(None));
@@ -2656,10 +2852,95 @@ mod tests {
         path
     }
 
+    #[cfg(target_os = "windows")]
+    fn fake_preview_ffmpeg(dir: &Path, succeeds: bool) -> PathBuf {
+        let path = dir.join(if succeeds {
+            "ffmpeg_success.cmd"
+        } else {
+            "ffmpeg_fail.cmd"
+        });
+        let exit_code = if succeeds { "0" } else { "1" };
+        fs::write(
+            &path,
+            format!(
+                r#"@echo off
+set output=
+:loop
+if "%~1"=="" goto done
+set output=%~1
+shift
+goto loop
+:done
+> "%output%" echo preview
+exit /b {exit_code}
+"#
+            ),
+        )
+        .expect("write fake preview ffmpeg");
+        path
+    }
+
+    #[cfg(target_os = "windows")]
+    fn fake_chatty_failing_ffmpeg(dir: &Path) -> PathBuf {
+        let path = dir.join("ffmpeg_chatty_fail.cmd");
+        fs::write(
+            &path,
+            r#"@echo off
+powershell.exe -NoProfile -Command "$text = 'preview failure' * 20000; [Console]::Error.Write($text); exit 1"
+exit /b %errorlevel%
+"#,
+        )
+        .expect("write fake chatty ffmpeg");
+        path
+    }
+
     #[cfg(not(target_os = "windows"))]
     fn fake_sleeping_ffmpeg(dir: &Path) -> PathBuf {
         let path = dir.join("ffmpeg");
         fs::write(&path, "#!/bin/sh\nsleep 5\n").expect("write fake sleeping ffmpeg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("ffmpeg metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("fake ffmpeg permissions");
+        }
+        path
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn fake_preview_ffmpeg(dir: &Path, succeeds: bool) -> PathBuf {
+        let path = dir.join(if succeeds {
+            "ffmpeg-success"
+        } else {
+            "ffmpeg-fail"
+        });
+        let exit_code = if succeeds { "0" } else { "1" };
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\noutput=\"\"\nfor arg do output=\"$arg\"; done\nprintf preview > \"$output\"\nexit {exit_code}\n"
+            ),
+        )
+        .expect("write fake preview ffmpeg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("ffmpeg metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("fake ffmpeg permissions");
+        }
+        path
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn fake_chatty_failing_ffmpeg(dir: &Path) -> PathBuf {
+        let path = dir.join("ffmpeg-chatty-fail");
+        fs::write(
+            &path,
+            "#!/bin/sh\ni=0\nwhile [ $i -lt 20000 ]; do printf 'preview failure' >&2; i=$((i + 1)); done\nexit 1\n",
+        )
+        .expect("write fake chatty ffmpeg");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

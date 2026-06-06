@@ -59,6 +59,10 @@ export function artifactPreviewPathFromProgress(payload: JobProgress): string | 
   return payload.preview_artifact_path || payload.artifact_path || null;
 }
 
+export function artifactOutputPathFromProgress(payload: JobProgress): string | null {
+  return payload.artifact_path || null;
+}
+
 export interface JobRecord {
   id: string;
   timestamp: string;
@@ -102,6 +106,7 @@ interface JobState {
   finishedAtMs: number | null;
   activeBackend: string | null;
   artifactPath: string | null;
+  previewArtifactPath: string | null;
   warnings: string[];
   timings: JobProgress["timings"];
   metrics: JobMetrics;
@@ -150,6 +155,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   finishedAtMs: null,
   activeBackend: null,
   artifactPath: null,
+  previewArtifactPath: null,
   warnings: [],
   timings: [],
   metrics: {},
@@ -231,6 +237,7 @@ export const useJobStore = create<JobState>((set, get) => ({
     finishedAtMs: null,
     activeBackend: null,
     artifactPath: null,
+    previewArtifactPath: null,
     warnings: [],
     timings: [],
     metrics: {},
@@ -286,6 +293,15 @@ export const useJobStore = create<JobState>((set, get) => ({
       unlisten = null;
     };
 
+    const applyArtifactProgress = (payload: JobProgress) => {
+      const artifactPath = artifactOutputPathFromProgress(payload);
+      const previewArtifactPath = artifactPreviewPathFromProgress(payload);
+      set((state) => ({
+        artifactPath: artifactPath || state.artifactPath,
+        previewArtifactPath: previewArtifactPath || state.previewArtifactPath
+      }));
+    };
+
     const addHistoryRecord = (status: "success" | "failed", diagnostic: string | null) => {
       const finishedAt = new Date().toISOString();
       const finalOutputPath = get().artifactPath || get().outputPath || context.outputPath;
@@ -332,6 +348,7 @@ export const useJobStore = create<JobState>((set, get) => ({
       finishedAtMs: null,
       activeBackend: null,
       artifactPath: null,
+      previewArtifactPath: null,
       warnings: [],
       timings: [],
       metrics: {},
@@ -391,12 +408,13 @@ export const useJobStore = create<JobState>((set, get) => ({
             }
             break;
           case "artifact_written":
+            applyArtifactProgress(payload);
             set({
-              artifactPath: artifactPreviewPathFromProgress(payload),
               statusMessage: payload.message || "Artifact written"
             });
             break;
           case "completed": {
+            applyArtifactProgress(payload);
             const diagnostic = payload.message || get().statusMessage || "Completed";
             addHistoryRecord("success", diagnostic);
             set({

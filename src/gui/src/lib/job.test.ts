@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  artifactOutputPathFromProgress,
   artifactPreviewPathFromProgress,
   type JobProgress
 } from "@/lib/job";
@@ -14,6 +15,9 @@ describe("job artifact preview path", () => {
 
     expect(artifactPreviewPathFromProgress(payload)).toBe(
       "C:\\renders\\shot001\\comp_0001.png"
+    );
+    expect(artifactOutputPathFromProgress(payload)).toBe(
+      "C:\\renders\\shot001"
     );
   });
 
