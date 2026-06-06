@@ -42,7 +42,7 @@ below are the floor; later patch releases are fine.
 2. Git for Windows (latest).
 3. `pwsh` (PowerShell 7+) — already shipped on Windows 11.
 4. Python 3.11+ on PATH (used by `scripts/lint_release_notes.py`).
-5. CUDA Toolkit 12.8 if the runner will execute GPU integration tests.
+5. CUDA Toolkit 12.9 if the runner will execute GPU integration tests.
    Standard install path; no env tweaks required.
 
 Add nothing else to PATH. In particular, **do not install MinGW or MSYS2 on

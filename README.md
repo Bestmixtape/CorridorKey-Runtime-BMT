@@ -174,12 +174,14 @@ cmake --build --preset release
 ```
 
 On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
-builds. Use `.\scripts\windows.ps1 -Task package-runtime -Preset release` for
-the portable Runtime/GUI ZIP and `.\scripts\windows.ps1 -Task package-suite`
-for the top-level online suite installer once the runtime, OFX, and Adobe
-payload roots have been staged. The suite installer keeps the CLI/runtime core
-fixed and lets the user select GUI, host plugins, Green, and Blue components.
-Use `.\scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online` for the
+builds. Use `.\scripts\windows.ps1 -Task package-runtime -Preset release
+-FfmpegPath C:\path\to\ffmpeg.exe` for the portable Runtime/GUI ZIP, or set
+`CORRIDORKEY_FFMPEG_PATH` before running the command. Use
+`.\scripts\windows.ps1 -Task package-suite` for the top-level online suite
+installer once the runtime, OFX, and Adobe payload roots have been staged. The
+suite installer keeps the CLI/runtime core fixed and lets the user select GUI,
+host plugins, Green, and Blue components. Use
+`.\scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online` for the
 current automated release track packaging.
 
 Lower-level Windows scripts exist only as internal delegates for debugging the

@@ -565,7 +565,10 @@ foreach ($entry in @(
             -Key "shared_root"
         if ([string]::IsNullOrWhiteSpace($sidecarSharedRoot)) {
             Add-CorridorKeySuiteIssue -Issues $issues -Check $check -Message "Runtime sidecar does not define runtime.shared_root: $sidecarPath"
-        } elseif ([System.IO.Path]::GetFullPath($sidecarSharedRoot) -ne $resolvedRuntimeRoot) {
+        } elseif (-not [string]::Equals(
+                [System.IO.Path]::GetFullPath($sidecarSharedRoot),
+                $resolvedRuntimeRoot,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
             Add-CorridorKeySuiteIssue -Issues $issues -Check $check -Message "Runtime sidecar points at '$sidecarSharedRoot' instead of '$resolvedRuntimeRoot': $sidecarPath"
         }
     }

@@ -64,9 +64,8 @@ rules here.
   directly; they are internal delegates and skip the version metadata
   sync, track resolution, and validation the wrapper applies.
 - When any prerequisite is missing (TensorRT-RTX SDK at
-  `vendor/TensorRT-RTX/`, `vcpkg` at `VCPKG_ROOT`, `uv`, CUDA Toolkit
-  12.8), fix the prerequisite. Do not route around the canonical
-  pipeline.
+  `vendor/TensorRT-RTX/`, `vcpkg` at `VCPKG_ROOT`, `uv`, CUDA Toolkit 12.9),
+  fix the prerequisite. Do not route around the canonical pipeline.
 - The only supported repo-local Windows runtime roots are
   `vendor/onnxruntime-windows-rtx` and `vendor/onnxruntime-windows-dml`
 - Do not use `vendor/onnxruntime-universal` or a globally installed ONNX Runtime

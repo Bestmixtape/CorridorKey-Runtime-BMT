@@ -337,6 +337,18 @@ try {
     }
     New-RuntimeSidecar -Path (Join-Path $ofxRoot "Contents\Resources\corridorkey_runtime.ini") -RuntimeRoot $runtimeRoot
 
+    New-RuntimeSidecar -Path (Join-Path $guiRoot "corridorkey_runtime.ini") -RuntimeRoot $runtimeRoot.ToLowerInvariant()
+    $caseInsensitiveSidecarReportPath = Join-Path $tempRoot "readiness_sidecar_case.json"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validatorPath `
+        -RuntimeRoot $runtimeRoot `
+        -DistributionManifestPath $manifestPath `
+        -ReportPath $caseInsensitiveSidecarReportPath
+    if ($LASTEXITCODE -ne 0) {
+        $caseInsensitiveSidecarReport = Get-Content -Path $caseInsensitiveSidecarReportPath -Raw | ConvertFrom-Json
+        throw "Suite install readiness should compare sidecar shared_root paths case-insensitively. Issues: $($caseInsensitiveSidecarReport.issues -join ' | ')"
+    }
+    New-RuntimeSidecar -Path (Join-Path $guiRoot "corridorkey_runtime.ini") -RuntimeRoot $runtimeRoot
+
     Remove-Item -LiteralPath (Join-Path $adobeRoot "Contents\Win64\corridorkey_adobe_blue.aex") -Force
     $missingAdobePluginReportPath = Join-Path $tempRoot "readiness_missing_adobe_blue.json"
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $validatorPath `

@@ -228,9 +228,11 @@ than falling back to a quality the renderer cannot ship.
 
 ## Tauri Desktop GUI Support Scope
 
-The Tauri desktop GUI is distributed as an independent installer that embeds
-its own copy of the runtime payload. It does not require an OFX host and does
-not require the OFX bundle to be present on the system.
+The Tauri desktop GUI is distributed as an optional Windows suite component
+that uses the shared CLI/runtime core installed by the suite. It does not
+require an OFX host and does not require the OFX bundle to be present on the
+system. The portable Runtime/GUI bundle remains available for support and
+minimal installs.
 
 The GUI inherits the same backend and hardware support designations as the
 OFX plugin and CLI on the same machine. A configuration officially supported

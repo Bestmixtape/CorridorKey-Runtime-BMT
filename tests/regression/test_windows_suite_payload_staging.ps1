@@ -298,8 +298,8 @@ try {
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\corridorkey.exe") -Label "staged runtime CLI alias"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\onnxruntime.dll") -Label "staged runtime dll"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\corridorkey_host_plugin_runtime_server.exe") -Label "staged shared runtime server"
+    Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\update_path.ps1") -Label "staged CLI PATH helper"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\torchtrt-runtime\bin\corridorkey_torchtrt.dll") -Label "staged TorchTRT wrapper"
-    Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\model_inventory.json") -Label "staged runtime model inventory"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "gui\CorridorKey.exe") -Label "staged GUI exe"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "gui\ffmpeg.exe") -Label "staged GUI ffmpeg"
     Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "ofx-resolve-fusion\Contents\Win64\CorridorKey.ofx") -Label "staged Resolve/Fusion OFX payload"
@@ -314,6 +314,7 @@ try {
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\corridorkey_torchtrt.dll") -Label "blue wrapper root DLL in runtime core"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\torchtrt-runtime\bin\corridorkey_torchtrt.dll") -Label "runtime TorchTRT wrapper under Win64 payload"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\models\green_fixture.onnx") -Label "runtime model duplicate"
+    Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\model_inventory.json") -Label "portable runtime model inventory in suite payload"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\outputs\scratch.tmp") -Label "runtime output scratch"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "ofx-resolve-fusion\Contents\Win64\onnxruntime.dll") -Label "OFX runtime dll duplicate"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "ofx-resolve-fusion\Contents\Win64\corridorkey.exe") -Label "OFX runtime cli duplicate"
@@ -330,6 +331,10 @@ try {
         -Path (Join-Path $suitePayloadOutputRoot "gui\CorridorKey.exe") `
         -Expected "gui" `
         -Label "staged GUI executable"
+    Assert-FileContent `
+        -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\update_path.ps1") `
+        -Expected "SendMessageTimeout" `
+        -Label "staged CLI PATH helper"
     Assert-FileContent `
         -Path $outputIssPath `
         -Expected ('#define SuitePayloadRoot "' + $suitePayloadOutputRoot + '"') `

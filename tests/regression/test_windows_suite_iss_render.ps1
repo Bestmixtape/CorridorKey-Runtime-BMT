@@ -131,6 +131,10 @@ try {
             "DestDir: `"{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle`"; Components: ofxresolvefusion",
             "DestDir: `"{commoncf64}\OFX\Plugins\CorridorKey.ofx.bundle`"; Components: ofxnuke",
             "DestDir: `"{autopf}\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey`"; Components: adobe",
+            "[Run]",
+            "Filename: `"powershell.exe`"; Parameters: `"-NoProfile -ExecutionPolicy Bypass -File `"`"`"{#SharedRuntimeRoot}\Contents\Win64\update_path.ps1`"`"`" -Mode Install`"; Components: runtimecore; Flags: runhidden waituntilterminated",
+            "[UninstallRun]",
+            "Filename: `"powershell.exe`"; Parameters: `"-NoProfile -ExecutionPolicy Bypass -File `"`"`"{#SharedRuntimeRoot}\Contents\Win64\update_path.ps1`"`"`" -Mode Uninstall`"; Flags: runhidden waituntilterminated",
             "[INI]",
             "Filename: `"{#SuiteInventoryPath}`"; Section: `"suite`"; Key: `"installer_surface`"; String: `"suite`"",
             "Filename: `"{#SuiteInventoryPath}`"; Section: `"suite`"; Key: `"version`"; String: `"0.9.0`"",
@@ -166,9 +170,20 @@ try {
             "procedure CorridorKeyDeleteFileIfPresent(const Path: String);",
             "RaiseException('Unable to remove CorridorKey file: ' + Path);",
             "if not DeleteFile(Path) then begin",
+            "procedure CorridorKeyStopSuiteProcesses;",
+            "CorridorKeyStopProcessIfRunning('Resolve.exe');",
+            "CorridorKeyStopProcessIfRunning('Nuke*.exe');",
+            "CorridorKeyStopProcessIfRunning('corridorkey_host_plugin_runtime_server.exe');",
+            "procedure CorridorKeyDeleteHostCaches;",
+            "CorridorKeyDeleteMatchingFiles(ExpandConstant('{userappdata}\Blackmagic Design\DaVinci Resolve\Support\OFXPluginCacheV2.xml'));",
+            "CorridorKeyDeleteMatchingFiles(ExpandConstant('{localappdata}\Temp\nuke\ofxplugincache\ofxplugincache_Nuke*-64.xml'));",
             "function CorridorKeySuitePackMarkerPath(const DestSubdir, PackName: String): String;",
             "procedure CorridorKeyWriteSuitePackMarker(const DestSubdir, PackName, MarkerValue: String);",
             "function CorridorKeySuitePackMarkerValid(const DestSubdir, PackName, MarkerValue: String): Boolean;",
+            "function CorridorKeySuitePackPayloadPresent(const DestSubdir, PackName: String): Boolean;",
+            "Result := LoadStringFromFile(MarkerPath, ExistingValue) and (ExistingValue = MarkerValue) and CorridorKeySuitePackPayloadPresent(DestSubdir, PackName);",
+            "FileExists(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\models\corridorkey_fp16_512.onnx'))",
+            "CorridorKeySuiteDirectoryFileCount(ExpandConstant('{#SharedRuntimeRoot}\Contents\Resources\torchtrt-runtime\bin')) >= 41",
             "procedure CorridorKeyWriteSelectedSuitePackMarkers;",
             "CorridorKeyWriteSuitePackMarker('models', 'green-models',",
             "CorridorKeyWriteSuitePackMarker('models', 'blue-models',",
@@ -202,6 +217,8 @@ try {
             "procedure CorridorKeyApplySuiteDeselectionCleanup;",
             "procedure CorridorKeyApplySuiteCleanInstallCleanup;",
             "procedure CorridorKeyApplySuiteLifecycleCleanup;",
+            "CorridorKeyStopSuiteProcesses;",
+            "CorridorKeyDeleteHostCaches;",
             "CorridorKeyApplySuiteDeselectionCleanup;",
             "CorridorKeyApplySuiteCleanInstallCleanup;",
             "procedure CurStepChanged(CurStep: TSetupStep);",
@@ -223,6 +240,11 @@ try {
             -Content $content `
             -First "  CorridorKeyApplySuiteDeselectionCleanup;" `
             -Second "  CorridorKeyApplySuiteCleanInstallCleanup;" `
+            -Label $issPath
+        Assert-TokenOrder `
+            -Content $content `
+            -First "Name: `"recommended`"; Description: `"Recommended Green plus Blue`"" `
+            -Second "Name: `"runtimeonly`"; Description: `"Runtime and CLI only`"" `
             -Label $issPath
     }
 

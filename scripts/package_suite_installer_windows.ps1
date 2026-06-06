@@ -391,10 +391,10 @@ function New-CorridorKeySuiteManifest {
         "blue"
     )
     $setupTypes = @(
+        [ordered]@{ id = "recommended"; label = "Recommended Green plus Blue"; components = @($recommendedComponents) },
         [ordered]@{ id = "runtimeonly"; label = "Runtime and CLI only"; components = @("runtime-core") },
         [ordered]@{ id = "greenonly"; label = "Green only"; components = @("runtime-core", "green") },
         [ordered]@{ id = "blueonly"; label = "Blue only"; components = @("runtime-core", "blue") },
-        [ordered]@{ id = "recommended"; label = "Recommended Green plus Blue"; components = @($recommendedComponents) },
         [ordered]@{ id = "custom"; label = "Custom"; components = @() }
     )
     $components = @(
@@ -477,7 +477,11 @@ function ConvertTo-CorridorKeyInnoComponentList {
 function ConvertTo-CorridorKeyInnoPath {
     param([string]$Path)
 
-    return $Path.Replace("%CommonProgramFiles%", "{commoncf64}").Replace("%ProgramFiles%", "{autopf}")
+    return $Path.
+        Replace("%CommonProgramFiles%", "{commoncf64}").
+        Replace("%ProgramFiles%", "{autopf}").
+        Replace("%AppData%", "{userappdata}").
+        Replace("%LocalAppData%", "{localappdata}")
 }
 
 function Get-CorridorKeySuiteComponentDestDir {
@@ -575,6 +579,21 @@ function Add-CorridorKeySuiteDeleteFileCall {
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value ($Indent + "CorridorKeyDeleteFileIfPresent(ExpandConstant('" + $escapedPath + "'));")
 }
 
+function Add-CorridorKeySuitePathRegistrationSections {
+    param([System.Collections.Generic.List[string]]$Lines)
+
+    $helperPath = '{#SharedRuntimeRoot}\Contents\Win64\update_path.ps1'
+    $installParameters = '-NoProfile -ExecutionPolicy Bypass -File """' + $helperPath + '""" -Mode Install'
+    $uninstallParameters = '-NoProfile -ExecutionPolicy Bypass -File """' + $helperPath + '""" -Mode Uninstall'
+
+    Add-CorridorKeySuiteLine -Lines $Lines
+    Add-CorridorKeySuiteLine -Lines $Lines -Value "[Run]"
+    Add-CorridorKeySuiteLine -Lines $Lines -Value ('Filename: "powershell.exe"; Parameters: "' + $installParameters + '"; Components: runtimecore; Flags: runhidden waituntilterminated')
+    Add-CorridorKeySuiteLine -Lines $Lines
+    Add-CorridorKeySuiteLine -Lines $Lines -Value "[UninstallRun]"
+    Add-CorridorKeySuiteLine -Lines $Lines -Value ('Filename: "powershell.exe"; Parameters: "' + $uninstallParameters + '"; Flags: runhidden waituntilterminated')
+}
+
 function Get-CorridorKeySuitePackMarkerValue {
     param([object]$Pack)
 
@@ -623,13 +642,67 @@ function Add-CorridorKeySuitePackMarkerCode {
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  SaveStringToFile(MarkerPath, MarkerValue, False);"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
     Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeySuiteDirectoryFileCount(const Path: String): Integer;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "var"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  FindRec: TFindRec;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  ChildPath: String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := 0;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if FindFirst(Path + '\*', FindRec) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    try"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      repeat"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          ChildPath := Path + '\' + FindRec.Name;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          if DirExists(ChildPath) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "            Result := Result + CorridorKeySuiteDirectoryFileCount(ChildPath);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          end else begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "            Result := Result + 1;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      until not FindNext(FindRec);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    finally"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      FindClose(FindRec);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeySuitePackPayloadPresent(const DestSubdir, PackName: String): Boolean;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := False;"
+    foreach ($pack in $SuiteManifest.model_packs) {
+        $destSubdir = ([string]$pack.dest_subdir).Replace("/", "\")
+        $escapedDestSubdir = ConvertTo-CorridorKeyInnoPascalString -Value $destSubdir
+        $escapedPackId = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$pack.id)
+        $destRoot = "{#SharedRuntimeRoot}\Contents\Resources\$destSubdir"
+        $escapedDestRoot = ConvertTo-CorridorKeyInnoPascalString -Value $destRoot
+        Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("  if (DestSubdir = '" + $escapedDestSubdir + "') and (PackName = '" + $escapedPackId + "') then begin")
+        if ($pack.is_archive -and $pack.extract) {
+            $count = if ($null -ne $pack.installed_file_count) { [int]$pack.installed_file_count } else { 1 }
+            Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("    Result := DirExists(ExpandConstant('" + $escapedDestRoot + "')) and (CorridorKeySuiteDirectoryFileCount(ExpandConstant('" + $escapedDestRoot + "')) >= " + $count + ");")
+        } else {
+            $files = @($pack.files)
+            if ($files.Count -eq 0) {
+                Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    Result := False;"
+            } else {
+                Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    Result :="
+                for ($index = 0; $index -lt $files.Count; $index++) {
+                    $filename = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$files[$index].filename)
+                    $suffix = if ($index -eq ($files.Count - 1)) { ";" } else { " and" }
+                    Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("      FileExists(ExpandConstant('" + $escapedDestRoot + "\" + $filename + "'))" + $suffix)
+                }
+            }
+        }
+        Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    }
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "function CorridorKeySuitePackMarkerValid(const DestSubdir, PackName, MarkerValue: String): Boolean;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "var"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MarkerPath: String;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  ExistingValue: AnsiString;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MarkerPath := CorridorKeySuitePackMarkerPath(DestSubdir, PackName);"
-    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := LoadStringFromFile(MarkerPath, ExistingValue) and (ExistingValue = MarkerValue);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Result := LoadStringFromFile(MarkerPath, ExistingValue) and (ExistingValue = MarkerValue) and CorridorKeySuitePackPayloadPresent(DestSubdir, PackName);"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
     Add-CorridorKeySuitePascalLine -Lines $Lines
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyWriteSelectedSuitePackMarkers;"
@@ -734,6 +807,73 @@ function Add-CorridorKeySuiteLifecycleCode {
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
     Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyDeleteMatchingFiles(const Pattern: String);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "var"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  FindRec: TFindRec;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Directory: String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  MatchedPath: String;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Directory := ExtractFileDir(Pattern);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if FindFirst(Pattern, FindRec) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    try"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      repeat"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        MatchedPath := Directory + '\' + FindRec.Name;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        if FileExists(MatchedPath) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          if not DeleteFile(MatchedPath) then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "            RaiseException('Unable to remove CorridorKey cache file: ' + MatchedPath);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "          end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "        end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      until not FindNext(FindRec);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    finally"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "      FindClose(FindRec);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyStopProcessIfRunning(const ImageName: String);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "var"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  ResultCode: Integer;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM ""' + ImageName + '""', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyStopSuiteProcesses;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if WizardIsComponentSelected('ofxresolvefusion') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyStopProcessIfRunning('Resolve.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if WizardIsComponentSelected('ofxnuke') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyStopProcessIfRunning('Nuke*.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if WizardIsComponentSelected('adobe') then begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyStopProcessIfRunning('AfterFX.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "    CorridorKeyStopProcessIfRunning('Adobe Premiere Pro.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyStopProcessIfRunning('corridorkey_host_plugin_runtime_server.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyStopProcessIfRunning('corridorkey_ofx_runtime_server.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyStopProcessIfRunning('corridorkey.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyStopProcessIfRunning('ck-engine.exe');"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyDeleteHostCaches;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    foreach ($hostEntry in $SuiteManifest.hosts) {
+        $cacheDeletes = @($hostEntry.cache_deletes)
+        if ($cacheDeletes.Count -eq 0) {
+            continue
+        }
+        $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$hostEntry.component)
+        $componentId = ConvertTo-CorridorKeyInnoPascalString -Value ([string]$hostEntry.component)
+        Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("  if WizardIsComponentSelected('" + $componentName + "') or CorridorKeyWasPreviouslyInstalled('components', '" + $componentId + "') then begin")
+        foreach ($cacheDelete in $cacheDeletes) {
+            $cachePath = ConvertTo-CorridorKeyInnoPath -Path ([string]$cacheDelete)
+            $escapedCachePath = ConvertTo-CorridorKeyInnoPascalString -Value $cachePath
+            Add-CorridorKeySuitePascalLine -Lines $Lines -Value ("    CorridorKeyDeleteMatchingFiles(ExpandConstant('" + $escapedCachePath + "'));")
+        }
+        Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  end;"
+    }
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyApplySuiteDeselectionCleanup;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  if not WizardIsComponentSelected('gui') then begin"
@@ -783,6 +923,8 @@ function Add-CorridorKeySuiteLifecycleCode {
     Add-CorridorKeySuitePascalLine -Lines $Lines
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "procedure CorridorKeyApplySuiteLifecycleCleanup;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "begin"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyStopSuiteProcesses;"
+    Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyDeleteHostCaches;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyApplySuiteDeselectionCleanup;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "  CorridorKeyApplySuiteCleanInstallCleanup;"
     Add-CorridorKeySuitePascalLine -Lines $Lines -Value "end;"
@@ -1019,6 +1161,8 @@ function New-CorridorKeySuiteIss {
         $componentName = ConvertTo-CorridorKeyInnoComponentName -Id ([string]$iniEntry.Component)
         Add-CorridorKeySuiteLine -Lines $lines -Value ('Filename: "' + $iniEntry.Filename + '"; Section: "runtime"; Key: "shared_root"; String: "{#SharedRuntimeRoot}"; Components: ' + $componentName)
     }
+
+    Add-CorridorKeySuitePathRegistrationSections -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Code]"
@@ -1311,6 +1455,74 @@ function Get-CorridorKeySuiteRuntimeCoreExcludedNames {
     )
 }
 
+function Write-CorridorKeySuitePathUpdateScript {
+    param([string]$Win64Destination)
+
+    if (-not (Test-Path -LiteralPath $Win64Destination -PathType Container)) {
+        throw "Suite runtime Win64 directory not found at $Win64Destination. Runtime staging must run before writing update_path.ps1."
+    }
+
+    $targetPath = Join-Path $Win64Destination "update_path.ps1"
+    $content = @'
+param(
+    [ValidateSet("Install", "Uninstall")]
+    [string]$Mode = "Install"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$binDir = $PSScriptRoot
+$current = [Environment]::GetEnvironmentVariable("Path", "Machine")
+if ($null -eq $current) { $current = "" }
+
+$normalizedBinDir = $binDir.TrimEnd('\')
+$entries = @(
+    $current -split ';' | Where-Object {
+        $_ -and ($_.Trim().TrimEnd('\') -ine $normalizedBinDir)
+    }
+)
+
+if ($Mode -eq "Install") {
+    $entries += $binDir
+}
+
+$newPath = ($entries -join ';').Trim(';')
+[Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
+
+$source = @"
+using System;
+using System.Runtime.InteropServices;
+public static class CorridorKeyEnvironmentBroadcast {
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        UInt32 Msg,
+        UIntPtr wParam,
+        String lParam,
+        UInt32 fuFlags,
+        UInt32 uTimeout,
+        out UIntPtr lpdwResult);
+}
+"@
+Add-Type -TypeDefinition $source -ErrorAction SilentlyContinue
+
+$result = [UIntPtr]::Zero
+[void][CorridorKeyEnvironmentBroadcast]::SendMessageTimeout(
+    [IntPtr]65535,
+    0x001A,
+    [UIntPtr]::Zero,
+    "Environment",
+    0x0002,
+    5000,
+    [ref]$result)
+
+Write-Host "CorridorKey CLI PATH $Mode complete: $binDir"
+'@
+
+    Set-Content -LiteralPath $targetPath -Value $content -Encoding ASCII
+}
+
 function Copy-CorridorKeySuiteRuntimePayload {
     param(
         [string]$RuntimeRoot,
@@ -1343,6 +1555,7 @@ function Copy-CorridorKeySuiteRuntimePayload {
     if (-not (Test-Path -LiteralPath $cliAliasPath -PathType Leaf)) {
         Copy-Item -LiteralPath $sourceCliPath -Destination $cliAliasPath -Force
     }
+    Write-CorridorKeySuitePathUpdateScript -Win64Destination $win64Destination
 
     $runtimeServerCandidates = @(
         (Join-Path $resolvedRuntimeRoot "corridorkey_host_plugin_runtime_server.exe")
@@ -1394,11 +1607,6 @@ function Copy-CorridorKeySuiteRuntimePayload {
         -Destination (Join-Path $torchTrtWrapperDestinationDir "corridorkey_torchtrt.dll") `
         -Force
 
-    $modelInventoryPath = Join-Path $resolvedRuntimeRoot "model_inventory.json"
-    if (Test-Path -LiteralPath $modelInventoryPath -PathType Leaf) {
-        New-Item -ItemType Directory -Path $resourcesDestination -Force | Out-Null
-        Copy-Item -LiteralPath $modelInventoryPath -Destination (Join-Path $resourcesDestination "model_inventory.json") -Force
-    }
 }
 
 function Copy-CorridorKeySuiteGuiPayload {

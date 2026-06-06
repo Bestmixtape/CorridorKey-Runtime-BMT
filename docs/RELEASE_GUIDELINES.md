@@ -266,7 +266,7 @@ still has to install manually; everything else is fetched on demand by
 |---|---|---|
 | Git for Windows | on `PATH` | auto-discovered by the helper scripts as a fallback when not on `PATH` |
 | Visual Studio 2022 | Community, Pro, or Enterprise with the "Desktop development with C++" workload and the Windows 10/11 SDK | `vcvars64.bat` must be locatable under `C:\Program Files\Microsoft Visual Studio\2022\*`; the pipeline injects the MSVC dev shell on demand |
-| CUDA Toolkit 12.8 | default location `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8` | or pass `-CudaHome <path>` through `-ForwardArguments` |
+| CUDA Toolkit 12.9 | default location `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9` | or pass `-CudaHome <path>` through `-ForwardArguments` |
 | vcpkg | `C:\tools\vcpkg` with `VCPKG_ROOT` pointing at it | pinned baseline is in `vcpkg-configuration.json`; every shell that calls the pipeline must export `VCPKG_ROOT` |
 | Python 3.12 | default per-user install from python.org | auto-discovered by `Resolve-CorridorKeyPython312Path`; the pin lives in `Get-CorridorKeyWindowsRtxBuildContract.required_python_version` |
 | uv | `%USERPROFILE%\.local\bin\uv.exe` (default installer path) | auto-discovered via `Resolve-CorridorKeyUvPath`; install once with `irm https://astral.sh/uv/install.ps1 \| iex` |
