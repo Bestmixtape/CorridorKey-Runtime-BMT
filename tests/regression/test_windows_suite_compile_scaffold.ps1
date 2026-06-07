@@ -241,6 +241,25 @@ $outputBase = [regex]::Match($content, "(?m)^OutputBaseFilename=(.+)$").Groups[1
 if ([string]::IsNullOrWhiteSpace($outputDir) -or [string]::IsNullOrWhiteSpace($outputBase)) {
     throw "fake ISCC expected OutputDir and OutputBaseFilename in the .iss."
 }
+foreach ($requiredToken in @(
+    "WizardImageFile={#InstallerWizardImage}",
+    "WizardImageFileDynamicDark={#InstallerWizardImage}",
+    "SetupIconFile={#InstallerIcon}"
+)) {
+    if ($content -notmatch [regex]::Escape($requiredToken)) {
+        throw "fake ISCC expected suite installer branding token: $requiredToken"
+    }
+}
+foreach ($defineName in @("InstallerIcon", "InstallerWizardImage")) {
+    $match = [regex]::Match($content, '(?m)^#define ' + [regex]::Escape($defineName) + ' "([^"\r\n]+)"\r?$')
+    if (-not $match.Success) {
+        throw "fake ISCC expected #define $defineName in the .iss."
+    }
+    $assetPath = $match.Groups[1].Value.Replace('""', '"')
+    if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+        throw "fake ISCC expected $defineName asset to exist: $assetPath"
+    }
+}
 
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $outputDir ($outputBase + ".exe")) -Value "fake installer" -Encoding UTF8

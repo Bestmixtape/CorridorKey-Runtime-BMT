@@ -949,18 +949,209 @@ function Add-CorridorKeySuiteLine {
     $Lines.Add($Value) | Out-Null
 }
 
+function Resolve-CorridorKeySuiteAssetPath {
+    param(
+        [string]$RelativePath,
+        [string]$Label
+    )
+
+    $path = Join-Path $repoRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "$Label not found: $path"
+    }
+
+    return (Resolve-Path -LiteralPath $path).ProviderPath
+}
+
+function New-CorridorKeySuiteIconDibFrameBytes {
+    param(
+        [object]$SourceImage,
+        [int]$Size
+    )
+
+    $bitmap = [System.Drawing.Bitmap]::new(
+        $Size,
+        $Size,
+        [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+        $bitmap.SetResolution(96, 96)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.Clear([System.Drawing.Color]::Transparent)
+            $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+
+            $scale = [Math]::Min(
+                [double]$Size / [double]$SourceImage.Width,
+                [double]$Size / [double]$SourceImage.Height)
+            $drawWidth = [int][Math]::Round([double]$SourceImage.Width * $scale)
+            $drawHeight = [int][Math]::Round([double]$SourceImage.Height * $scale)
+            $x = [int][Math]::Round(([double]$Size - [double]$drawWidth) / 2.0)
+            $y = [int][Math]::Round(([double]$Size - [double]$drawHeight) / 2.0)
+
+            $graphics.DrawImage($SourceImage, $x, $y, $drawWidth, $drawHeight)
+        } finally {
+            $graphics.Dispose()
+        }
+
+        $memory = [System.IO.MemoryStream]::new()
+        try {
+            $writer = [System.IO.BinaryWriter]::new($memory)
+            try {
+                $xorStride = $Size * 4
+                $andStride = [int]([Math]::Ceiling($Size / 32.0) * 4)
+                $xorBytes = $xorStride * $Size
+                $andBytes = $andStride * $Size
+
+                $writer.Write([UInt32]40)
+                $writer.Write([Int32]$Size)
+                $writer.Write([Int32]($Size * 2))
+                $writer.Write([UInt16]1)
+                $writer.Write([UInt16]32)
+                $writer.Write([UInt32]0)
+                $writer.Write([UInt32]$xorBytes)
+                $writer.Write([Int32]0)
+                $writer.Write([Int32]0)
+                $writer.Write([UInt32]0)
+                $writer.Write([UInt32]0)
+
+                for ($y = $Size - 1; $y -ge 0; $y--) {
+                    for ($x = 0; $x -lt $Size; $x++) {
+                        $pixel = $bitmap.GetPixel($x, $y)
+                        $writer.Write([byte]$pixel.B)
+                        $writer.Write([byte]$pixel.G)
+                        $writer.Write([byte]$pixel.R)
+                        $writer.Write([byte]$pixel.A)
+                    }
+                }
+
+                $writer.Write([byte[]]::new($andBytes))
+                return $memory.ToArray()
+            } finally {
+                $writer.Dispose()
+            }
+        } finally {
+            $memory.Dispose()
+        }
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+function New-CorridorKeySuiteSetupIcon {
+    param(
+        [string]$SourcePath,
+        [string]$OutputDir
+    )
+
+    $resolvedSource = (Resolve-Path -LiteralPath $SourcePath).ProviderPath
+    if ([System.IO.Path]::GetExtension($resolvedSource).ToLowerInvariant() -eq ".ico") {
+        return [ordered]@{
+            source = $resolvedSource
+            path = $resolvedSource
+        }
+    }
+
+    Add-Type -AssemblyName System.Drawing
+
+    $sourceImage = [System.Drawing.Image]::FromFile($resolvedSource)
+    try {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+        $iconPath = Join-Path $OutputDir "ck_microchip_suite_setup.ico"
+        $frames = @()
+        foreach ($size in @(16, 32, 48, 64, 256)) {
+            $frames += , [ordered]@{
+                size = $size
+                bytes = New-CorridorKeySuiteIconDibFrameBytes -SourceImage $sourceImage -Size $size
+            }
+        }
+
+        $fileStream = [System.IO.File]::Open(
+            $iconPath,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write)
+        try {
+            $writer = [System.IO.BinaryWriter]::new($fileStream)
+            try {
+                $writer.Write([UInt16]0)
+                $writer.Write([UInt16]1)
+                $writer.Write([UInt16]$frames.Count)
+
+                $offset = 6 + (16 * $frames.Count)
+                foreach ($frame in $frames) {
+                    $dimension = if ($frame.size -eq 256) { 0 } else { $frame.size }
+                    $writer.Write([byte]$dimension)
+                    $writer.Write([byte]$dimension)
+                    $writer.Write([byte]0)
+                    $writer.Write([byte]0)
+                    $writer.Write([UInt16]1)
+                    $writer.Write([UInt16]32)
+                    $writer.Write([UInt32]$frame.bytes.Length)
+                    $writer.Write([UInt32]$offset)
+                    $offset += $frame.bytes.Length
+                }
+
+                foreach ($frame in $frames) {
+                    $writer.Write([byte[]]$frame.bytes)
+                }
+            } finally {
+                $writer.Dispose()
+            }
+        } finally {
+            $fileStream.Dispose()
+        }
+
+        return [ordered]@{
+            source = $resolvedSource
+            path = $iconPath
+        }
+    } finally {
+        $sourceImage.Dispose()
+    }
+}
+
+function Resolve-CorridorKeySuiteInstallerArtwork {
+    param([string]$OutputIssPath)
+
+    $issParent = Split-Path -Parent $OutputIssPath
+    if ([string]::IsNullOrWhiteSpace($issParent)) {
+        $issParent = Join-Path $env:TEMP ("corridorkey_suite_iss_" + [System.Guid]::NewGuid().ToString("N"))
+    }
+
+    $setupIcon = New-CorridorKeySuiteSetupIcon `
+        -SourcePath (Resolve-CorridorKeySuiteAssetPath -RelativePath "assets\ck-microchip.png" -Label "Suite installer icon") `
+        -OutputDir $issParent
+    $wizardImage = Resolve-CorridorKeySuiteAssetPath `
+        -RelativePath "assets\ck-install-banner.png" `
+        -Label "Suite installer wizard image"
+
+    return [ordered]@{
+        setup_icon_source = $setupIcon.source
+        setup_icon_path = $setupIcon.path
+        wizard_image_path = $wizardImage
+    }
+}
+
 function New-CorridorKeySuiteIss {
     param(
         [object]$SuiteManifest,
         [ValidateSet("online", "offline")]
-        [string]$Flavor
+        [string]$Flavor,
+        [string]$InstallerIconPath,
+        [string]$InstallerWizardImagePath
     )
 
+    $escapedInstallerIconPath = ConvertTo-CorridorKeyInnoDoubleQuotedString -Value ($InstallerIconPath -replace '/', '\')
+    $escapedInstallerWizardImagePath = ConvertTo-CorridorKeyInnoDoubleQuotedString -Value ($InstallerWizardImagePath -replace '/', '\')
     $lines = [System.Collections.Generic.List[string]]::new()
     Add-CorridorKeySuiteLine -Lines $lines -Value "; Generated by scripts/package_suite_installer_windows.ps1."
     Add-CorridorKeySuiteLine -Lines $lines -Value '#define InstallerSurface "suite"'
     Add-CorridorKeySuiteLine -Lines $lines -Value '#define SuitePayloadRoot "@@SUITE_PAYLOAD_ROOT@@"'
     Add-CorridorKeySuiteLine -Lines $lines -Value '#define OfflinePayloadRoot "@@OFFLINE_PAYLOAD_ROOT@@"'
+    Add-CorridorKeySuiteLine -Lines $lines -Value ('#define InstallerIcon "' + $escapedInstallerIconPath + '"')
+    Add-CorridorKeySuiteLine -Lines $lines -Value ('#define InstallerWizardImage "' + $escapedInstallerWizardImagePath + '"')
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SharedRuntimeRoot "' + $SuiteManifest.shared_runtime_root + '"')
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SuiteGuiRoot "' + $SuiteManifest.gui_root + '"')
     Add-CorridorKeySuiteLine -Lines $lines -Value ('#define SuiteInventoryPath "' + $SuiteManifest.shared_runtime_root + '\Contents\Resources\suite_inventory.ini"')
@@ -970,13 +1161,40 @@ function New-CorridorKeySuiteIss {
     Add-CorridorKeySuiteLine -Lines $lines -Value "AppId={{7C93E726-017B-45ED-931B-78436F7612A8}"
     Add-CorridorKeySuiteLine -Lines $lines -Value "AppName=CorridorKey Suite"
     Add-CorridorKeySuiteLine -Lines $lines -Value ("AppVersion=" + $SuiteManifest.version)
+    Add-CorridorKeySuiteLine -Lines $lines -Value ("AppVerName=CorridorKey Suite " + $SuiteManifest.display_version_label)
+    Add-CorridorKeySuiteLine -Lines $lines -Value "AppPublisher=CorridorKey"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "AppPublisherURL=https://corridorkey.com"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "AppSupportURL=https://corridorkey.com"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "AppUpdatesURL=https://corridorkey.com"
+    Add-CorridorKeySuiteLine -Lines $lines -Value ("VersionInfoVersion=" + $SuiteManifest.version)
+    Add-CorridorKeySuiteLine -Lines $lines -Value "VersionInfoCompany=CorridorKey"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "VersionInfoDescription=CorridorKey Suite Installer"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "VersionInfoProductName=CorridorKey Suite"
+    Add-CorridorKeySuiteLine -Lines $lines -Value ("VersionInfoProductVersion=" + $SuiteManifest.version)
+    Add-CorridorKeySuiteLine -Lines $lines -Value ("VersionInfoProductTextVersion=" + $SuiteManifest.display_version_label)
     Add-CorridorKeySuiteLine -Lines $lines -Value ("VersionInfoTextVersion=" + $SuiteManifest.display_version_label)
     Add-CorridorKeySuiteLine -Lines $lines -Value "DefaultDirName={autopf}\CorridorKey"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "DisableWelcomePage=no"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "DisableDirPage=auto"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "DisableProgramGroupPage=yes"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "DisableReadyPage=no"
+    Add-CorridorKeySuiteLine -Lines $lines -Value ("UninstallDisplayName=CorridorKey Suite " + $SuiteManifest.display_version_label)
+    Add-CorridorKeySuiteLine -Lines $lines -Value "UninstallDisplayIcon={#SharedRuntimeRoot}\Contents\Win64\corridorkey.exe"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "WizardStyle=modern dynamic windows11"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "WizardSizePercent=110"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "WizardImageFile={#InstallerWizardImage}"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "WizardImageFileDynamicDark={#InstallerWizardImage}"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "WizardSmallImageFile="
+    Add-CorridorKeySuiteLine -Lines $lines -Value "WizardImageBackColor=black"
     Add-CorridorKeySuiteLine -Lines $lines -Value "ArchitecturesAllowed=x64compatible"
     Add-CorridorKeySuiteLine -Lines $lines -Value "ArchitecturesInstallIn64BitMode=x64compatible"
     Add-CorridorKeySuiteLine -Lines $lines -Value "ArchiveExtraction=full"
     Add-CorridorKeySuiteLine -Lines $lines -Value "OutputDir=@@OUTPUT_DIR@@"
     Add-CorridorKeySuiteLine -Lines $lines -Value "OutputBaseFilename=@@OUTPUT_BASE_FILENAME@@"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "SetupIconFile={#InstallerIcon}"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "PrivilegesRequired=admin"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "PrivilegesRequiredOverridesAllowed=dialog"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "ShowLanguageDialog=no"
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Types]"
@@ -1279,10 +1497,15 @@ function Write-CorridorKeySuiteIss {
         [object]$SuiteManifest,
         [ValidateSet("online", "offline")]
         [string]$Flavor,
-        [string]$Path
+        [string]$Path,
+        [object]$InstallerArtwork
     )
 
-    $iss = New-CorridorKeySuiteIss -SuiteManifest $SuiteManifest -Flavor $Flavor
+    $iss = New-CorridorKeySuiteIss `
+        -SuiteManifest $SuiteManifest `
+        -Flavor $Flavor `
+        -InstallerIconPath ([string]$InstallerArtwork.setup_icon_path) `
+        -InstallerWizardImagePath ([string]$InstallerArtwork.wizard_image_path)
     $parent = Split-Path -Parent $Path
     if (-not [string]::IsNullOrWhiteSpace($parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -1896,10 +2119,15 @@ function ConvertTo-CorridorKeyConcreteSuiteIss {
         [string]$ResolvedSuitePayloadRoot,
         [string]$ResolvedModelPayloadDir,
         [string]$ResolvedOutputDir,
-        [string]$ResolvedOutputBaseFilename
+        [string]$ResolvedOutputBaseFilename,
+        [object]$InstallerArtwork
     )
 
-    $iss = New-CorridorKeySuiteIss -SuiteManifest $SuiteManifest -Flavor $Flavor
+    $iss = New-CorridorKeySuiteIss `
+        -SuiteManifest $SuiteManifest `
+        -Flavor $Flavor `
+        -InstallerIconPath ([string]$InstallerArtwork.setup_icon_path) `
+        -InstallerWizardImagePath ([string]$InstallerArtwork.wizard_image_path)
     $iss = $iss.Replace("@@SUITE_PAYLOAD_ROOT@@", ($ResolvedSuitePayloadRoot -replace '/', '\'))
     $iss = $iss.Replace("@@OFFLINE_PAYLOAD_ROOT@@", ($ResolvedModelPayloadDir -replace '/', '\'))
     $iss = $iss.Replace("@@OUTPUT_DIR@@", ($ResolvedOutputDir -replace '/', '\'))
@@ -1930,11 +2158,19 @@ if ([string]::IsNullOrWhiteSpace($OutputManifestPath) -and [string]::IsNullOrWhi
 }
 
 if ($RenderOnly) {
+    $installerArtwork = $null
+    if (-not [string]::IsNullOrWhiteSpace($OutputIssPath)) {
+        $installerArtwork = Resolve-CorridorKeySuiteInstallerArtwork -OutputIssPath $OutputIssPath
+    }
     if (-not [string]::IsNullOrWhiteSpace($OutputManifestPath)) {
         Write-CorridorKeySuiteManifest -SuiteManifest $suiteManifest -Path $OutputManifestPath
     }
     if (-not [string]::IsNullOrWhiteSpace($OutputIssPath)) {
-        Write-CorridorKeySuiteIss -SuiteManifest $suiteManifest -Flavor $Flavor -Path $OutputIssPath
+        Write-CorridorKeySuiteIss `
+            -SuiteManifest $suiteManifest `
+            -Flavor $Flavor `
+            -Path $OutputIssPath `
+            -InstallerArtwork $installerArtwork
     }
     if (-not [string]::IsNullOrWhiteSpace($OutputManifestPath)) {
         Write-Host "[suite] Rendered suite installer manifest: $OutputManifestPath" -ForegroundColor Green
@@ -1980,6 +2216,7 @@ $resolvedOutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 if (-not (Test-Path -LiteralPath $resolvedOutputDir)) {
     New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
 }
+$installerArtwork = Resolve-CorridorKeySuiteInstallerArtwork -OutputIssPath $OutputIssPath
 Write-CorridorKeySuiteManifest -SuiteManifest $suiteManifest -Path $OutputManifestPath
 $concreteIss = ConvertTo-CorridorKeyConcreteSuiteIss `
     -SuiteManifest $suiteManifest `
@@ -1987,7 +2224,8 @@ $concreteIss = ConvertTo-CorridorKeyConcreteSuiteIss `
     -ResolvedSuitePayloadRoot $resolvedSuitePayloadRoot `
     -ResolvedModelPayloadDir $resolvedModelPayloadDir `
     -ResolvedOutputDir $resolvedOutputDir `
-    -ResolvedOutputBaseFilename $OutputBaseFilename
+    -ResolvedOutputBaseFilename $OutputBaseFilename `
+    -InstallerArtwork $installerArtwork
 $issParent = Split-Path -Parent $OutputIssPath
 if (-not [string]::IsNullOrWhiteSpace($issParent)) {
     New-Item -ItemType Directory -Path $issParent -Force | Out-Null
