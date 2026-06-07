@@ -244,13 +244,15 @@ if ([string]::IsNullOrWhiteSpace($outputDir) -or [string]::IsNullOrWhiteSpace($o
 foreach ($requiredToken in @(
     "WizardImageFile={#InstallerWizardImage}",
     "WizardImageFileDynamicDark={#InstallerWizardImage}",
+    "WizardSmallImageFile={#InstallerWizardSmallImage}",
+    "WizardSmallImageFileDynamicDark={#InstallerWizardSmallImage}",
     "SetupIconFile={#InstallerIcon}"
 )) {
     if ($content -notmatch [regex]::Escape($requiredToken)) {
         throw "fake ISCC expected suite installer branding token: $requiredToken"
     }
 }
-foreach ($defineName in @("InstallerIcon", "InstallerWizardImage")) {
+foreach ($defineName in @("InstallerIcon", "InstallerWizardImage", "InstallerWizardSmallImage")) {
     $match = [regex]::Match($content, '(?m)^#define ' + [regex]::Escape($defineName) + ' "([^"\r\n]+)"\r?$')
     if (-not $match.Success) {
         throw "fake ISCC expected #define $defineName in the .iss."
