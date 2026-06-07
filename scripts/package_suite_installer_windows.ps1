@@ -1803,6 +1803,16 @@ function Copy-CorridorKeySuiteRuntimePayload {
         -Destination $win64Destination `
         -ExcludeNames @(Get-CorridorKeySuiteRuntimeCoreExcludedNames)
 
+    $modelInventoryPath = Join-Path $resolvedRuntimeRoot "model_inventory.json"
+    if (-not (Test-Path -LiteralPath $modelInventoryPath -PathType Leaf)) {
+        throw "Runtime package root is missing model_inventory.json for suite runtime validation: $resolvedRuntimeRoot"
+    }
+    New-Item -ItemType Directory -Path $resourcesDestination -Force | Out-Null
+    Copy-Item `
+        -LiteralPath $modelInventoryPath `
+        -Destination (Join-Path $resourcesDestination "model_inventory.json") `
+        -Force
+
     $sourceCliPath = if (Test-Path -LiteralPath $cliPath -PathType Leaf) { $cliPath } else { $enginePath }
     $cliAliasPath = Join-Path $win64Destination "corridorkey.exe"
     if (-not (Test-Path -LiteralPath $cliAliasPath -PathType Leaf)) {

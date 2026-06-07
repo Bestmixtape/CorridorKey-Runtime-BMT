@@ -314,7 +314,7 @@ try {
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\win64\corridorkey_torchtrt.dll") -Label "blue wrapper root DLL in runtime core"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\torchtrt-runtime\bin\corridorkey_torchtrt.dll") -Label "runtime TorchTRT wrapper under Win64 payload"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\models\green_fixture.onnx") -Label "runtime model duplicate"
-    Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\model_inventory.json") -Label "portable runtime model inventory in suite payload"
+    Assert-PathExists -Path (Join-Path $suitePayloadOutputRoot "runtime\resources\model_inventory.json") -Label "suite runtime model inventory"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "runtime\outputs\scratch.tmp") -Label "runtime output scratch"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "ofx-resolve-fusion\Contents\Win64\onnxruntime.dll") -Label "OFX runtime dll duplicate"
     Assert-PathMissing -Path (Join-Path $suitePayloadOutputRoot "ofx-resolve-fusion\Contents\Win64\corridorkey.exe") -Label "OFX runtime cli duplicate"
