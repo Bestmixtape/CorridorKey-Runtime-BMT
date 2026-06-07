@@ -120,6 +120,23 @@ Append-only log. Date each entry. Never rewrite past entries.
   - `cargo test` from `src/gui/src-tauri`: passed, 9 tests.
   - `git diff --check` from the repository root: passed.
 
+### 2026-06-07
+
+- Fixed a startup readiness regression where the GUI could require a second
+  launch after the first runtime probe reported a transient missing-runtime
+  state. `src/gui/src/lib/store.ts` now retries only transient startup probes:
+  missing runtime with no resolved runtime path, or the frontend probe timeout.
+  Real runtime command failures, such as non-zero `doctor` output, are not
+  retried or hidden.
+- Added `src/gui/src/lib/store.test.ts` coverage for both behaviors: recovery
+  when the second probe resolves the runtime in the same launch, and no retry
+  for a real runtime command failure.
+- Verification:
+  - `pnpm vitest run src/lib/store.test.ts` from `src/gui`: passed.
+  - `pnpm test:unit` from `src/gui`: passed, 64 tests.
+  - `pnpm build` from `src/gui`: passed.
+  - `pnpm smoke:readiness` from `src/gui`: passed, 5 fake-runtime scenarios.
+
 
 ## Definition of Done
 

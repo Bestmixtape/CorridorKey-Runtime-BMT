@@ -3,6 +3,7 @@ import {
   DeviceInfo,
   RuntimeCatalogEntry,
   RuntimeReadiness,
+  RuntimeCommandError,
   SystemInfo,
   firstRuntimeError,
   formatRuntimeError,
@@ -15,6 +16,9 @@ import {
   presetChoices,
   supportedTracks
 } from "@/lib/catalog";
+
+const RUNTIME_READINESS_TIMEOUT_MS = 30000;
+const RUNTIME_READINESS_RETRY_DELAYS_MS = [300, 1200];
 
 interface EngineState {
   info: SystemInfo | null;
@@ -79,7 +83,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const readiness = await withTimeout(getRuntimeReadiness(), 15000);
+      const readiness = await probeRuntimeReadiness();
       const info = readiness.info.ok ? readiness.info.value : null;
       const commandError = firstRuntimeError(readiness);
       const error =
@@ -103,6 +107,50 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     }
   },
 }));
+
+async function probeRuntimeReadiness(): Promise<RuntimeReadiness> {
+  let lastReadiness: RuntimeReadiness | null = null;
+
+  for (let attempt = 0; attempt <= RUNTIME_READINESS_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const readiness = await withTimeout(getRuntimeReadiness(), RUNTIME_READINESS_TIMEOUT_MS);
+      if (!shouldRetryRuntimeReadiness(readiness) || attempt === RUNTIME_READINESS_RETRY_DELAYS_MS.length) {
+        return readiness;
+      }
+      lastReadiness = readiness;
+    } catch (error) {
+      if (!isRetryableRuntimeProbeError(error) || attempt === RUNTIME_READINESS_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+    }
+
+    await delay(RUNTIME_READINESS_RETRY_DELAYS_MS[attempt]);
+  }
+
+  return lastReadiness ?? withTimeout(getRuntimeReadiness(), RUNTIME_READINESS_TIMEOUT_MS);
+}
+
+function shouldRetryRuntimeReadiness(readiness: RuntimeReadiness): boolean {
+  if (readiness.status !== "error" || readiness.runtime_path) {
+    return false;
+  }
+
+  return isTransientRuntimeProbeError(firstRuntimeError(readiness));
+}
+
+function isRetryableRuntimeProbeError(error: unknown): boolean {
+  return error instanceof Error && error.message === "Runtime probe timeout";
+}
+
+function isTransientRuntimeProbeError(error: RuntimeCommandError | null): boolean {
+  return error?.kind === "missing_runtime";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
