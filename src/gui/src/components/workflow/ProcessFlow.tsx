@@ -203,29 +203,40 @@ export function ProcessFlow() {
     modelLabel: selectedModel ? modelOptionLabel(selectedModel) : null,
     videoEncodeMode,
     artifactPath,
-    outputRecipe,
-    advancedSettings
+    outputRecipe
   }), [
     selectedPreset,
     selectedModel,
     videoEncodeMode,
     artifactPath,
-    outputRecipe,
-    advancedSettings
+    outputRecipe
   ]);
   const artifactMetadata = useMemo(() => ({
+    preset: selectedPreset ? presetOptionLabel(selectedPreset) : "default",
+    model: selectedModel ? modelOptionLabel(selectedModel) : "auto",
     output_recipe: outputRecipeLabel(outputRecipe),
     artifact_family: outputRecipe.artifactFamily,
     alpha_mode: outputRecipe.alphaMode,
     preview_background: outputRecipe.previewBackground,
     color_intent: outputRecipe.colorIntent,
     video_encode: videoEncodeMode,
+    quality_fallback: advancedSettings.qualityFallback,
+    refinement_mode: advancedSettings.refinementMode,
+    precision: advancedSettings.precision,
+    resolution: String(advancedSettings.resolution),
+    batch_size: String(advancedSettings.batchSize),
+    despill: advancedSettings.despill.toFixed(2),
+    despeckle: advancedSettings.despeckle ? "on" : "off",
+    tiling: advancedSettings.tiled ? "forced" : "off",
     output_path: artifactPath || outputPath || ""
   }), [
     artifactPath,
     outputPath,
     outputRecipe,
-    videoEncodeMode
+    selectedPreset,
+    selectedModel,
+    videoEncodeMode,
+    advancedSettings
   ]);
 
   const handleSelectInput = async () => {

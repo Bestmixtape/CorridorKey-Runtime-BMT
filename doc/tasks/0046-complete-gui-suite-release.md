@@ -172,6 +172,23 @@ now lives under Advanced controls. Verification passed with
 src/lib/workflowLabels.test.ts`, `pnpm test:unit`, and `pnpm build` in
 `src/gui`.
 
+Status-chip reduction TDD slice:
+
+- Source C: `src/gui/src/lib/jobRecipe.ts` previously emitted every advanced
+  processing setting as a visible chip under the viewer.
+- Source C: `src/gui/src/components/workflow/JobStatusPanel.tsx` already has
+  dedicated telemetry pills for FPS, ETA, stages, workers, and resource usage.
+- Source C: `src/gui/src/lib/diagnosticLog.ts` preserves copyable rich
+  diagnostics separately from the visible status surface.
+
+Decision: keep visible recipe chips limited to high-signal choices: preset,
+explicit model override, encode mode, output family, and finished format. Move
+advanced settings into `artifactMetadata` for diagnostics instead of showing
+them as default UI tags. Verification passed with
+`pnpm vitest run src/lib/jobRecipe.test.ts`, `pnpm test:unit`, `pnpm build`, and
+a Playwright DOM check against the local Vite app confirming the old
+`Precision/Batch/Despill/Cleanup/Tiling/Model Auto` chips are absent.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
