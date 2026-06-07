@@ -1221,6 +1221,12 @@ function New-CorridorKeySuiteIss {
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Tasks]"
     Add-CorridorKeySuiteLine -Lines $lines -Value 'Name: "cleaninstall"; Description: "Clean install (remove selected CorridorKey payloads before installing)"; Flags: unchecked'
+    Add-CorridorKeySuiteLine -Lines $lines -Value 'Name: "desktopicon"; Description: "Create a CorridorKey GUI desktop shortcut"; GroupDescription: "Shortcuts:"; Components: gui; Flags: unchecked'
+    Add-CorridorKeySuiteLine -Lines $lines
+
+    Add-CorridorKeySuiteLine -Lines $lines -Value "[Icons]"
+    Add-CorridorKeySuiteLine -Lines $lines -Value 'Name: "{autoprograms}\CorridorKey\CorridorKey GUI"; Filename: "{#SuiteGuiRoot}\CorridorKey.exe"; WorkingDir: "{#SuiteGuiRoot}"; Components: gui'
+    Add-CorridorKeySuiteLine -Lines $lines -Value 'Name: "{autodesktop}\CorridorKey GUI"; Filename: "{#SuiteGuiRoot}\CorridorKey.exe"; WorkingDir: "{#SuiteGuiRoot}"; Components: gui; Tasks: desktopicon'
     Add-CorridorKeySuiteLine -Lines $lines
 
     Add-CorridorKeySuiteLine -Lines $lines -Value "[Dirs]"
