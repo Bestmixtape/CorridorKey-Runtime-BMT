@@ -106,6 +106,13 @@ export function comparisonPairOptions(
   });
 }
 
+export function availableComparisonPairOptions(
+  buffers: ViewerBuffer[],
+  swapped = false
+): ViewerComparisonPairOption[] {
+  return comparisonPairOptions(buffers, swapped).filter((option) => option.available);
+}
+
 export function comparisonClipStyle(
   mode: ViewerComparisonMode,
   positionPercent: number
@@ -122,10 +129,7 @@ export function comparisonClipStyle(
   }
 
   if (mode === "diagonal") {
-    const geometry = comparisonDividerGeometry("diagonal", position);
-    return {
-      clipPath: `polygon(0 0, ${formatPercent(geometry.x1)} 0, ${formatPercent(geometry.x2)} 100%, 0 100%)`
-    };
+    return { clipPath: diagonalClipPolygon(position) };
   }
 
   return {};
@@ -148,11 +152,22 @@ export function comparisonDividerGeometry(
   }
 
   if (mode === "diagonal") {
+    const total = position * 2;
+    if (total <= 100) {
+      return {
+        kind: "diagonal",
+        x1: total,
+        y1: 0,
+        x2: 0,
+        y2: total
+      };
+    }
+
     return {
       kind: "diagonal",
-      x1: position * 2,
-      y1: 0,
-      x2: position * 2 - 100,
+      x1: 100,
+      y1: total - 100,
+      x2: total - 100,
       y2: 100
     };
   }
@@ -188,6 +203,22 @@ function clampPercent(value: number): number {
 
 function formatPercent(value: number): string {
   return `${Number.isInteger(value) ? value.toFixed(0) : Number(value.toFixed(3))}%`;
+}
+
+function diagonalClipPolygon(position: number): string {
+  const total = position * 2;
+  if (total <= 100) {
+    return `polygon(0 0, ${formatPercent(total)} 0, 0 ${formatPercent(total)})`;
+  }
+
+  const inset = total - 100;
+  return [
+    "polygon(0 0",
+    "100% 0",
+    `100% ${formatPercent(inset)}`,
+    `${formatPercent(inset)} 100%`,
+    "0 100%)"
+  ].join(", ");
 }
 
 function bufferForId(buffers: ViewerBuffer[], id: string): ViewerBuffer | null {

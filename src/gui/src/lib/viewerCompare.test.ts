@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  availableComparisonPairOptions,
   comparisonPairOptions,
   comparisonClipStyle,
   comparisonDividerGeometry,
@@ -83,6 +84,16 @@ describe("viewer comparison", () => {
     ]);
   });
 
+  test("filters comparison controls to available media pairs", () => {
+    const options = availableComparisonPairOptions([
+      { id: "source", label: "Source", path: "C:\\Shots\\input.mp4" },
+      { id: "hint", label: "Alpha Hint", path: null },
+      { id: "result", label: "Result", path: "C:\\Shots\\output.mov" }
+    ]);
+
+    expect(options.map((option) => option.id)).toEqual(["source-result"]);
+  });
+
   test("resolves explicit pair selection and side swapping", () => {
     const buffers = [
       { id: "source", label: "Source", path: "C:\\Shots\\input.mp4" },
@@ -114,7 +125,10 @@ describe("viewer comparison", () => {
   test("builds horizontal and full-bounds diagonal clip styles", () => {
     expect(comparisonClipStyle("horizontal", 25)).toEqual({ clipPath: "inset(0 0 75% 0)" });
     expect(comparisonClipStyle("diagonal", 40)).toEqual({
-      clipPath: "polygon(0 0, 80% 0, -20% 100%, 0 100%)"
+      clipPath: "polygon(0 0, 80% 0, 0 80%)"
+    });
+    expect(comparisonClipStyle("diagonal", 75)).toEqual({
+      clipPath: "polygon(0 0, 100% 0, 100% 50%, 50% 100%, 0 100%)"
     });
   });
 
@@ -137,7 +151,14 @@ describe("viewer comparison", () => {
       kind: "diagonal",
       x1: 80,
       y1: 0,
-      x2: -20,
+      x2: 0,
+      y2: 80
+    });
+    expect(comparisonDividerGeometry("diagonal", 75)).toEqual({
+      kind: "diagonal",
+      x1: 100,
+      y1: 50,
+      x2: 50,
       y2: 100
     });
   });

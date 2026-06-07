@@ -189,6 +189,22 @@ them as default UI tags. Verification passed with
 a Playwright DOM check against the local Vite app confirming the old
 `Precision/Batch/Despill/Cleanup/Tiling/Model Auto` chips are absent.
 
+Viewer comparison gating and diagonal-wipe TDD slice:
+
+- Source C: `src/gui/src/components/workflow/WorkbenchViewer.tsx` displayed
+  compare pairs and wipe modes even when the source, hint, or result buffers
+  were unavailable.
+- Source C: `src/gui/src/lib/viewerCompare.ts` built diagonal clip paths with
+  negative or out-of-bounds endpoints, which can draw confusing partial or
+  inverted divider lines.
+
+Decision: comparison controls render only for available media pairs, and the
+diagonal divider/clip polygon is now derived from the line's intersection with
+the viewer bounds. Verification passed with
+`pnpm vitest run src/lib/viewerCompare.test.ts`, `pnpm test:unit`,
+`pnpm build`, and a Playwright DOM check confirming no compare controls render
+when fewer than two buffers are available.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:

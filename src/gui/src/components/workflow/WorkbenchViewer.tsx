@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/media";
 import {
   comparisonPairOptions,
+  availableComparisonPairOptions,
   resolveComparisonState,
   type ViewerComparisonPairId,
   type ViewerComparisonMode
@@ -80,7 +81,9 @@ export function WorkbenchViewer({
   ];
   const activeItem = previewItems.find((item) => item.id === activePreview) ?? previewItems[0];
   const pairOptions = comparisonPairOptions(previewItems, comparisonSwapped);
-  const activePair = pairOptions.find((pair) => pair.id === comparisonPairId) ?? pairOptions[0];
+  const availablePairOptions = availableComparisonPairOptions(previewItems, comparisonSwapped);
+  const activePair =
+    availablePairOptions.find((pair) => pair.id === comparisonPairId) ?? availablePairOptions[0];
   const comparisonState = resolveComparisonState(previewItems, activePreview, comparisonMode, {
     pairId: comparisonPairId,
     swapped: comparisonSwapped
@@ -93,6 +96,23 @@ export function WorkbenchViewer({
       setActivePreview("result");
     }
   }, [artifactPath]);
+
+  useEffect(() => {
+    if (availablePairOptions.length === 0) {
+      if (comparisonMode !== "single") {
+        setComparisonMode("single");
+      }
+      return;
+    }
+
+    if (!availablePairOptions.some((pair) => pair.id === comparisonPairId)) {
+      setComparisonPairId(availablePairOptions[0].id);
+    }
+  }, [
+    availablePairOptions.map((pair) => pair.id).join("|"),
+    comparisonMode,
+    comparisonPairId
+  ]);
 
   useEffect(() => {
     setActivePreview("source");
@@ -137,59 +157,57 @@ export function WorkbenchViewer({
             ))}
           </div>
 
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-            {pairOptions.map((pair) => (
-              <button
-                key={pair.id}
-                type="button"
-                disabled={!pair.available}
-                title={pair.unavailableReason ?? pair.label}
-                onClick={() => setComparisonPairId(pair.id)}
-                className={cn(
-                  "min-h-10 rounded-md px-2 py-1 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-55",
-                  comparisonPairId === pair.id
-                    ? "bg-brand text-white"
-                    : "text-zinc-400 hover:text-zinc-100"
-                )}
-              >
-                <span className="block truncate">{pair.label}</span>
-                {!pair.available && (
-                  <span className="block truncate text-[9px] font-medium uppercase tracking-wider text-zinc-500">
-                    {pair.unavailableReason}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          {availablePairOptions.length > 0 && (
+            <>
+              <div className="grid grid-cols-1 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 sm:grid-cols-3">
+                {availablePairOptions.map((pair) => (
+                  <button
+                    key={pair.id}
+                    type="button"
+                    title={pair.label}
+                    onClick={() => setComparisonPairId(pair.id)}
+                    className={cn(
+                      "min-h-8 rounded-md px-2 py-1 text-xs font-bold transition-colors",
+                      comparisonPairId === pair.id
+                        ? "bg-brand text-white"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    <span className="block truncate">{pair.label}</span>
+                  </button>
+                ))}
+              </div>
 
-          <button
-            type="button"
-            disabled={!activePair?.available}
-            onClick={() => setComparisonSwapped((value) => !value)}
-            className="flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs font-bold text-zinc-400 transition-colors hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <ArrowLeftRight className="h-4 w-4" />
-            Swap sides
-          </button>
-
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 xl:grid-cols-6">
-            {COMPARISON_MODES.map((mode) => (
               <button
-                key={mode.id}
                 type="button"
-                disabled={mode.id !== "single" && !comparisonState.canCompare}
-                onClick={() => setComparisonMode(mode.id)}
-                className={cn(
-                  "h-8 rounded-md px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                  comparisonMode === mode.id
-                    ? "bg-brand text-white"
-                    : "text-zinc-400 hover:text-zinc-100"
-                )}
+                disabled={!activePair}
+                onClick={() => setComparisonSwapped((value) => !value)}
+                className="flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs font-bold text-zinc-400 transition-colors hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {mode.label}
+                <ArrowLeftRight className="h-4 w-4" />
+                Swap sides
               </button>
-            ))}
-          </div>
+
+              <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 xl:grid-cols-6">
+                {COMPARISON_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    disabled={mode.id !== "single" && !comparisonState.canCompare}
+                    onClick={() => setComparisonMode(mode.id)}
+                    className={cn(
+                      "h-8 rounded-md px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      comparisonMode === mode.id
+                        ? "bg-brand text-white"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    )}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
