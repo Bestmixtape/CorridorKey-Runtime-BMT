@@ -28,11 +28,11 @@ optional online-first components.
 
 Verifiable conditions. Each as a checkbox so progress is point-editable.
 
-- [ ] A formal grounding pass records the GUI/export release decisions against
+- [x] A formal grounding pass records the GUI/export release decisions against
       Apple-style progressive disclosure, reference editor viewer/export
       patterns, CorridorKey plugins, EZ-CorridorKey, CorridorKey Engine, current
       GUI code, and relevant git history.
-- [ ] Result preview proxy generation succeeds for a real `.mov` result whose
+- [x] Result preview proxy generation succeeds for a real `.mov` result whose
       browser playback requires an MP4/H.264 proxy, while preserving atomic
       cache writes and surfacing actionable proxy diagnostics.
 - [ ] The main GUI flow is a viewer-centered workbench: sidebar collapsed by
@@ -71,7 +71,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 
 Concrete sequential steps. Each as a checkbox. Reference file paths where applicable.
 
-- [ ] Run `ad-ground` for the complete GUI suite release scope and append the
+- [x] Run `ad-ground` for the complete GUI suite release scope and append the
       grounding summary to this task's Notes.
 - [x] Fix the preview proxy failure in `src/gui/src-tauri/src/lib.rs` with a
       regression test that proves FFmpeg can write the temporary MP4 output.
@@ -233,6 +233,47 @@ available, while the pill row keeps supporting details such as elapsed time,
 frame count, throughput, workers, backend, preset, output, and resources.
 Verification passed with `pnpm vitest run src/lib/jobTelemetry.test.ts`,
 `pnpm test:unit`, and `pnpm build`.
+
+Formal GUI/export release grounding:
+
+- Source A: Apple Human Interface Guidelines disclosure controls page states
+  the relevant pattern for hiding details until they are relevant:
+  https://developer.apple.com/design/human-interface-guidelines/disclosure-controls
+- Source A: Adobe Premiere Pro's comparison-view guide places comparison in the
+  Program Monitor and exposes vertical split, horizontal split, side-by-side,
+  reference/current switching, and swap-sides controls:
+  https://helpx.adobe.com/ph_fil/premiere-pro/how-to/frame-comparison-view.html
+- Source A: Blackmagic's DaVinci Resolve Color page frames wipe and split-screen
+  modes as viewer-native comparison tools, with horizontal, vertical, mixed,
+  alpha, difference matte, and picture-in-picture variants:
+  https://www.blackmagicdesign.com/ca/products/davinciresolve/color
+- Source B: `C:\Dev\EZ-CorridorKey\ui\widgets\view_mode_bar.py` gates viewer
+  modes by clip/stem availability and uses per-mode tooltips.
+- Source B: `C:\Dev\EZ-CorridorKey\ui\widgets\status_bar.py` foregrounds
+  frame count, percent, FPS, elapsed time, ETA, phases, and warnings.
+- Source B: `C:\Dev\EZ-CorridorKey\ui\widgets\preferences_dialog.py` persists
+  infrequently changed model-resolution preferences and documents compression
+  choices.
+- Source B: `C:\Dev\CorridorKey-Engine\ck_engine\cli.py` exposes rich progress
+  and output knobs such as EXR/PNG/none composite format, EXR compression, and
+  selectable output layers.
+- Source C: `src/plugins/ofx/ofx_constants.hpp` and
+  `src/plugins/adobe/adobe_effect_parameters.cpp` define the host-plugin quality
+  ladder as Default/Draft 512, High 1024, Ultra 1536, and Maximum 2048.
+- Source C: `src/gui/src` owns the Tauri workbench, output recipe, status,
+  preview, comparison, and catalog-selection behavior now covered by focused
+  unit tests.
+- Source D: Recent GUI history (`3c99f95`, `1c1f30e`, `22a20d2`, `d330c3f`,
+  `53912bd`) shows the viewer/proxy/comparison surfaces were already being
+  stabilized and should be evolved rather than replaced wholesale.
+
+Decision: the release GUI follows an editor-style viewer-first workbench:
+simple runnable controls at the primary level, details behind disclosure,
+availability-gated comparison/export options, compact persisted quality preset,
+and visible render telemetry. Deviations from plugins/EZ/Engine are allowed only
+where the App/Core runtime contract does not yet support the richer option; such
+options must remain disabled, hidden, or documented as contract-gated rather
+than presented as runnable.
 
 ## Definition of Done
 
