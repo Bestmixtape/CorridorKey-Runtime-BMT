@@ -1,6 +1,6 @@
 # Task `0046`: Complete GUI Suite Release
 
-**Status:** proposed
+**Status:** in_progress
 **Created:** 2026-06-07
 **Owner:** Runtime maintainers
 **Spec ref:** doc/specs/0003-useful-tauri-gui.md; doc/specs/0005-unified-windows-installer.md
@@ -73,7 +73,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 
 - [ ] Run `ad-ground` for the complete GUI suite release scope and append the
       grounding summary to this task's Notes.
-- [ ] Fix the preview proxy failure in `src/gui/src-tauri/src/lib.rs` with a
+- [x] Fix the preview proxy failure in `src/gui/src-tauri/src/lib.rs` with a
       regression test that proves FFmpeg can write the temporary MP4 output.
 - [ ] Update `src/gui/src/lib/job.ts`, `src/gui/src/components/workflow/*`, and
       related tests so preset selection is compact, persisted, and explained.
@@ -101,6 +101,37 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 ## Notes
 
 Append-only log. Date each entry. Never rewrite past entries.
+
+### 2026-06-07
+
+Preview proxy grounding and TDD slice:
+
+- Source A: FFmpeg command documentation defines `-f fmt` as the way to force
+  input or output format when extension-based guessing is insufficient:
+  https://www.ffmpeg.org/ffmpeg.html#Main-options
+- Source A: FFmpeg formats documentation shows muxer options such as
+  `movflags=+faststart` applied to MP4-family output:
+  https://ffmpeg.org/ffmpeg-formats.html
+- Source B: A validated FFmpeg failure case resolves "Unable to find a suitable
+  output format" by adding `-f mp4` before the output path:
+  https://stackoverflow.com/questions/76315677/unable-to-find-suitable-output-format-for-ffmpeg
+- Source B: A validated atomic conversion pattern writes to a temporary file and
+  replaces the final output only after FFmpeg succeeds:
+  https://stackoverflow.com/questions/75151280/how-to-make-ffmpeg-delete-original-file-after-conversion
+- Source C: `src/gui/src-tauri/src/lib.rs` already owns preview proxy cache
+  generation, success markers, retry behavior, and FFmpeg timeout coverage.
+- Source D: `3c99f95` introduced atomic temporary proxy writes,
+  `1c1f30e` retried transient proxy failures, and `22a20d2` established result
+  preview registration after processing.
+
+Decision: keep the atomic temporary proxy write and final rename, but force the
+MP4 muxer with `-f mp4` before the temporary output path so FFmpeg does not rely
+on the final `.tmp` extension. The regression test
+`preview_proxy_uses_explicit_mp4_muxer_for_atomic_temp_output` fails without the
+explicit muxer and passes after the fix. Verification passed with
+`cargo test --lib` in `src/gui/src-tauri`, and the packaged GUI FFmpeg generated
+a real proxy for `C:\Users\alexa\Downloads\Jordan4k_corridorkey.mov` into a
+temporary `*.mp4.libx264.tmp` output in 1.21 seconds before cleanup.
 
 ## Definition of Done
 

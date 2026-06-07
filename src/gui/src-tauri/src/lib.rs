@@ -1941,7 +1941,7 @@ fn run_preview_ffmpeg_with_timeout(
         command.args(["-preset", "veryfast", "-crf", "23"]);
     }
 
-    command.args(["-movflags", "+faststart", proxy_arg.as_str()]);
+    command.args(["-f", "mp4", "-movflags", "+faststart", proxy_arg.as_str()]);
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
@@ -2610,6 +2610,25 @@ mod tests {
     }
 
     #[test]
+    fn preview_proxy_uses_explicit_mp4_muxer_for_atomic_temp_output() {
+        let dir = unique_test_dir("preview-proxy-explicit-muxer");
+        let cache = dir.join("cache");
+        let source = dir.join("result.mov");
+        fs::write(&source, "source").expect("write source");
+        let ffmpeg = fake_preview_ffmpeg_requiring_mp4_muxer(&dir);
+
+        let result = create_preview_proxy_in_cache(&source, &cache, &ffmpeg)
+            .expect("preview proxy should declare MP4 muxer for temp output");
+
+        assert!(!result.reused);
+        assert!(result.path.ends_with(".mp4"));
+        assert_eq!(
+            fs::read_to_string(result.path).expect("read proxy").trim(),
+            "preview"
+        );
+    }
+
+    #[test]
     fn preview_proxy_recovers_from_transient_source_read_failures() {
         let dir = unique_test_dir("preview-proxy-transient-source");
         let cache = dir.join("cache");
@@ -2979,6 +2998,42 @@ exit /b {exit_code}
     }
 
     #[cfg(target_os = "windows")]
+    fn fake_preview_ffmpeg_requiring_mp4_muxer(dir: &Path) -> PathBuf {
+        let path = dir.join("ffmpeg_requires_mp4_muxer.cmd");
+        let script_path = dir.join("ffmpeg_requires_mp4_muxer.ps1");
+        fs::write(
+            &script_path,
+            r#"$output = $args[$args.Count - 1]
+$hasMuxer = $false
+for ($i = 0; $i -lt ($args.Count - 1); $i += 1) {
+  if (($args[$i] -eq '-f') -and ($args[$i + 1] -eq 'mp4')) {
+    $hasMuxer = $true
+  }
+}
+if (-not $hasMuxer) {
+  [Console]::Error.WriteLine('Unable to choose an output format for temporary preview output')
+  exit 1
+}
+Set-Content -LiteralPath $output -Value 'preview' -NoNewline
+exit 0
+"#,
+        )
+        .expect("write fake muxer-checking ffmpeg script");
+        fs::write(
+            &path,
+            format!(
+                r#"@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{}" %*
+exit /b %errorlevel%
+"#,
+                script_path.display()
+            ),
+        )
+        .expect("write fake muxer-checking ffmpeg command");
+        path
+    }
+
+    #[cfg(target_os = "windows")]
     fn fake_chatty_failing_ffmpeg(dir: &Path) -> PathBuf {
         let path = dir.join("ffmpeg_chatty_fail.cmd");
         fs::write(
@@ -3037,6 +3092,41 @@ exit /b %errorlevel%
     fn fake_sleeping_ffmpeg(dir: &Path) -> PathBuf {
         let path = dir.join("ffmpeg");
         fs::write(&path, "#!/bin/sh\nsleep 5\n").expect("write fake sleeping ffmpeg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("ffmpeg metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("fake ffmpeg permissions");
+        }
+        path
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn fake_preview_ffmpeg_requiring_mp4_muxer(dir: &Path) -> PathBuf {
+        let path = dir.join("ffmpeg-requires-mp4-muxer");
+        fs::write(
+            &path,
+            r#"#!/bin/sh
+output=""
+has_muxer=0
+previous=""
+for arg do
+  if [ "$previous" = "-f" ] && [ "$arg" = "mp4" ]; then
+    has_muxer=1
+  fi
+  previous="$arg"
+  output="$arg"
+done
+if [ "$has_muxer" -ne 1 ]; then
+  echo "Unable to choose an output format for temporary preview output" >&2
+  exit 1
+fi
+printf preview > "$output"
+exit 0
+"#,
+        )
+        .expect("write fake muxer-checking ffmpeg");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
