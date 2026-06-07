@@ -25,6 +25,8 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const RUNTIME_PATH_ENV: &str = "CORRIDORKEY_GUI_RUNTIME_PATH";
 const PREVIEW_SOURCE_SAMPLE_BYTES: u64 = 64 * 1024;
 const PREVIEW_FFMPEG_TIMEOUT: Duration = Duration::from_secs(60);
+const PREVIEW_PROXY_TRANSCODE_ATTEMPTS: usize = 8;
+const PREVIEW_PROXY_TRANSCODE_RETRY_DELAY: Duration = Duration::from_millis(400);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1656,6 +1658,38 @@ fn create_preview_proxy_in_cache(
         )
     })?;
 
+    let mut last_error = None;
+    for attempt_index in 0..PREVIEW_PROXY_TRANSCODE_ATTEMPTS {
+        match create_preview_proxy_in_cache_once(source_path, cache_root, ffmpeg_path) {
+            Ok(proxy) => return Ok(proxy),
+            Err(error)
+                if attempt_index + 1 < PREVIEW_PROXY_TRANSCODE_ATTEMPTS
+                    && should_retry_preview_proxy_error(&error) =>
+            {
+                last_error = Some(error);
+                thread::sleep(PREVIEW_PROXY_TRANSCODE_RETRY_DELAY);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        runtime_command_error(
+            RuntimeCommandErrorKind::PrerequisiteFailed,
+            "create_preview_proxy",
+            format!(
+                "Could not create a browser preview proxy for {}.",
+                source_path.display()
+            ),
+        )
+    }))
+}
+
+fn create_preview_proxy_in_cache_once(
+    source_path: &Path,
+    cache_root: &Path,
+    ffmpeg_path: &Path,
+) -> Result<PreviewProxy, RuntimeCommandError> {
     let proxy_path = preview_proxy_path(source_path, cache_root)?;
     let marker_path = preview_proxy_marker_path(&proxy_path);
     if proxy_path.is_file()
@@ -1743,6 +1777,19 @@ fn create_preview_proxy_in_cache(
         error.stderr = Some(last_error);
     }
     Err(error)
+}
+
+fn should_retry_preview_proxy_error(error: &RuntimeCommandError) -> bool {
+    if error.kind != RuntimeCommandErrorKind::PrerequisiteFailed
+        || error.command != "create_preview_proxy"
+    {
+        return false;
+    }
+
+    !error
+        .stderr
+        .as_deref()
+        .is_some_and(|stderr| stderr.contains("timed out"))
 }
 
 fn preview_proxy_marker_path(proxy_path: &Path) -> PathBuf {
@@ -2045,13 +2092,14 @@ mod tests {
         build_process_args, candidate_preview_ffmpeg_paths, candidate_runtime_roots,
         collect_runtime_readiness_for_path, create_preview_proxy_in_cache, engine_binary_names,
         enrich_job_event_for_gui, is_preview_asset_allowed, is_terminal_job_event_type,
-        job_event_type_from_line, kill_active_child, path_to_string, preview_ffmpeg_path_arg,
-        preview_artifact_path_from_job_event, preview_ffmpeg_binary_name, preview_proxy_path,
-        preview_source_sample_offsets, primary_engine_binary_name, registered_preview_asset_path,
-        remember_preview_asset, resolve_preview_ffmpeg_candidate, resolve_selected_model_path,
-        run_preview_ffmpeg_with_timeout, runtime_exit_failure_payload, runtime_root_from_config,
-        runtime_working_dir_for_engine, shutdown_active_job, ActiveJob, JobProcessState,
-        PreviewAssetScope, ProcessCommandOptions, RuntimeCommandErrorKind, RuntimeReadinessStatus,
+        job_event_type_from_line, kill_active_child, path_to_string,
+        preview_artifact_path_from_job_event, preview_ffmpeg_binary_name, preview_ffmpeg_path_arg,
+        preview_proxy_path, preview_source_sample_offsets, primary_engine_binary_name,
+        registered_preview_asset_path, remember_preview_asset, resolve_preview_ffmpeg_candidate,
+        resolve_selected_model_path, run_preview_ffmpeg_with_timeout, runtime_exit_failure_payload,
+        runtime_root_from_config, runtime_working_dir_for_engine, shutdown_active_job, ActiveJob,
+        JobProcessState, PreviewAssetScope, ProcessCommandOptions, RuntimeCommandErrorKind,
+        RuntimeReadinessStatus,
     };
     use serde_json::Value;
     use std::fs;
@@ -2216,7 +2264,9 @@ mod tests {
     #[test]
     fn preview_ffmpeg_path_arg_strips_windows_verbatim_prefixes() {
         assert_eq!(
-            preview_ffmpeg_path_arg(Path::new(r"\\?\C:\Users\alexa\Downloads\Input_corridorkey.mov")),
+            preview_ffmpeg_path_arg(Path::new(
+                r"\\?\C:\Users\alexa\Downloads\Input_corridorkey.mov"
+            )),
             r"C:\Users\alexa\Downloads\Input_corridorkey.mov"
         );
         assert_eq!(
@@ -2555,6 +2605,24 @@ mod tests {
         assert!(!result.reused);
         assert_eq!(
             fs::read_to_string(&proxy).expect("read proxy").trim(),
+            "preview"
+        );
+    }
+
+    #[test]
+    fn preview_proxy_recovers_from_transient_source_read_failures() {
+        let dir = unique_test_dir("preview-proxy-transient-source");
+        let cache = dir.join("cache");
+        let source = dir.join("result.mov");
+        fs::write(&source, "source").expect("write source");
+        let ffmpeg = fake_retrying_preview_ffmpeg(&dir, 4);
+
+        let result = create_preview_proxy_in_cache(&source, &cache, &ffmpeg)
+            .expect("preview proxy should retry after transient source failures");
+
+        assert!(!result.reused);
+        assert_eq!(
+            fs::read_to_string(result.path).expect("read proxy").trim(),
             "preview"
         );
     }
@@ -2924,6 +2992,47 @@ exit /b %errorlevel%
         path
     }
 
+    #[cfg(target_os = "windows")]
+    fn fake_retrying_preview_ffmpeg(dir: &Path, fail_count: u32) -> PathBuf {
+        let command_path = dir.join("ffmpeg_retry.cmd");
+        let script_path = dir.join("ffmpeg_retry.ps1");
+        let counter_path = dir.join("ffmpeg_retry_count.txt");
+        let counter_arg = counter_path.to_string_lossy().replace('\'', "''");
+        fs::write(
+            &script_path,
+            format!(
+                r#"$counterPath = '{counter_arg}'
+$count = 0
+if (Test-Path -LiteralPath $counterPath) {{
+  $count = [int](Get-Content -LiteralPath $counterPath -Raw)
+}}
+$count += 1
+Set-Content -LiteralPath $counterPath -Value $count
+if ($count -le {fail_count}) {{
+  [Console]::Error.WriteLine('moov atom not found')
+  exit 1
+}}
+$output = $args[$args.Count - 1]
+Set-Content -LiteralPath $output -Value 'preview' -NoNewline
+exit 0
+"#
+            ),
+        )
+        .expect("write fake retrying ffmpeg script");
+        fs::write(
+            &command_path,
+            format!(
+                r#"@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{}" %*
+exit /b %errorlevel%
+"#,
+                script_path.display()
+            ),
+        )
+        .expect("write fake retrying ffmpeg command");
+        command_path
+    }
+
     #[cfg(not(target_os = "windows"))]
     fn fake_sleeping_ffmpeg(dir: &Path) -> PathBuf {
         let path = dir.join("ffmpeg");
@@ -2971,6 +3080,28 @@ exit /b %errorlevel%
             "#!/bin/sh\ni=0\nwhile [ $i -lt 20000 ]; do printf 'preview failure' >&2; i=$((i + 1)); done\nexit 1\n",
         )
         .expect("write fake chatty ffmpeg");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("ffmpeg metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("fake ffmpeg permissions");
+        }
+        path
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn fake_retrying_preview_ffmpeg(dir: &Path, fail_count: u32) -> PathBuf {
+        let path = dir.join("ffmpeg-retry");
+        let counter_path = dir.join("ffmpeg-retry-count.txt");
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\ncount=0\nif [ -f \"{counter}\" ]; then count=$(cat \"{counter}\"); fi\ncount=$((count + 1))\nprintf '%s' \"$count\" > \"{counter}\"\nif [ \"$count\" -le {fail_count} ]; then echo 'moov atom not found' >&2; exit 1; fi\noutput=\"\"\nfor arg do output=\"$arg\"; done\nprintf preview > \"$output\"\nexit 0\n",
+                counter = counter_path.display()
+            ),
+        )
+        .expect("write fake retrying ffmpeg");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
