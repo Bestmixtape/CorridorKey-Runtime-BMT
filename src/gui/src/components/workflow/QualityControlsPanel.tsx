@@ -18,6 +18,7 @@ import {
   modelOptionLabel,
   modelOptionValue,
   modelUnavailableLabel,
+  presetOptionHelp,
   presetOptionLabel,
   presetOptionValue,
   presetUnavailableLabel,
@@ -31,8 +32,7 @@ import {
   AdvancedInfo,
   AdvancedNumber,
   AdvancedSelect,
-  PanelTitle,
-  QualityStat
+  PanelTitle
 } from "@/components/workflow/WorkflowPanelPrimitives";
 
 export function QualityControlsPanel({
@@ -79,6 +79,13 @@ export function QualityControlsPanel({
   ) => void;
   onToggleAdvanced: () => void;
 }) {
+  const selectedPresetModel = selectedPreset
+    ? modelChoices.find((model) => model.filename === selectedPreset.recommended_model) ?? null
+    : null;
+  const selectedPresetHelp = selectedPreset
+    ? presetOptionHelp(selectedPreset, selectedPresetModel)
+    : null;
+
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 shadow-apple">
       <PanelTitle icon={SlidersHorizontal} label="Quality" />
@@ -95,33 +102,22 @@ export function QualityControlsPanel({
               <option value="">{presetUnavailableLabel(readiness)}</option>
             ) : (
               presetChoices.map((preset) => (
-                <option key={presetOptionValue(preset)} value={presetOptionValue(preset)}>
+                <option
+                  key={presetOptionValue(preset)}
+                  value={presetOptionValue(preset)}
+                  title={presetOptionHelp(
+                    preset,
+                    modelChoices.find((model) => model.filename === preset.recommended_model) ?? null
+                  )}
+                >
                   {presetOptionLabel(preset)}
                 </option>
               ))
             )}
           </select>
-        </label>
-
-        <label className="space-y-2">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Model</span>
-          <select
-            value={selectedModelId ?? ""}
-            disabled={isProcessing || !runtimeUsable}
-            onChange={(event) => onSelectedModel(event.target.value || null)}
-            className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-50 outline-none transition-colors focus:border-brand disabled:opacity-50"
-          >
-            <option value="">Runtime preset default</option>
-            {modelChoices.length === 0 ? (
-              <option value="" disabled>{modelUnavailableLabel(readiness)}</option>
-            ) : (
-              modelChoices.map((model) => (
-                <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
-                  {modelOptionLabel(model)}
-                </option>
-              ))
-            )}
-          </select>
+          {selectedPresetHelp && (
+            <p className="text-xs leading-relaxed text-zinc-500">{selectedPresetHelp}</p>
+          )}
         </label>
 
         <div className="space-y-2">
@@ -146,11 +142,6 @@ export function QualityControlsPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <QualityStat label="Preset" value={selectedPreset ? presetOptionLabel(selectedPreset) : "Default"} />
-          <QualityStat label="Model" value={selectedModel ? modelOptionLabel(selectedModel) : "Auto"} />
-        </div>
-
         <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
           <button
             type="button"
@@ -167,14 +158,37 @@ export function QualityControlsPanel({
 
           {showAdvanced && (
             <div className="space-y-4 border-t border-zinc-800 p-3">
+              <AdvancedGroup title="Runtime override">
+                <label className="space-y-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Model</span>
+                  <select
+                    value={selectedModelId ?? ""}
+                    disabled={isProcessing || !runtimeUsable}
+                    onChange={(event) => onSelectedModel(event.target.value || null)}
+                    className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-100 outline-none transition-colors focus:border-brand disabled:opacity-50"
+                  >
+                    <option value="">Runtime preset default</option>
+                    {modelChoices.length === 0 ? (
+                      <option value="" disabled>{modelUnavailableLabel(readiness)}</option>
+                    ) : (
+                      modelChoices.map((model) => (
+                        <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
+                          {modelOptionLabel(model)}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+                <AdvancedInfo
+                  label="Selection policy"
+                  value={selectedModel ? "Explicit model override" : "Preset chooses the model"}
+                />
+              </AdvancedGroup>
+
               <AdvancedGroup title="Screen color">
                 <AdvancedInfo
                   label="Active screen color"
                   value={screenColorLabel(selectedModel ?? null)}
-                />
-                <AdvancedInfo
-                  label="Selection policy"
-                  value={selectedModel ? "Explicit model" : "Runtime preset"}
                 />
               </AdvancedGroup>
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { RuntimeCatalogEntry, RuntimeReadiness, SystemInfo } from "@/lib/engine";
-import { missingModelList, modelChoices, presetChoices } from "@/lib/catalog";
+import { missingModelList, modelChoices, preferredPresetId, presetChoices } from "@/lib/catalog";
 
 const windowsInfo: SystemInfo = {
   active_device: {
@@ -52,12 +52,18 @@ describe("runtime catalog choices", () => {
   test("preset choices reject Mac presets and keep loaded Windows presets", () => {
     const readiness = readinessWith({
       info: windowsInfo,
-      models: [macMlx(), windowsModel("corridorkey_fp16_1024.onnx"), windowsModel("corridorkey_fp16_2048.onnx")],
+      models: [
+        macMlx(),
+        windowsModel("corridorkey_fp16_512.onnx"),
+        windowsModel("corridorkey_fp16_1024.onnx"),
+        windowsModel("corridorkey_fp16_2048.onnx")
+      ],
       doctorModels: [
         doctorModel(macMlx(), {
           certifiedForActiveDevice: false,
           packagedForActiveTrack: false
         }),
+        doctorModel(windowsModel("corridorkey_fp16_512.onnx")),
         doctorModel(windowsModel("corridorkey_fp16_1024.onnx")),
         doctorModel(windowsModel("corridorkey_fp16_2048.onnx"), {
           certifiedForActiveDevice: false
@@ -65,6 +71,7 @@ describe("runtime catalog choices", () => {
       ],
       presets: [
         macPreset("mac-balanced", "Mac Balanced"),
+        windowsPreset("win-rtx-draft", "Windows RTX Draft", "corridorkey_fp16_512.onnx"),
         windowsPreset("win-rtx-balanced", "Windows RTX Balanced", "corridorkey_fp16_1024.onnx"),
         windowsPreset("win-rtx-max-quality", "Windows RTX Max Quality", "corridorkey_fp16_1024.onnx"),
         windowsPreset("win-rtx-ultra-quality", "Windows RTX Ultra Quality", "corridorkey_fp16_2048.onnx"),
@@ -75,10 +82,23 @@ describe("runtime catalog choices", () => {
     const names = presetChoices(readiness).map((preset) => preset.name);
 
     expect(names).toEqual([
+      "Windows RTX Draft",
       "Windows RTX Balanced",
       "Windows RTX Max Quality",
       "Windows RTX Ultra Quality"
     ]);
+  });
+
+  test("preferred preset restores a valid saved id before falling back to runtime default", () => {
+    const presets = [
+      { ...windowsPreset("win-rtx-balanced", "Windows RTX Balanced", "corridorkey_fp16_1024.onnx"), default_for_windows: false },
+      windowsPreset("win-rtx-draft", "Windows RTX Draft", "corridorkey_fp16_512.onnx"),
+      { ...windowsPreset("win-rtx-ultra-quality", "Windows RTX Ultra Quality", "corridorkey_fp16_2048.onnx"), default_for_windows: false }
+    ];
+
+    expect(preferredPresetId(presets, "win-rtx-ultra-quality")).toBe("win-rtx-ultra-quality");
+    expect(preferredPresetId(presets, "missing-preset")).toBe("win-rtx-draft");
+    expect(preferredPresetId([], "win-rtx-draft")).toBeNull();
   });
 
   test("degraded Windows readiness still keeps compatible loaded presets", () => {
@@ -418,7 +438,7 @@ function windowsPreset(
 ): RuntimeCatalogEntry {
   return {
     default_for_macos: false,
-    default_for_windows: id === "win-rtx-balanced",
+    default_for_windows: id === "win-rtx-draft",
     id,
     intended_platforms: ["windows_rtx_30_plus"],
     name,

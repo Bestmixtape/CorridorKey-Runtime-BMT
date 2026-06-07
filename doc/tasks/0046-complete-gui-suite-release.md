@@ -39,7 +39,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       default, no duplicated source/result tabs or tags, and only controls that
       are valid for the current media/job state are visible at the primary
       level.
-- [ ] The primary quality control is a compact preset dropdown that defaults to
+- [x] The primary quality control is a compact preset dropdown that defaults to
       the lowest compatible preset, persists the user's selected preset locally,
       and explains each option with model, resolution, backend, precision,
       tiling, and cost information when available.
@@ -75,7 +75,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       grounding summary to this task's Notes.
 - [x] Fix the preview proxy failure in `src/gui/src-tauri/src/lib.rs` with a
       regression test that proves FFmpeg can write the temporary MP4 output.
-- [ ] Update `src/gui/src/lib/job.ts`, `src/gui/src/components/workflow/*`, and
+- [x] Update `src/gui/src/lib/job.ts`, `src/gui/src/components/workflow/*`, and
       related tests so preset selection is compact, persisted, and explained.
 - [ ] Refactor the workflow shell so the sidebar starts collapsed, the viewer is
       the visual center, and primary controls are state-driven rather than
@@ -150,6 +150,27 @@ The product-facing `default` and `draft` aliases route to Draft on Windows RTX,
 while macOS keeps `mac-balanced`. Verification passed with
 `scripts\windows.ps1 -Task build -Preset debug` and
 `build\debug\tests\unit\test_unit.exe "[runtime]"`.
+
+GUI preset selection TDD slice:
+
+- Source C: `src/gui/src/components/workflow/ProcessFlow.tsx` previously picked
+  the first compatible preset every time the runtime catalog changed.
+- Source C: `src/gui/src/lib/job.ts` already persisted history in local storage,
+  but had no user preset preference.
+- Source C: `src/gui/src/components/workflow/QualityControlsPanel.tsx` exposed
+  both preset and manual model at the primary level, duplicating information the
+  preset contract already carries.
+- Source C: `src/gui/src/lib/workflowLabels.ts` owned option labels and is the
+  right local place for preset explanation text.
+
+Decision: keep the primary quality surface as one preset dropdown plus compact
+encoding controls. The dropdown restores a valid saved preset, otherwise chooses
+the runtime default flag, and explains the selected preset with resolution,
+model, backend, precision, tiling, and GPU-cost guidance. Manual model override
+now lives under Advanced controls. Verification passed with
+`pnpm vitest run src/lib/catalog.test.ts src/lib/job.test.ts
+src/lib/workflowLabels.test.ts`, `pnpm test:unit`, and `pnpm build` in
+`src/gui`.
 
 ## Definition of Done
 

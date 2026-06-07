@@ -63,6 +63,21 @@ export function presetChoices(readiness: RuntimeReadiness | null): RuntimeCatalo
   );
 }
 
+export function preferredPresetId(
+  presets: RuntimeCatalogEntry[],
+  savedPresetId: string | null | undefined
+): string | null {
+  const saved = stringField(savedPresetId);
+  if (saved && presets.some((preset) => presetIdentity(preset) === saved)) {
+    return saved;
+  }
+
+  const runtimeDefault = presets.find((preset) =>
+    preset.default_for_windows === true || preset.default_for_macos === true
+  );
+  return presetIdentity(runtimeDefault ?? presets[0] ?? null) || null;
+}
+
 export function missingModelList(readiness: RuntimeReadiness | null): string[] {
   const modelsValue = readiness?.models.value;
   const doctorValue = readiness?.doctor.value;
@@ -286,6 +301,10 @@ function modelIdentity(model: RuntimeCatalogEntry): string {
     stringField(model.name) ||
     stringField(model.path)
   );
+}
+
+function presetIdentity(preset: RuntimeCatalogEntry | null): string {
+  return stringField(preset?.id) || stringField(preset?.name);
 }
 
 function isActionableMissingModel(

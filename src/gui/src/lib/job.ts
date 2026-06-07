@@ -17,8 +17,15 @@ import {
 } from "@/lib/outputRecipe";
 
 const HISTORY_KEY = "corridorkey_history";
+const PRESET_PREFERENCE_KEY = "corridorkey_selected_preset";
 const MAX_HISTORY_RECORDS = 50;
 const MAX_LOG_LINES = 200;
+
+interface PreferenceStorage {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
+}
 
 export type JobTerminalStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 export type InputSourceSelectionMode = "file" | "folder";
@@ -118,6 +125,7 @@ interface JobState {
   setOutput: (path: string | null) => void;
   setHint: (path: string | null) => void;
   setSelectedPresetId: (presetId: string | null) => void;
+  restoreSelectedPresetId: (presetId: string | null) => void;
   setSelectedModelId: (modelId: string | null) => void;
   setVideoEncodeMode: (mode: "lossless" | "balanced") => void;
   setOutputRecipeSetting: <Key extends keyof OutputRecipeSettings>(
@@ -170,7 +178,11 @@ export const useJobStore = create<JobState>((set, get) => ({
   }),
   setOutput: (path) => set({ outputPath: path, error: null }),
   setHint: (path) => set({ hintPath: path }),
-  setSelectedPresetId: (presetId) => set({ selectedPresetId: presetId }),
+  setSelectedPresetId: (presetId) => {
+    persistSelectedPresetPreference(presetId);
+    set({ selectedPresetId: presetId });
+  },
+  restoreSelectedPresetId: (presetId) => set({ selectedPresetId: presetId }),
   setSelectedModelId: (modelId) => set({ selectedModelId: modelId }),
   setVideoEncodeMode: (mode) => set({ videoEncodeMode: mode }),
   setOutputRecipeSetting: (key, value) => set((state) => ({
@@ -474,6 +486,48 @@ function normalizeProgress(value: number | undefined): number {
 
   const percent = value <= 1 ? value * 100 : value;
   return Math.max(0, Math.min(100, percent));
+}
+
+export function loadSelectedPresetPreference(
+  storage: PreferenceStorage | null = browserPreferenceStorage()
+): string | null {
+  if (!storage) {
+    return null;
+  }
+
+  try {
+    const value = storage.getItem(PRESET_PREFERENCE_KEY)?.trim() ?? "";
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function persistSelectedPresetPreference(
+  presetId: string | null | undefined,
+  storage: PreferenceStorage | null = browserPreferenceStorage()
+): void {
+  if (!storage) {
+    return;
+  }
+
+  try {
+    const value = presetId?.trim() ?? "";
+    if (value.length === 0) {
+      storage.removeItem(PRESET_PREFERENCE_KEY);
+      return;
+    }
+    storage.setItem(PRESET_PREFERENCE_KEY, value);
+  } catch {
+    return;
+  }
+}
+
+function browserPreferenceStorage(): PreferenceStorage | null {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+  return localStorage;
 }
 
 function createRecordId(): string {

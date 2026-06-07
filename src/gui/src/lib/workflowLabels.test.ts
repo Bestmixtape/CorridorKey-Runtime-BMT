@@ -5,6 +5,7 @@ import {
   hintModeLabel,
   modelOptionLabel,
   modelOptionValue,
+  presetOptionHelp,
   presetOptionLabel,
   presetOptionValue,
   screenColorLabel
@@ -20,6 +21,32 @@ describe("workflow labels", () => {
       resolution: 1024,
       artifact_state: { state: "recommended" }
     })).toBe("green.onnx - 1024px - recommended");
+  });
+
+  test("explains preset resolution, model, backend, precision, tiling, and cost", () => {
+    const help = presetOptionHelp(
+      {
+        id: "win-rtx-draft",
+        name: "Windows RTX Draft",
+        recommended_model: "corridorkey_fp16_512.onnx",
+        params: {
+          enable_tiling: true,
+          target_resolution: 512
+        }
+      },
+      {
+        filename: "corridorkey_fp16_512.onnx",
+        recommended_backend: "tensorrt",
+        variant: "fp16"
+      }
+    );
+
+    expect(help).toContain("512px");
+    expect(help).toContain("corridorkey_fp16_512.onnx");
+    expect(help).toContain("TensorRT");
+    expect(help).toContain("FP16");
+    expect(help).toContain("tiling");
+    expect(help).toContain("light");
   });
 
   test("uses conservative readable labels for workflow modes", () => {

@@ -8,6 +8,41 @@ export function presetOptionLabel(entry: RuntimeCatalogEntry): string {
   return stringField(entry.name) || stringField(entry.id) || "Runtime preset";
 }
 
+export function presetOptionHelp(
+  entry: RuntimeCatalogEntry,
+  recommendedModel: RuntimeCatalogEntry | null = null
+): string {
+  const params = recordField(entry.params);
+  const modelName =
+    stringField(entry.recommended_model) ||
+    stringField(recommendedModel?.filename) ||
+    stringField(recommendedModel?.name);
+  const resolution =
+    numberField(params?.target_resolution) ||
+    numberField(recommendedModel?.resolution) ||
+    resolutionFromName(modelName);
+  const precision = precisionLabel(
+    stringField(recommendedModel?.variant) ||
+    modelName ||
+    stringField(recommendedModel?.filename)
+  );
+  const backend = backendLabel(
+    stringField(recommendedModel?.recommended_backend) ||
+    stringField(entry.recommended_backend)
+  );
+  const tiling = params?.enable_tiling === true ? "tiling enabled" : "single-frame pass";
+  const cost = costLabel(resolution);
+
+  return [
+    resolution > 0 ? `${resolution}px` : "runtime resolution",
+    precision,
+    backend,
+    tiling,
+    cost,
+    modelName
+  ].filter(Boolean).join(" - ");
+}
+
 export function modelOptionValue(entry: RuntimeCatalogEntry): string {
   return stringField(entry.path) || stringField(entry.filename) || stringField(entry.id) || stringField(entry.name) || "";
 }
@@ -73,4 +108,52 @@ function stringField(value: unknown): string {
 
 function numberField(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function recordField(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function resolutionFromName(value: string): number {
+  const match = value.match(/(?:^|_)(512|1024|1536|2048)(?:\.|_|$)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function precisionLabel(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized.includes("fp16")) return "FP16";
+  if (normalized.includes("fp32")) return "FP32";
+  if (normalized.includes("int8")) return "INT8";
+  if (normalized.includes("mlx")) return "MLX";
+  return "";
+}
+
+function backendLabel(value: string): string {
+  switch (value.toLowerCase()) {
+    case "tensorrt":
+      return "TensorRT";
+    case "torchtrt":
+      return "TorchTRT";
+    case "dml":
+    case "directml":
+      return "DirectML";
+    case "mlx":
+      return "MLX";
+    case "coreml":
+      return "CoreML";
+    case "cpu":
+      return "CPU";
+    default:
+      return displayModeLabel(value);
+  }
+}
+
+function costLabel(resolution: number): string {
+  if (resolution <= 0) return "";
+  if (resolution <= 512) return "light GPU cost";
+  if (resolution <= 1024) return "balanced GPU cost";
+  if (resolution <= 1536) return "high GPU cost";
+  return "maximum GPU cost";
 }

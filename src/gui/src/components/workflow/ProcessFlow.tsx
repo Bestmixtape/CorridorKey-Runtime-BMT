@@ -1,9 +1,10 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { useJobStore } from "@/lib/job";
+import { loadSelectedPresetPreference, useJobStore } from "@/lib/job";
 import { useEngineStore } from "@/lib/store";
 import { useEffect, useMemo, useState } from "react";
 import { selectAlphaHintAsset, selectSourceAsset } from "@/lib/preview";
+import { preferredPresetId } from "@/lib/catalog";
 import { jobTelemetrySummary } from "@/lib/jobTelemetry";
 import {
   isOutputPathReady,
@@ -30,7 +31,7 @@ export function ProcessFlow() {
     outputPath, setOutput,
     hintPath, setHint,
     selectedModelId, setSelectedModelId,
-    selectedPresetId, setSelectedPresetId,
+    selectedPresetId, setSelectedPresetId, restoreSelectedPresetId,
     videoEncodeMode, setVideoEncodeMode,
     outputRecipe, setOutputRecipeSetting,
     advancedSettings, setAdvancedSetting,
@@ -78,20 +79,18 @@ export function ProcessFlow() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (presetChoiceValues.length === 0) {
-      if (selectedPresetId) {
-        setSelectedPresetId(null);
-      }
-      return;
-    }
-
-    if (!selectedPresetId || !presetChoiceValues.includes(selectedPresetId)) {
-      setSelectedPresetId(presetChoiceValues[0]);
+    const preferredId = preferredPresetId(
+      presetChoices,
+      selectedPresetId ?? loadSelectedPresetPreference()
+    );
+    if (preferredId !== selectedPresetId) {
+      restoreSelectedPresetId(preferredId);
     }
   }, [
     presetChoiceValues.join("|"),
     selectedPresetId,
-    setSelectedPresetId
+    presetChoices,
+    restoreSelectedPresetId
   ]);
 
   useEffect(() => {
