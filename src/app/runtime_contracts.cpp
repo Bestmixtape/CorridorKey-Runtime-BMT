@@ -229,7 +229,13 @@ std::optional<int> windows_universal_resolution_ceiling(std::int64_t available_m
 
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
-    if (selector == "balanced" || selector == "default") {
+    if (selector == "default" || selector == "draft") {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+            return "win-rtx-draft";
+        }
+        return "mac-balanced";
+    }
+    if (selector == "balanced") {
         if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
             return "win-rtx-balanced";
         }
@@ -615,15 +621,30 @@ std::vector<PresetDefinition> preset_catalog() {
             .validated_hardware_tiers = {"apple_silicon_16gb_plus"},
         },
         PresetDefinition{
+            .id = "win-rtx-draft",
+            .name = "Windows RTX Draft",
+            .description =
+                "Default Windows RTX preset using the 512px FP16 model for fast startup, low memory "
+                "use, and the same Draft quality baseline exposed by the host plugins.",
+            .params = make_preset_inference_params(kRes512, false, true, kDefaultTilePadding),
+            .recommended_model = "corridorkey_fp16_512.onnx",
+            .intended_use = "windows_rtx_primary",
+            .default_for_macos = false,
+            .default_for_windows = true,
+            .validated_platforms = {"windows_rtx_30_plus"},
+            .intended_platforms = {"windows_rtx_30_plus"},
+            .validated_hardware_tiers = {"rtx_8gb_plus"},
+        },
+        PresetDefinition{
             .id = "win-rtx-balanced",
             .name = "Windows RTX Balanced",
-            .description = "Default Windows RTX preset with FP16 inference, runtime cache enabled, "
-                           "and tiling ready for portable bundles.",
+            .description = "Balanced Windows RTX preset with 1024px FP16 inference, runtime cache "
+                           "enabled, and tiling ready for portable bundles.",
             .params = make_preset_inference_params(kRes1024, false, true, kDefaultTilePadding),
             .recommended_model = "corridorkey_fp16_1024.onnx",
             .intended_use = "windows_rtx_primary",
             .default_for_macos = false,
-            .default_for_windows = true,
+            .default_for_windows = false,
             .validated_platforms = {"windows_rtx_30_plus"},
             .intended_platforms = {"windows_rtx_30_plus"},
             .validated_hardware_tiers = {"rtx_10gb_plus"},

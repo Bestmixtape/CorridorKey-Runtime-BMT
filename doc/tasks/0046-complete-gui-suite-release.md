@@ -133,6 +133,24 @@ explicit muxer and passes after the fix. Verification passed with
 a real proxy for `C:\Users\alexa\Downloads\Jordan4k_corridorkey.mov` into a
 temporary `*.mp4.libx264.tmp` output in 1.21 seconds before cleanup.
 
+Preset contract grounding and TDD slice:
+
+- Source C: `src/plugins/ofx/ofx_constants.hpp` defines the host plugin quality
+  ladder as Draft 512, High 1024, Ultra 1536, and Maximum 2048.
+- Source C: `src/plugins/adobe/adobe_effect_parameters.cpp` exposes the same
+  quality labels to Adobe hosts.
+- Source B: `C:\Dev\EZ-CorridorKey\ui\widgets\preferences_dialog.py` persists a
+  model-resolution dropdown instead of keeping model files as a primary action.
+- Source C: `src/app/runtime_contracts.cpp` is the shared catalog used by CLI,
+  diagnostics, plugins, and the GUI runtime bridge.
+
+Decision: Windows RTX default now resolves to `win-rtx-draft`, recommends
+`corridorkey_fp16_512.onnx`, and keeps `balanced` as the explicit 1024 preset.
+The product-facing `default` and `draft` aliases route to Draft on Windows RTX,
+while macOS keeps `mac-balanced`. Verification passed with
+`scripts\windows.ps1 -Task build -Preset debug` and
+`build\debug\tests\unit\test_unit.exe "[runtime]"`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:

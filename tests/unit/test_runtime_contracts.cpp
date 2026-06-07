@@ -276,7 +276,9 @@ TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
         std::find_if(presets.begin(), presets.end(),
                      [](const PresetDefinition& preset) { return preset.default_for_windows; });
     REQUIRE(windows_default_it != presets.end());
-    REQUIRE(windows_default_it->id == "win-rtx-balanced");
+    REQUIRE(windows_default_it->id == "win-rtx-draft");
+    REQUIRE(windows_default_it->params.target_resolution == 512);
+    REQUIRE(windows_default_it->recommended_model == "corridorkey_fp16_512.onnx");
 }
 
 TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
@@ -298,6 +300,18 @@ TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
         REQUIRE(balanced->id == "win-rtx-balanced");
     } else {
         REQUIRE(balanced->id == "mac-balanced");
+    }
+
+    auto default_alias = find_preset_by_selector("default");
+    REQUIRE(default_alias.has_value());
+    auto draft_alias = find_preset_by_selector("draft");
+    REQUIRE(draft_alias.has_value());
+    if (windows_rtx_defaults) {
+        REQUIRE(default_alias->id == "win-rtx-draft");
+        REQUIRE(draft_alias->id == "win-rtx-draft");
+    } else {
+        REQUIRE(default_alias->id == "mac-balanced");
+        REQUIRE(draft_alias->id == "mac-balanced");
     }
 
     auto max_quality = find_preset_by_selector("max");
@@ -339,13 +353,13 @@ TEST_CASE("default model selection stays aligned with device intent", "[unit][ru
 
     auto windows_default = default_preset_for_capabilities(windows_capabilities);
     REQUIRE(windows_default.has_value());
-    REQUIRE(windows_default->id == "win-rtx-balanced");
+    REQUIRE(windows_default->id == "win-rtx-draft");
 
     auto windows_rtx_model = default_model_for_request(
         windows_capabilities, DeviceInfo{"NVIDIA GeForce RTX 3080", 10240, Backend::TensorRT},
         windows_default);
     REQUIRE(windows_rtx_model.has_value());
-    REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_1024.onnx");
+    REQUIRE(windows_rtx_model->filename == "corridorkey_fp16_512.onnx");
 
     // Windows CPU rendering retired with INT8: Backend::CPU yields no
     // catalog match. Callers must surface "no supported render backend"
@@ -381,7 +395,7 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
                                                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                                windows_default, "green");
         REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_fp16_1024.onnx");
+        REQUIRE(entry->filename == "corridorkey_fp16_512.onnx");
         REQUIRE(entry->screen_color == "green");
     }
 
@@ -413,7 +427,7 @@ TEST_CASE("blue screen routes to the dynamic CorridorKeyBlue artifact on Windows
                                                DeviceInfo{"RTX 3080", 10240, Backend::TensorRT},
                                                windows_default);
         REQUIRE(entry.has_value());
-        REQUIRE(entry->filename == "corridorkey_fp16_1024.onnx");
+        REQUIRE(entry->filename == "corridorkey_fp16_512.onnx");
         REQUIRE(entry->screen_color == "green");
     }
 
@@ -594,16 +608,27 @@ TEST_CASE("artifact runtime state separates packaged, certified, and recommended
     const auto windows_rtx_models_dir = write_models_inventory_fixture("windows-rtx");
     ScopedModelsDirOverride windows_rtx_override(windows_rtx_models_dir);
 
-    auto fp16_1024 = find_model_by_filename("corridorkey_fp16_1024.onnx");
-    REQUIRE(fp16_1024.has_value());
+    auto fp16_512 = find_model_by_filename("corridorkey_fp16_512.onnx");
+    REQUIRE(fp16_512.has_value());
     auto recommended_state =
-        artifact_runtime_state_for_device(*fp16_1024, windows_capabilities, rtx_3080, true);
+        artifact_runtime_state_for_device(*fp16_512, windows_capabilities, rtx_3080, true);
     REQUIRE(recommended_state.packaged_for_active_track);
     REQUIRE(recommended_state.present);
     REQUIRE(recommended_state.certified_for_active_track);
     REQUIRE(recommended_state.certified_for_active_device);
     REQUIRE(recommended_state.recommended_for_active_device);
     REQUIRE(recommended_state.state == "recommended");
+
+    auto fp16_1024 = find_model_by_filename("corridorkey_fp16_1024.onnx");
+    REQUIRE(fp16_1024.has_value());
+    auto balanced_state =
+        artifact_runtime_state_for_device(*fp16_1024, windows_capabilities, rtx_3080, true);
+    REQUIRE(balanced_state.packaged_for_active_track);
+    REQUIRE(balanced_state.present);
+    REQUIRE(balanced_state.certified_for_active_track);
+    REQUIRE(balanced_state.certified_for_active_device);
+    REQUIRE_FALSE(balanced_state.recommended_for_active_device);
+    REQUIRE(balanced_state.state == "certified");
 
     auto fp16_1536 = find_model_by_filename("corridorkey_fp16_1536.onnx");
     REQUIRE(fp16_1536.has_value());
