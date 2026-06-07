@@ -1688,6 +1688,100 @@ function Test-CorridorKeyDoctorMissingModelBundleFailuresOnly {
     return $true
 }
 
+function Test-CorridorKeyDoctorAdobeOnlinePayloadFailuresOnly {
+    param(
+        [object]$Doctor,
+        [string[]]$MissingModels = @(),
+        [string[]]$MissingRuntimePacks = @()
+    )
+
+    if ($null -eq $Doctor -or @($MissingRuntimePacks) -notcontains "blue-runtime") {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Doctor -Name "bundle")) {
+        return $false
+    }
+
+    $bundle = $Doctor.bundle
+    if ($null -eq $bundle) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $bundle -Name "layout_kind") -and
+        [string]$bundle.layout_kind -ne "windows_adobe") {
+        return $false
+    }
+
+    foreach ($layoutProperty in @("packaged_layout_detected", "runtime_backend_bundle_ready")) {
+        if ((Test-CorridorKeyPsProperty -Object $bundle -Name $layoutProperty) -and
+            (-not [bool]$bundle.$layoutProperty)) {
+            return $false
+        }
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $bundle -Name "blue_runtime")) {
+        return $false
+    }
+
+    $blueRuntime = $bundle.blue_runtime
+    if ($null -eq $blueRuntime) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "required") -and
+        (-not [bool]$blueRuntime.required)) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "ready") -and
+        [bool]$blueRuntime.ready) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "corridorkey_torchtrt_dll_found") -and
+        (-not [bool]$blueRuntime.corridorkey_torchtrt_dll_found)) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "torchtrt_dll_found") -and
+        [bool]$blueRuntime.torchtrt_dll_found) {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $bundle -Name "packaged_models")) {
+        return $false
+    }
+
+    foreach ($modelEntry in @($bundle.packaged_models)) {
+        if ($null -eq $modelEntry -or -not (Test-CorridorKeyPsProperty -Object $modelEntry -Name "filename")) {
+            return $false
+        }
+
+        $found = $true
+        if (Test-CorridorKeyPsProperty -Object $modelEntry -Name "found") {
+            $found = [bool]$modelEntry.found
+        }
+        $usable = $found
+        if (Test-CorridorKeyPsProperty -Object $modelEntry -Name "usable") {
+            $usable = [bool]$modelEntry.usable
+        }
+        if ($found -and $usable) {
+            continue
+        }
+
+        $filename = [string]$modelEntry.filename
+        if ([string]::IsNullOrWhiteSpace($filename) -or @($MissingModels) -notcontains $filename) {
+            return $false
+        }
+        if ($found) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Read-CorridorKeyBundleValidationReport {
     param([string]$ValidationReportPath)
 
@@ -1885,11 +1979,18 @@ function Get-CorridorKeyAdobePackageValidationIssues {
         $doctorFailureTolerated =
             (Test-CorridorKeyPsProperty -Object $Validation.doctor -Name "failure_tolerated") -and
             [bool]$Validation.doctor.failure_tolerated
+        $doctorFailureReason = ""
+        if (Test-CorridorKeyPsProperty -Object $Validation.doctor -Name "failure_reason") {
+            $doctorFailureReason = [string]$Validation.doctor.failure_reason
+        }
+        $onlineRuntimePackFailureTolerated =
+            $doctorFailureReason -eq "Packaged runtime doctor reported failures only for the online blue-runtime pack."
         if (-not $doctorSucceeded -and -not $doctorFailureTolerated) {
             $issues += "Adobe package doctor did not succeed."
         }
-        if ($doctorFailureTolerated -and $missingModelCount -le 0) {
-            $issues += "Adobe package doctor failure was tolerated without missing model state."
+        if ($doctorFailureTolerated -and $missingModelCount -le 0 -and
+            -not $onlineRuntimePackFailureTolerated) {
+            $issues += "Adobe package doctor failure was tolerated without missing model state or online runtime-pack state."
         }
     }
 

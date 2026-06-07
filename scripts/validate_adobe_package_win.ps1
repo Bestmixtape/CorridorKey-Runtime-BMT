@@ -206,9 +206,17 @@ if ($doctorSucceeded -and ((-not $doctorHealthy) -or (-not $doctorBundleHealthy)
     $missingModelOnlyFailures =
         (Test-CorridorKeyDoctorMissingModelProbeFailuresOnly -Doctor $doctor -MissingModels $missingModels) -or
         (Test-CorridorKeyDoctorMissingModelBundleFailuresOnly -Doctor $doctor -MissingModels $missingModels)
+    $adobeOnlinePayloadOnlyFailures =
+        Test-CorridorKeyDoctorAdobeOnlinePayloadFailuresOnly `
+            -Doctor $doctor `
+            -MissingModels $missingModels `
+            -MissingRuntimePacks @("blue-runtime")
     if ($missingModelOnlyFailures) {
         $doctorFailureTolerated = $true
         $doctorFailureReason = "Packaged runtime doctor reported failures only for missing model(s)."
+    } elseif ($adobeOnlinePayloadOnlyFailures) {
+        $doctorFailureTolerated = $true
+        $doctorFailureReason = "Packaged runtime doctor reported failures only for the online blue-runtime pack."
     } elseif (-not $doctorBundleHealthy) {
         throw "Packaged runtime doctor reported an unhealthy Adobe bundle layout. See $doctorReportPath."
     } else {

@@ -71,6 +71,17 @@ runtime-only metadata, component optionality, preserved offline/staged behavior,
 online optional payload downloads, non-render online builds with externalized
 optional payloads, and invalid optional payload sizes.
 
+### 2026-06-07
+
+Hardened Adobe online package validation for the suite model where the Blue
+runtime is an installer-managed online pack. The Adobe validator now tolerates
+only the pre-install state where `blue-runtime` is pending while the Adobe
+bundle, shared runtime wrapper, and packaged models are otherwise valid. A real
+backend bundle failure or an unrelated tolerated doctor failure still fails
+validation. Regression coverage was added through the Windows doctor
+missing-model tolerance test, and the online Adobe and suite package flows were
+rebuilt through `scripts/windows.ps1`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
