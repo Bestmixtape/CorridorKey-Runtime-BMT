@@ -109,6 +109,11 @@ export function JobStatusPanel({
             <div className="text-sm font-bold text-zinc-50">
               {jobStatusTitle(terminalStatus, Boolean(error), currentProgress)}
             </div>
+            {telemetry.headlineLabel !== "n/a" && (
+              <div className="mt-1 text-xs font-bold text-brand">
+                {telemetry.headlineLabel}
+              </div>
+            )}
             <div className={cn("mt-1 break-words text-xs", error ? "text-destructive" : "text-zinc-400")}>
               {statusMessage}
             </div>
@@ -118,10 +123,7 @@ export function JobStatusPanel({
         <div className="flex min-w-0 flex-wrap gap-2">
           {activeBackend && <StatusPill label={activeBackend} />}
           <StatusPill label={`Elapsed ${telemetry.elapsedLabel}`} />
-          {telemetry.etaLabel !== "n/a" && <StatusPill label={`ETA ${telemetry.etaLabel}`} />}
-          {telemetry.stageLabel !== "n/a" && <StatusPill label={`Stage ${telemetry.stageLabel}`} />}
           {telemetry.frameLabel !== "n/a" && <StatusPill label={telemetry.frameLabel} />}
-          {telemetry.fpsLabel !== "n/a" && <StatusPill label={`Render ${telemetry.fpsLabel}`} />}
           {telemetry.throughputLabel !== "n/a" && <StatusPill label={`Throughput ${telemetry.throughputLabel}`} />}
           {telemetry.decodeFpsLabel !== "n/a" && <StatusPill label={telemetry.decodeFpsLabel} />}
           {telemetry.encodeFpsLabel !== "n/a" && <StatusPill label={telemetry.encodeFpsLabel} />}

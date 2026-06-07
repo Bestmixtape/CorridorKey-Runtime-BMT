@@ -32,6 +32,7 @@ export interface JobTelemetryInput {
 export interface JobTelemetrySummary {
   elapsedLabel: string;
   etaLabel: string;
+  headlineLabel: string;
   fpsLabel: string;
   frameLabel: string;
   stageLabel: string;
@@ -49,13 +50,17 @@ export interface JobTelemetrySummary {
 export function jobTelemetrySummary(input: JobTelemetryInput): JobTelemetrySummary {
   const elapsedMs = elapsedMilliseconds(input.startedAtMs, input.finishedAtMs ?? input.nowMs);
   const etaMs = etaMilliseconds(input.progressPercent, elapsedMs);
+  const etaLabel = etaMs === null ? "n/a" : formatSeconds(etaMs);
+  const fpsLabel = formatFps(metricNumber(input.metrics?.render_fps) ?? frameFps(input.timings ?? []));
+  const stage = stageLabel(input.metrics);
 
   return {
     elapsedLabel: formatSeconds(elapsedMs),
-    etaLabel: etaMs === null ? "n/a" : formatSeconds(etaMs),
-    fpsLabel: formatFps(metricNumber(input.metrics?.render_fps) ?? frameFps(input.timings ?? [])),
+    etaLabel,
+    headlineLabel: headlineLabel(stage, fpsLabel, etaLabel),
+    fpsLabel,
     frameLabel: frameLabel(input.metrics),
-    stageLabel: stageLabel(input.metrics),
+    stageLabel: stage,
     workerLabel: workerLabel(input.metrics),
     decodeFpsLabel: fpsKindLabel(input.metrics?.decode_fps, "decode"),
     encodeFpsLabel: fpsKindLabel(input.metrics?.encode_fps, "encode"),
@@ -66,6 +71,14 @@ export function jobTelemetrySummary(input: JobTelemetryInput): JobTelemetrySumma
     vramLabel: memoryLabel(input.metrics?.vram_usage_mb, "VRAM"),
     stageCount: input.timings?.length ?? 0
   };
+}
+
+function headlineLabel(stage: string, fps: string, eta: string): string {
+  return [
+    stage !== "n/a" ? stage : "",
+    fps !== "n/a" ? fps : "",
+    eta !== "n/a" ? `ETA ${eta}` : ""
+  ].filter(Boolean).join(" - ") || "n/a";
 }
 
 function elapsedMilliseconds(startedAtMs: number | null, endMs: number): number {

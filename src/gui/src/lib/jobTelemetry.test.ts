@@ -27,6 +27,7 @@ describe("job telemetry", () => {
     expect(summary).toEqual({
       elapsedLabel: "10.0s",
       etaLabel: "30.0s",
+      headlineLabel: "Matte - 18.50 fps - ETA 30.0s",
       fpsLabel: "18.50 fps",
       frameLabel: "12 / 48 frames",
       stageLabel: "Matte",
@@ -54,6 +55,7 @@ describe("job telemetry", () => {
     });
 
     expect(summary.fpsLabel).toBe("24.00 fps");
+    expect(summary.headlineLabel).toBe("24.00 fps");
     expect(summary.throughputLabel).toBe("n/a");
     expect(summary.frameLabel).toBe("n/a");
     expect(summary.stageLabel).toBe("n/a");
@@ -83,6 +85,7 @@ describe("job telemetry", () => {
     });
 
     expect(summary.stageLabel).toBe("Proxy generation");
+    expect(summary.headlineLabel).toBe("Proxy generation - ETA 4.0s");
     expect(summary.proxyLabel).toBe("Building preview");
     expect(summary.frameLabel).toBe("n/a");
     expect(summary.fpsLabel).toBe("n/a");

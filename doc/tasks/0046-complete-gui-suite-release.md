@@ -50,7 +50,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       composited review output, EXR sequence outputs, PNG sequence when the
       runtime reports support, configurable preview background, and no runnable
       merge/background/color option without an App/Core contract.
-- [ ] During processing, the job status headline shows FPS and ETA when enough
+- [x] During processing, the job status headline shows FPS and ETA when enough
       data exists, with phase/frame/backend/preset visible and technical logs
       or rich metrics behind disclosure.
 - [ ] On completion, the workbench switches to Result automatically and loads a
@@ -85,7 +85,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [ ] Audit and wire export gating across `src/gui/src/lib/outputRecipe.ts`,
       `src/gui/src/components/workflow/OutputRecipePanel.tsx`, Tauri process
       payloads, CLI/App contracts, and tests.
-- [ ] Add render status headline behavior in the job telemetry/status
+- [x] Add render status headline behavior in the job telemetry/status
       components and prove FPS/ETA fallback behavior with tests.
 - [ ] Implement Result auto-focus and preview retry/error reporting in the
       viewer flow, with E2E coverage for completed jobs.
@@ -219,6 +219,20 @@ tests and capabilities gate instead of occupying the main panel. Verification
 passed with `pnpm vitest run src/lib/outputRecipe.test.ts`, `pnpm test:unit`,
 `pnpm build`, and a Playwright DOM check confirming the initial output panel
 shows only `Movie`.
+
+Render telemetry headline TDD slice:
+
+- Source C: `src/gui/src/lib/jobTelemetry.ts` already computed ETA, render FPS,
+  phase, frame counts, workers, throughput, and resource labels.
+- Source C: `src/gui/src/components/workflow/JobStatusPanel.tsx` displayed that
+  information as many equally weighted pills, which made the most useful
+  render feedback hard to scan during processing.
+
+Decision: the status headline now promotes phase, render FPS, and ETA when
+available, while the pill row keeps supporting details such as elapsed time,
+frame count, throughput, workers, backend, preset, output, and resources.
+Verification passed with `pnpm vitest run src/lib/jobTelemetry.test.ts`,
+`pnpm test:unit`, and `pnpm build`.
 
 ## Definition of Done
 
