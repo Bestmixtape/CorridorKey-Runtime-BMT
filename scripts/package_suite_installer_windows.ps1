@@ -583,8 +583,8 @@ function Add-CorridorKeySuitePathRegistrationSections {
     param([System.Collections.Generic.List[string]]$Lines)
 
     $helperPath = '{#SharedRuntimeRoot}\Contents\Win64\update_path.ps1'
-    $installParameters = '-NoProfile -ExecutionPolicy Bypass -File """' + $helperPath + '""" -Mode Install'
-    $uninstallParameters = '-NoProfile -ExecutionPolicy Bypass -File """' + $helperPath + '""" -Mode Uninstall'
+    $installParameters = '-NoProfile -ExecutionPolicy Bypass -File ""' + $helperPath + '"" -Mode Install'
+    $uninstallParameters = '-NoProfile -ExecutionPolicy Bypass -File ""' + $helperPath + '"" -Mode Uninstall'
 
     Add-CorridorKeySuiteLine -Lines $Lines
     Add-CorridorKeySuiteLine -Lines $Lines -Value "[Run]"
