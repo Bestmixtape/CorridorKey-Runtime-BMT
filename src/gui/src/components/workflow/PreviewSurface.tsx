@@ -36,16 +36,27 @@ export interface PreviewVideoSync {
   syncFrom: (role: PreviewSyncRole) => void;
 }
 
+export interface PreviewPlaybackSnapshot {
+  currentTime: number;
+  duration: number;
+  paused: boolean;
+  playbackRate: number;
+}
+
 export function PreviewSurface({
   item,
   outputRecipe,
   fill = false,
-  videoSync
+  videoSync,
+  playbackSnapshot,
+  onPlaybackSnapshot
 }: {
   item: PreviewItem;
   outputRecipe: OutputRecipeSettings;
   fill?: boolean;
   videoSync?: PreviewVideoSync;
+  playbackSnapshot?: PreviewPlaybackSnapshot | null;
+  onPlaybackSnapshot?: (snapshot: PreviewPlaybackSnapshot) => void;
 }) {
   const [proxyPath, setProxyPath] = useState<string | null>(null);
   const [isCreatingProxy, setIsCreatingProxy] = useState(false);
@@ -114,6 +125,37 @@ export function PreviewSurface({
         if (requestIdRef.current !== requestId) return;
         setIsCreatingProxy(false);
       });
+  };
+
+  const emitPlaybackSnapshot = (video: HTMLVideoElement) => {
+    onPlaybackSnapshot?.({
+      currentTime: video.currentTime,
+      duration: video.duration,
+      paused: video.paused,
+      playbackRate: video.playbackRate
+    });
+  };
+
+  const restorePlaybackSnapshot = (video: HTMLVideoElement) => {
+    if (!playbackSnapshot) return;
+
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null;
+    const snapshotDuration = Number.isFinite(playbackSnapshot.duration) && playbackSnapshot.duration > 0
+      ? playbackSnapshot.duration
+      : null;
+    const targetTime = duration && snapshotDuration
+      ? duration * (playbackSnapshot.currentTime / snapshotDuration)
+      : playbackSnapshot.currentTime;
+
+    if (Number.isFinite(targetTime) && targetTime > 0) {
+      video.currentTime = Math.max(0, duration ? Math.min(targetTime, duration) : targetTime);
+    }
+    if (Number.isFinite(playbackSnapshot.playbackRate) && playbackSnapshot.playbackRate > 0) {
+      video.playbackRate = playbackSnapshot.playbackRate;
+    }
+    if (!playbackSnapshot.paused && !fill) {
+      void video.play().catch(() => undefined);
+    }
   };
 
   if (isCreatingProxy) {
@@ -186,15 +228,32 @@ export function PreviewSurface({
           playsInline
           preload="metadata"
           onError={handleVideoError}
-          onLoadedMetadata={() => {
+          onLoadedMetadata={(event) => {
             setPreviewError(null);
+            restorePlaybackSnapshot(event.currentTarget);
+            emitPlaybackSnapshot(event.currentTarget);
             videoSync?.syncFrom(videoSync.role);
           }}
-          onPlay={() => videoSync?.syncFrom(videoSync.role)}
-          onPause={() => videoSync?.syncFrom(videoSync.role)}
-          onRateChange={() => videoSync?.syncFrom(videoSync.role)}
-          onSeeked={() => videoSync?.syncFrom(videoSync.role)}
-          onTimeUpdate={() => videoSync?.syncFrom(videoSync.role)}
+          onPlay={(event) => {
+            emitPlaybackSnapshot(event.currentTarget);
+            videoSync?.syncFrom(videoSync.role);
+          }}
+          onPause={(event) => {
+            emitPlaybackSnapshot(event.currentTarget);
+            videoSync?.syncFrom(videoSync.role);
+          }}
+          onRateChange={(event) => {
+            emitPlaybackSnapshot(event.currentTarget);
+            videoSync?.syncFrom(videoSync.role);
+          }}
+          onSeeked={(event) => {
+            emitPlaybackSnapshot(event.currentTarget);
+            videoSync?.syncFrom(videoSync.role);
+          }}
+          onTimeUpdate={(event) => {
+            emitPlaybackSnapshot(event.currentTarget);
+            videoSync?.syncFrom(videoSync.role);
+          }}
         />
         {usingProxy && (
           <div className="pointer-events-none absolute left-4 top-4 rounded bg-zinc-950/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400">

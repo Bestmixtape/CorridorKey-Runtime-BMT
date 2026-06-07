@@ -158,6 +158,23 @@ fn path_to_string(path: &Path) -> String {
     path.display().to_string()
 }
 
+#[cfg(target_os = "windows")]
+fn preview_ffmpeg_path_arg(path: &Path) -> String {
+    let value = path_to_string(path);
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = value.strip_prefix(r"\\?\") {
+        return rest.to_string();
+    }
+    value
+}
+
+#[cfg(not(target_os = "windows"))]
+fn preview_ffmpeg_path_arg(path: &Path) -> String {
+    path_to_string(path)
+}
+
 fn canonical_preview_path(path: &Path) -> Result<PathBuf, RuntimeCommandError> {
     if !path.is_file() {
         return Err(runtime_command_error(
@@ -1852,8 +1869,8 @@ fn run_preview_ffmpeg_with_timeout(
     timeout: Duration,
 ) -> std::io::Result<std::process::Output> {
     let mut command = Command::new(ffmpeg_path);
-    let source_arg = path_to_string(source_path);
-    let proxy_arg = path_to_string(proxy_path);
+    let source_arg = preview_ffmpeg_path_arg(source_path);
+    let proxy_arg = preview_ffmpeg_path_arg(proxy_path);
 
     command.args([
         "-y",
@@ -2028,7 +2045,7 @@ mod tests {
         build_process_args, candidate_preview_ffmpeg_paths, candidate_runtime_roots,
         collect_runtime_readiness_for_path, create_preview_proxy_in_cache, engine_binary_names,
         enrich_job_event_for_gui, is_preview_asset_allowed, is_terminal_job_event_type,
-        job_event_type_from_line, kill_active_child, path_to_string,
+        job_event_type_from_line, kill_active_child, path_to_string, preview_ffmpeg_path_arg,
         preview_artifact_path_from_job_event, preview_ffmpeg_binary_name, preview_proxy_path,
         preview_source_sample_offsets, primary_engine_binary_name, registered_preview_asset_path,
         remember_preview_asset, resolve_preview_ffmpeg_candidate, resolve_selected_model_path,
@@ -2192,6 +2209,19 @@ mod tests {
                     .join("Win64")
                     .join(preview_ffmpeg_binary_name())
             )
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn preview_ffmpeg_path_arg_strips_windows_verbatim_prefixes() {
+        assert_eq!(
+            preview_ffmpeg_path_arg(Path::new(r"\\?\C:\Users\alexa\Downloads\Input_corridorkey.mov")),
+            r"C:\Users\alexa\Downloads\Input_corridorkey.mov"
+        );
+        assert_eq!(
+            preview_ffmpeg_path_arg(Path::new(r"\\?\UNC\server\share\result.mov")),
+            r"\\server\share\result.mov"
         );
     }
 

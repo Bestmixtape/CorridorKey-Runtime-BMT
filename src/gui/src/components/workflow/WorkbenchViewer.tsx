@@ -19,7 +19,8 @@ import { ComparisonSurface } from "@/components/workflow/ComparisonSurface";
 import {
   PreviewSurface,
   type PreviewItem,
-  type PreviewMode
+  type PreviewMode,
+  type PreviewPlaybackSnapshot
 } from "@/components/workflow/PreviewSurface";
 
 export function WorkbenchViewer({
@@ -46,6 +47,7 @@ export function WorkbenchViewer({
   const [comparisonPairId, setComparisonPairId] = useState<ViewerComparisonPairId>("source-result");
   const [comparisonPosition, setComparisonPosition] = useState(50);
   const [comparisonSwapped, setComparisonSwapped] = useState(false);
+  const [singlePlaybackSnapshot, setSinglePlaybackSnapshot] = useState<PreviewPlaybackSnapshot | null>(null);
   const previewItems: PreviewItem[] = [
     {
       id: "source",
@@ -98,6 +100,7 @@ export function WorkbenchViewer({
     setComparisonPairId("source-result");
     setComparisonPosition(50);
     setComparisonSwapped(false);
+    setSinglePlaybackSnapshot(null);
   }, [resetCount]);
 
   return (
@@ -202,7 +205,12 @@ export function WorkbenchViewer({
             onPositionChange={setComparisonPosition}
           />
         ) : (
-          <PreviewSurface item={activeItem} outputRecipe={outputRecipe} />
+          <PreviewSurface
+            item={activeItem}
+            outputRecipe={outputRecipe}
+            playbackSnapshot={singlePlaybackSnapshot}
+            onPlaybackSnapshot={setSinglePlaybackSnapshot}
+          />
         )}
       </div>
     </section>
