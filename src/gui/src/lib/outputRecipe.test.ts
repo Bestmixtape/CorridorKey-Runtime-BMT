@@ -5,6 +5,7 @@ import {
   isOutputPathReady,
   normalizeOutputRecipe,
   outputArtifactOptions,
+  primaryOutputArtifactOptions,
   outputRecipeControlOptions,
   outputRecipeChips,
   outputRecipeLabel,
@@ -102,6 +103,16 @@ describe("output recipe", () => {
       ["png_sequence", false],
       ["preview_only", false]
     ]);
+  });
+
+  test("keeps primary output choices limited to currently runnable artifacts", () => {
+    expect(
+      primaryOutputArtifactOptions(outputArtifactOptions("C:\\Shots\\plate.mov")).map((option) => option.value)
+    ).toEqual(["movie"]);
+
+    expect(
+      primaryOutputArtifactOptions(outputArtifactOptions("C:\\Shots\\plate.exr")).map((option) => option.value)
+    ).toEqual(["exr_sequence"]);
   });
 
   test("uses runtime capabilities to reopen future output families", () => {

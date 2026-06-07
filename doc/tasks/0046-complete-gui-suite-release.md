@@ -205,6 +205,21 @@ the viewer bounds. Verification passed with
 `pnpm build`, and a Playwright DOM check confirming no compare controls render
 when fewer than two buffers are available.
 
+Output recipe primary-option TDD slice:
+
+- Source C: `src/gui/src/lib/outputRecipe.ts` already computes artifact
+  support from the current media type and runtime output contract.
+- Source C: `src/gui/src/components/workflow/OutputRecipePanel.tsx` still
+  displayed disabled artifact families as primary choices, which made unsupported
+  PNG/preview/sequence actions look like runnable workflow decisions.
+
+Decision: the primary output selector now shows only currently runnable artifact
+families; future/runtime-blocked families remain represented in the contract
+tests and capabilities gate instead of occupying the main panel. Verification
+passed with `pnpm vitest run src/lib/outputRecipe.test.ts`, `pnpm test:unit`,
+`pnpm build`, and a Playwright DOM check confirming the initial output panel
+shows only `Movie`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:

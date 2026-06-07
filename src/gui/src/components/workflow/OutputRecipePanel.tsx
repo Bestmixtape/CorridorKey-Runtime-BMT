@@ -6,7 +6,8 @@ import {
   type OutputColorIntent,
   type OutputRecipeControlOptions,
   type OutputRecipeSettings,
-  type PreviewBackgroundMode
+  type PreviewBackgroundMode,
+  primaryOutputArtifactOptions
 } from "@/lib/outputRecipe";
 import { artifactOptionStatusLabel } from "@/lib/workflowLabels";
 import { cn } from "@/lib/utils";
@@ -35,12 +36,14 @@ export function OutputRecipePanel({
   onSelectReplacementMedia: () => void;
   onClearReplacementMedia: () => void;
 }) {
+  const primaryArtifactOptions = primaryOutputArtifactOptions(artifactOptions);
+
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 shadow-apple">
       <PanelTitle icon={FileImage} label="Output Recipe" />
       <div className="mt-4 space-y-4">
         <div className="grid grid-cols-2 gap-2">
-          {artifactOptions.map((option) => (
+          {primaryArtifactOptions.map((option) => (
             <button
               key={option.value}
               type="button"

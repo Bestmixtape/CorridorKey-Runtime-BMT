@@ -141,6 +141,12 @@ export function outputArtifactOptions(
   ];
 }
 
+export function primaryOutputArtifactOptions(
+  options: OutputArtifactOption[]
+): OutputArtifactOption[] {
+  return options.filter((option) => option.enabled);
+}
+
 export function preferredOutputArtifactFamily(
   inputPath: string | null,
   recipe: OutputRecipeSettings,
