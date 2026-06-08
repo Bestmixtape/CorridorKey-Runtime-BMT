@@ -163,10 +163,23 @@ describe("output recipe", () => {
 
   test("checks output path readiness per artifact family", () => {
     expect(isOutputPathReady("C:\\Shots\\result.mov", DEFAULT_OUTPUT_RECIPE)).toBe(true);
+    expect(isOutputPathReady("C:\\Shots\\result.mp4", DEFAULT_OUTPUT_RECIPE)).toBe(true);
+    expect(isOutputPathReady("C:\\Shots\\result.exr", DEFAULT_OUTPUT_RECIPE)).toBe(false);
     expect(isOutputPathReady("C:\\Shots\\result", DEFAULT_OUTPUT_RECIPE)).toBe(false);
     expect(
       isOutputPathReady("C:\\Shots\\result_exr", normalizeOutputRecipe({ artifactFamily: "exr_sequence" }))
     ).toBe(true);
+  });
+
+  test("replaces invalid movie extensions with a runnable movie suggestion", () => {
+    expect(
+      suggestOutputPathForRecipe(
+        "C:\\Shots\\Jordan4k.mp4",
+        "C:\\Users\\Smoke\\Downloads\\Jordan4k_corridorkey.exr",
+        "C:\\Users\\Smoke\\Downloads",
+        DEFAULT_OUTPUT_RECIPE
+      )
+    ).toBe("C:\\Users\\Smoke\\Downloads\\Jordan4k_corridorkey.mov");
   });
 
   test("builds concise user-facing labels and chips", () => {

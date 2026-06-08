@@ -46,7 +46,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [ ] Manual model selection and other advanced runtime controls are removed
       from the primary flow and exposed through contextual disclosure sections
       only when the runtime contract supports them.
-- [ ] Export/Delivery supports the agreed professional set: MOV/MP4
+- [x] Export/Delivery supports the agreed professional set: MOV/MP4
       composited review output, EXR sequence outputs, PNG sequence when the
       runtime reports support, configurable preview background, and no runnable
       merge/background/color option without an App/Core contract.
@@ -82,7 +82,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       duplicated.
 - [ ] Replace the global advanced panel with contextual disclosure sections for
       preset/runtime, output/export, alpha hint, processing, and diagnostics.
-- [ ] Audit and wire export gating across `src/gui/src/lib/outputRecipe.ts`,
+- [x] Audit and wire export gating across `src/gui/src/lib/outputRecipe.ts`,
       `src/gui/src/components/workflow/OutputRecipePanel.tsx`, Tauri process
       payloads, CLI/App contracts, and tests.
 - [x] Add render status headline behavior in the job telemetry/status
@@ -327,6 +327,28 @@ the selected preset is the only viable model path, the override stays hidden and
 screen-color context follows the preset's recommended model. Verification
 passed with `pnpm smoke:readiness`, `pnpm test:unit`, and `pnpm build` in
 `src/gui`.
+
+Export/Delivery gating TDD slice:
+
+- Source B: `C:\Dev\CorridorKey-Engine\docs\cli_reference.md` defines Python
+  engine composite sequence output as `exr`, `png`, or `none`, and
+  `C:\Dev\EZ-CorridorKey\ui\widgets\parameter_panel.py` exposes EXR/PNG output
+  format choices with tooltips.
+- Source C: the C++ runtime CLI currently exposes `--video-encode` for video
+  output and `frame_io::save_result` writes the sequence bundle as Matte EXR,
+  FG EXR, Processed EXR, and Comp PNG for image/folder inputs.
+- Source C: `src/app/runtime_contracts.cpp` reports the current GUI output
+  contract as `movie` and `exr_sequence`, with PNG sequence left contract-gated.
+- Source C: `src/gui/src/lib/outputRecipe.ts` already gates primary output
+  options by runtime capability and selected source kind.
+
+Decision: keep video delivery limited to movie outputs until the C++ runtime
+adds a video-to-sequence App/Core contract. Keep EXR sequence delivery for
+image/folder sources, expose PNG sequence only when the runtime advertises it,
+and keep preview background/color options preview-only unless the runtime
+contract grows merge/color delivery support. Movie output readiness now rejects
+non-video extensions such as `.exr` and suggests a runnable `.mov` output path.
+Verification passed with `pnpm vitest run src/lib/outputRecipe.test.ts`.
 
 ## Definition of Done
 

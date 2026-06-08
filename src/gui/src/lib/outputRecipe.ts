@@ -218,7 +218,7 @@ export function isOutputPathReady(
     return false;
   }
   if (recipe.artifactFamily === "movie") {
-    return hasFileExtension(outputPath);
+    return VIDEO_EXTENSIONS.has(fileExtension(outputPath));
   }
   if (recipe.artifactFamily === "preview_only") {
     return true;
