@@ -59,7 +59,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       use icon buttons with tooltips, and include Auto Compare with a central
       draggable handle that locks vertical, horizontal, or diagonal behavior at
       drag start.
-- [ ] Unit, integration, and E2E coverage verify the release-critical GUI
+- [x] Unit, integration, and E2E coverage verify the release-critical GUI
       behaviors, including proxy creation, persisted preset selection,
       state-driven control visibility, export option gating, telemetry display,
       Result auto-focus, and comparison controls.
@@ -91,7 +91,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       viewer flow, with E2E coverage for completed jobs.
 - [x] Replace comparison controls with the icon toolbar and Auto Compare handle,
       keeping available-buffer gating and synchronized playback coverage.
-- [ ] Run focused unit/integration/E2E tests after each slice and a final GUI
+- [x] Run focused unit/integration/E2E tests after each slice and a final GUI
       smoke suite before packaging.
 - [ ] Run fresh-context `ad-review` with agents against the completed task
       scope.
@@ -349,6 +349,20 @@ and keep preview background/color options preview-only unless the runtime
 contract grows merge/color delivery support. Movie output readiness now rejects
 non-video extensions such as `.exr` and suggests a runnable `.mov` output path.
 Verification passed with `pnpm vitest run src/lib/outputRecipe.test.ts`.
+
+Coverage closure:
+
+- GUI unit/build/integration/E2E coverage passed with `pnpm test` in `src/gui`;
+  this includes persisted preset selection, state-driven control visibility,
+  export gating, telemetry headline, Result auto-focus, preview-proxy retry, and
+  comparison controls.
+- Native preview/runtime coverage passed with `cargo test --lib` in
+  `src/gui/src-tauri`; this includes preview proxy creation, retry, source
+  scoping, result preview asset registration, and runtime readiness failure
+  modes.
+- C++ runtime contract coverage passed with
+  `build\debug\tests\unit\test_unit.exe "[runtime]"`; this includes the runtime
+  preset/model contract used by the GUI.
 
 ## Definition of Done
 
