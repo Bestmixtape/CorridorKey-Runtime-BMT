@@ -42,6 +42,12 @@ const scenarios = [
     workflow: async (page) => {
       await assertSelectOptions(page, "Preset", ["Fast Green", "Quality Blue"]);
       await assertSelectOptionsMissing(page, "Preset", ["Mac Balanced", "Mac Ultra Quality"]);
+      assert.equal(
+        await page.getByLabel("Model").count(),
+        0,
+        "model override should not be visible in the primary workflow"
+      );
+      await openAdvancedControls(page);
       await assertSelectOptions(page, "Model", [
         "Runtime preset default",
         greenModelName,
@@ -113,9 +119,17 @@ const scenarios = [
     name: "missing_models",
     statusText: "runtime usable",
     workflow: async (page) => {
-      await assertSelectOptions(page, "Model", ["Runtime preset default", greenModelName]);
+      await assertSelectOptions(page, "Preset", ["Fast Green"]);
       await assertSelectOptionsMissing(page, "Preset", ["Quality Blue", "Mac Balanced"]);
-      await assertSelectOptionsMissing(page, "Model", [blueModelName, macModelName]);
+      await openAdvancedControls(page);
+      assert.equal(
+        await page.getByLabel("Model").count(),
+        0,
+        "model override should stay hidden when only one model is available"
+      );
+      const workflowBody = await bodyText(page);
+      assertMissing(workflowBody, blueModelName, "missing model workflow override");
+      assertMissing(workflowBody, macModelName, "platform-filtered model workflow override");
     },
     diagnostics: async (_page, body) => {
       assertContains(body, "Runtime usable with missing model packs", "missing model summary");
@@ -285,6 +299,11 @@ async function runScenario(context, baseUrl, scenario, runtime) {
 async function assertSidebarCollapse(page) {
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
+}
+
+async function openAdvancedControls(page) {
+  await page.getByRole("button", { name: /Advanced controls/i }).click();
+  await waitForBody(page, "Runtime diagnostics");
 }
 
 function handleInvoke(runtime, scenarioName, command, args) {

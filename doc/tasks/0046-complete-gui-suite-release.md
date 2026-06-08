@@ -312,6 +312,22 @@ proxy failure, verifies the actionable error, clicks `Retry preview`, and then
 expects the generated proxy video to load. Verification passed with
 `pnpm build`, `pnpm smoke:job`, and `pnpm test:unit` in `src/gui`.
 
+Contextual runtime override TDD slice:
+
+- Source C: `src/gui/src/components/workflow/QualityControlsPanel.tsx` already
+  moved manual model selection out of the primary quality row and into Advanced
+  controls.
+- Source C: `src/gui/scripts/smoke-runtime-readiness.mjs` covers runtime-ready,
+  missing-runtime, missing-model, invalid JSON, and nonzero doctor states.
+
+Decision: the manual model override remains hidden in the primary workflow and
+now appears inside Advanced controls only when it is useful: multiple usable
+models are available, or no preset exists and a model fallback is needed. When
+the selected preset is the only viable model path, the override stays hidden and
+screen-color context follows the preset's recommended model. Verification
+passed with `pnpm smoke:readiness`, `pnpm test:unit`, and `pnpm build` in
+`src/gui`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:

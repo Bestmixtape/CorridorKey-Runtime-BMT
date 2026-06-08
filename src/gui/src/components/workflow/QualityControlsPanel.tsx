@@ -17,7 +17,6 @@ import {
   displayModeLabel,
   modelOptionLabel,
   modelOptionValue,
-  modelUnavailableLabel,
   presetOptionHelp,
   presetOptionLabel,
   presetOptionValue,
@@ -85,6 +84,9 @@ export function QualityControlsPanel({
   const selectedPresetHelp = selectedPreset
     ? presetOptionHelp(selectedPreset, selectedPresetModel)
     : null;
+  const showRuntimeOverride = modelChoices.length > 0 && (
+    modelChoices.length > 1 || presetChoices.length === 0
+  );
 
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 shadow-apple">
@@ -158,37 +160,35 @@ export function QualityControlsPanel({
 
           {showAdvanced && (
             <div className="space-y-4 border-t border-zinc-800 p-3">
-              <AdvancedGroup title="Runtime override">
-                <label className="space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Model</span>
-                  <select
-                    value={selectedModelId ?? ""}
-                    disabled={isProcessing || !runtimeUsable}
-                    onChange={(event) => onSelectedModel(event.target.value || null)}
-                    className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-100 outline-none transition-colors focus:border-brand disabled:opacity-50"
-                  >
-                    <option value="">Runtime preset default</option>
-                    {modelChoices.length === 0 ? (
-                      <option value="" disabled>{modelUnavailableLabel(readiness)}</option>
-                    ) : (
-                      modelChoices.map((model) => (
+              {showRuntimeOverride && (
+                <AdvancedGroup title="Runtime override">
+                  <label className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Model</span>
+                    <select
+                      value={selectedModelId ?? ""}
+                      disabled={isProcessing || !runtimeUsable}
+                      onChange={(event) => onSelectedModel(event.target.value || null)}
+                      className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-100 outline-none transition-colors focus:border-brand disabled:opacity-50"
+                    >
+                      <option value="">Runtime preset default</option>
+                      {modelChoices.map((model) => (
                         <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
                           {modelOptionLabel(model)}
                         </option>
-                      ))
-                    )}
-                  </select>
-                </label>
-                <AdvancedInfo
-                  label="Selection policy"
-                  value={selectedModel ? "Explicit model override" : "Preset chooses the model"}
-                />
-              </AdvancedGroup>
+                      ))}
+                    </select>
+                  </label>
+                  <AdvancedInfo
+                    label="Selection policy"
+                    value={selectedModel ? "Explicit model override" : "Preset chooses the model"}
+                  />
+                </AdvancedGroup>
+              )}
 
               <AdvancedGroup title="Screen color">
                 <AdvancedInfo
                   label="Active screen color"
-                  value={screenColorLabel(selectedModel ?? null)}
+                  value={screenColorLabel(selectedModel ?? selectedPresetModel ?? null)}
                 />
               </AdvancedGroup>
 
