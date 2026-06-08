@@ -1,9 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import {
+  autoComparisonModeFromPoint,
   comparisonClipStyle,
   comparisonDividerGeometry,
+  comparisonDividerHandlePoint,
   comparisonPositionFromPoint,
-  type ViewerComparisonMode
+  type ViewerComparisonMode,
+  type ViewerComparisonWipeMode
 } from "@/lib/viewerCompare";
 import { mediaSyncAction, mediaSyncStatus } from "@/lib/viewerSync";
 import type { OutputRecipeSettings } from "@/lib/outputRecipe";
@@ -16,20 +19,24 @@ import {
 
 export function ComparisonSurface({
   mode,
+  autoMode = false,
   position,
   primary,
   secondary,
   title,
   outputRecipe,
-  onPositionChange
+  onPositionChange,
+  onAutoModeChange
 }: {
   mode: ViewerComparisonMode;
+  autoMode?: boolean;
   position: number;
   primary: PreviewItem;
   secondary: PreviewItem;
   title: string;
   outputRecipe: OutputRecipeSettings;
   onPositionChange: (position: number) => void;
+  onAutoModeChange?: (mode: ViewerComparisonWipeMode) => void;
 }) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const primaryVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -37,7 +44,7 @@ export function ComparisonSurface({
   const isApplyingSyncRef = useRef(false);
   const isDraggingRef = useRef(false);
   const [syncStatusLabel, setSyncStatusLabel] = useState("Sync pending");
-  const clipped = mode === "vertical" || mode === "horizontal" || mode === "diagonal";
+  const clipped = isWipeMode(mode);
   const adjustable = clipped || mode === "overlay";
   const updateSyncStatus = useCallback(() => {
     const primaryVideo = primaryVideoRef.current;
@@ -126,6 +133,13 @@ export function ComparisonSurface({
     }
     const x = ((clientX - rect.left) / rect.width) * 100;
     const y = ((clientY - rect.top) / rect.height) * 100;
+    if (autoMode) {
+      const nextMode = autoComparisonModeFromPoint(x, y);
+      onAutoModeChange?.(nextMode);
+      onPositionChange(comparisonPositionFromPoint(nextMode, x, y));
+      return;
+    }
+
     onPositionChange(comparisonPositionFromPoint(mode, x, y));
   };
 
@@ -169,9 +183,9 @@ export function ComparisonSurface({
           videoSync={{ role: "primary", register: registerVideo, syncFrom }}
         />
       </div>
-      {clipped && <ComparisonDivider mode={mode} position={position} />}
+      {clipped && <ComparisonDivider mode={mode} position={position} showHandle={autoMode} />}
       <div className="pointer-events-none absolute left-4 top-4 rounded bg-zinc-950/85 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-300">
-        {title} - {comparisonModeLabel(mode)} - Synced playback - {syncStatusLabel}
+        {title} - {autoMode ? "Auto compare" : comparisonModeLabel(mode)} - Synced playback - {syncStatusLabel}
       </div>
       <div
         className="absolute bottom-4 left-4 right-4 flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/85 px-3 py-2 backdrop-blur-xl"
@@ -209,30 +223,46 @@ export function ComparisonSurface({
 
 function ComparisonDivider({
   mode,
-  position
+  position,
+  showHandle = false
 }: {
   mode: ViewerComparisonMode;
   position: number;
+  showHandle?: boolean;
 }) {
   const geometry = comparisonDividerGeometry(mode, position);
+  const handlePoint = comparisonDividerHandlePoint(mode, position);
 
   return (
-    <svg
-      aria-hidden="true"
-      className="ck-wipe-divider pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
-    >
-      <line
-        x1={geometry.x1}
-        y1={geometry.y1}
-        x2={geometry.x2}
-        y2={geometry.y2}
-        vectorEffect="non-scaling-stroke"
-        className="stroke-brand"
-        strokeWidth="0.35"
-      />
-    </svg>
+    <>
+      <svg
+        aria-hidden="true"
+        className="ck-wipe-divider pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+      >
+        <line
+          x1={geometry.x1}
+          y1={geometry.y1}
+          x2={geometry.x2}
+          y2={geometry.y2}
+          vectorEffect="non-scaling-stroke"
+          className="stroke-brand"
+          strokeWidth="0.35"
+        />
+      </svg>
+      {showHandle && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute h-5 w-5 rounded-full border border-brand bg-zinc-950/85 shadow-[0_0_22px_rgba(14,165,233,0.5)]"
+          style={{
+            left: `${handlePoint.x}%`,
+            top: `${handlePoint.y}%`,
+            transform: "translate(-50%, -50%)"
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -252,4 +282,8 @@ function comparisonModeLabel(mode: ViewerComparisonMode): string {
   if (mode === "overlay") return "Overlay blend";
   if (mode === "difference") return "Difference blend";
   return "Single view";
+}
+
+function isWipeMode(mode: ViewerComparisonMode): mode is ViewerComparisonWipeMode {
+  return mode === "vertical" || mode === "horizontal" || mode === "diagonal";
 }

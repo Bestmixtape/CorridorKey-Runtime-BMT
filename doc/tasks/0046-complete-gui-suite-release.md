@@ -55,7 +55,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       or rich metrics behind disclosure.
 - [ ] On completion, the workbench switches to Result automatically and loads a
       previewable result through the direct asset path or generated proxy.
-- [ ] Comparison controls appear only when at least two buffers are available,
+- [x] Comparison controls appear only when at least two buffers are available,
       use icon buttons with tooltips, and include Auto Compare with a central
       draggable handle that locks vertical, horizontal, or diagonal behavior at
       drag start.
@@ -89,7 +89,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       components and prove FPS/ETA fallback behavior with tests.
 - [ ] Implement Result auto-focus and preview retry/error reporting in the
       viewer flow, with E2E coverage for completed jobs.
-- [ ] Replace comparison controls with the icon toolbar and Auto Compare handle,
+- [x] Replace comparison controls with the icon toolbar and Auto Compare handle,
       keeping available-buffer gating and synchronized playback coverage.
 - [ ] Run focused unit/integration/E2E tests after each slice and a final GUI
       smoke suite before packaging.
@@ -274,6 +274,27 @@ and visible render telemetry. Deviations from plugins/EZ/Engine are allowed only
 where the App/Core runtime contract does not yet support the richer option; such
 options must remain disabled, hidden, or documented as contract-gated rather
 than presented as runnable.
+
+Comparison toolbar and Auto Compare TDD slice:
+
+- Source A: Adobe Premiere Pro's comparison-view guide places comparison in the
+  viewer and exposes split comparison modes as direct monitor controls:
+  https://helpx.adobe.com/ph_fil/premiere-pro/how-to/frame-comparison-view.html
+- Source A: DaVinci Resolve presents wipe/split comparison as a viewer-native
+  color-page operation with multiple split modes:
+  https://www.blackmagicdesign.com/ca/products/davinciresolve/color
+- Source B: `C:\Dev\EZ-CorridorKey\ui\widgets\view_mode_bar.py` gates viewer
+  modes by available media and uses tooltip-backed mode buttons.
+- Source C: `src/gui/src/lib/viewerCompare.ts` already owned comparison state,
+  available-pair filtering, wipe position, and divider geometry.
+
+Decision: comparison controls now stay hidden until at least two buffers are
+available, use icon buttons with accessible tooltips, default to Auto Compare,
+and show a central draggable handle on the wipe divider. Auto Compare derives a
+vertical, horizontal, or diagonal wipe from the drag direction while preserving
+explicit split, overlay, difference, swap, and synchronized playback controls.
+Verification passed with `pnpm vitest run src/lib/viewerCompare.test.ts`,
+`pnpm test:unit`, `pnpm build`, and `pnpm smoke:job` in `src/gui`.
 
 ## Definition of Done
 

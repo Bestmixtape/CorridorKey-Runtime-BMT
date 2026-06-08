@@ -1,10 +1,13 @@
 export type ViewerComparisonMode =
   | "single"
+  | "auto"
   | "vertical"
   | "horizontal"
   | "diagonal"
   | "overlay"
   | "difference";
+
+export type ViewerComparisonWipeMode = "vertical" | "horizontal" | "diagonal";
 
 export type ViewerComparisonPairId =
   | "source-result"
@@ -45,6 +48,11 @@ export interface ComparisonDividerGeometry {
   y1: number;
   x2: number;
   y2: number;
+}
+
+export interface ComparisonDividerHandlePoint {
+  x: number;
+  y: number;
 }
 
 export function resolveComparisonState(
@@ -181,6 +189,18 @@ export function comparisonDividerGeometry(
   };
 }
 
+export function comparisonDividerHandlePoint(
+  mode: ViewerComparisonMode,
+  positionPercent: number
+): ComparisonDividerHandlePoint {
+  const geometry = comparisonDividerGeometry(mode, positionPercent);
+
+  return {
+    x: (geometry.x1 + geometry.x2) / 2,
+    y: (geometry.y1 + geometry.y2) / 2
+  };
+}
+
 export function comparisonPositionFromPoint(
   mode: ViewerComparisonMode,
   xPercent: number,
@@ -195,6 +215,29 @@ export function comparisonPositionFromPoint(
   }
 
   return clampPercent(xPercent);
+}
+
+export function autoComparisonModeFromPoint(
+  xPercent: number,
+  yPercent: number
+): ViewerComparisonWipeMode {
+  const xDelta = Math.abs(clampPercent(xPercent) - 50);
+  const yDelta = Math.abs(clampPercent(yPercent) - 50);
+  const directionalThreshold = 1.35;
+
+  if (xDelta >= yDelta * directionalThreshold) {
+    return "vertical";
+  }
+
+  if (yDelta >= xDelta * directionalThreshold) {
+    return "horizontal";
+  }
+
+  if (xDelta === 0 && yDelta === 0) {
+    return "vertical";
+  }
+
+  return "diagonal";
 }
 
 function clampPercent(value: number): number {

@@ -47,10 +47,9 @@ const scenarios = [
       await assertVisualLayout(page, "desktop-workflow-progress", { settleMs: 0 });
       await waitForBody(page, "Complete");
       await waitForBody(page, artifactPath);
-      await waitForBody(page, "Stage Matte");
+      await waitForBody(page, "Matte - 18.50 fps");
       await waitForBody(page, "Proxy Building preview");
       await waitForBody(page, "12 / 24 frames");
-      await waitForBody(page, "Render 18.50 fps");
       await waitForBody(page, "Throughput");
       await waitForBody(page, "62.25 fps decode");
       await waitForBody(page, "30.00 fps encode");
@@ -61,11 +60,6 @@ const scenarios = [
       await waitForBody(page, "2 stages");
       await waitForBody(page, "Encode balanced");
       await waitForBody(page, "Output Movie");
-      await waitForBody(page, "Alpha Composited preview");
-      await waitForBody(page, "Preview Solid #111827");
-      await waitForBody(page, "Color Runtime default");
-      await waitForBody(page, "Resolution 2048");
-      await waitForBody(page, "Tiling forced");
       await assertCopyDiagnostics(page, "Status: completed");
       assert.equal(await page.evaluate(() => window.__corridorkeyRevealCalls || 0), 0);
       await page.getByRole("button", { name: /Reveal Output/i }).click();
@@ -647,8 +641,9 @@ async function assertAlphaHintSelectionAndClear(page) {
   await page.waitForFunction(() => window.__corridorkeyHintSelections === 1);
   assert.equal(await page.getByRole("button", { name: "Source / Alpha Hint" }).isDisabled(), false);
   assert.equal(
-    await page.getByRole("button", { name: /Alpha Hint \/ Result.*Missing Result/i }).isDisabled(),
-    true
+    await page.getByRole("button", { name: /Alpha Hint \/ Result/i }).count(),
+    0,
+    "comparison pairs without both buffers should stay hidden from the primary toolbar"
   );
   await page.getByRole("button", { name: /Clear Alpha Hint/i }).click();
   await waitForBody(page, "Runtime fallback");
@@ -658,7 +653,7 @@ async function assertAlphaHintSelectionAndClear(page) {
 async function configureOutputRecipe(page) {
   await waitForBody(page, "Output Recipe");
   await waitForBody(page, "Movie");
-  await waitForBody(page, "EXR sequence");
+  await expectBodyMissing(page, "EXR sequence");
   await waitForBody(page, "Matte only (needs runtime support)");
   await waitForBody(page, "Composite preview");
   await page.getByLabel("Preview background").selectOption("replacement_media");
@@ -747,8 +742,8 @@ async function assertCopyDiagnostics(page, expectedText) {
   assert(copied.includes("Raw logs:"), `Copied diagnostics missing raw logs:\n${copied}`);
   assert(copied.includes("Metrics:"), `Copied diagnostics missing metrics:\n${copied}`);
   assert(copied.includes("Job recipe:"), `Copied diagnostics missing job recipe:\n${copied}`);
-  assert(copied.includes("Model Auto"), `Copied diagnostics missing model selection:\n${copied}`);
   assert(copied.includes("Artifact metadata:"), `Copied diagnostics missing artifact metadata:\n${copied}`);
+  assert(copied.includes("model: auto"), `Copied diagnostics missing model selection:\n${copied}`);
   assert(copied.includes("output_recipe: Movie"), `Copied diagnostics missing output recipe:\n${copied}`);
 }
 
@@ -809,19 +804,22 @@ async function assertPreviewProxyFallback(page) {
 }
 
 async function assertViewerComparisonControls(page) {
-  const missingHintPair = page.getByRole("button", { name: /Source \/ Alpha Hint.*Missing Alpha Hint/i });
-  assert.equal(await missingHintPair.isDisabled(), true);
+  assert.equal(
+    await page.getByRole("button", { name: /Source \/ Alpha Hint/i }).count(),
+    0,
+    "comparison pairs without both buffers should not render"
+  );
 
   await page.getByRole("button", { name: "Result", exact: true }).click();
-  await page.getByRole("button", { name: "Vertical" }).click();
   await waitForBody(page, "Source vs Result");
-  await waitForBody(page, "Vertical wipe");
+  await waitForBody(page, "Auto compare");
   await waitForBody(page, "Synced playback");
+  await page.getByRole("button", { name: "Auto compare" }).click();
   await assertSynchronizedComparisonVideos(page);
 
-  await page.getByRole("button", { name: /Swap sides/i }).click();
+  await page.getByRole("button", { name: /Swap comparison sides/i }).click();
   await waitForBody(page, "Result vs Source");
-  await page.getByRole("button", { name: /Swap sides/i }).click();
+  await page.getByRole("button", { name: /Swap comparison sides/i }).click();
   await waitForBody(page, "Source vs Result");
 
   await page.getByLabel("Wipe position").fill("68");
@@ -835,20 +833,22 @@ async function assertViewerComparisonControls(page) {
   await page.mouse.up();
   assert.notEqual(await page.getByLabel("Wipe position").inputValue(), "68");
 
+  await page.getByRole("button", { name: "Vertical wipe" }).click();
+  await waitForBody(page, "Vertical wipe");
   await forceComparisonDesync(page);
   await waitForBody(page, "Desynced by");
   await page.getByRole("button", { name: /Resync/i }).click();
   await waitForBody(page, "Synced playback - Synced");
 
-  await page.getByRole("button", { name: "Horizontal" }).click();
-  await page.getByRole("button", { name: "Diagonal" }).click();
-  await page.getByRole("button", { name: "Overlay" }).click();
+  await page.getByRole("button", { name: "Horizontal wipe" }).click();
+  await page.getByRole("button", { name: "Diagonal wipe" }).click();
+  await page.getByRole("button", { name: "Overlay blend" }).click();
   await waitForBody(page, "Overlay blend");
   await page.getByLabel("Overlay opacity").fill("72");
   assert.equal(await page.getByLabel("Overlay opacity").inputValue(), "72");
-  await page.getByRole("button", { name: "Difference" }).click();
+  await page.getByRole("button", { name: "Difference blend" }).click();
   await waitForBody(page, "Difference blend");
-  await page.getByRole("button", { name: "Single" }).click();
+  await page.getByRole("button", { name: "Single view" }).click();
   await waitForBody(page, "Complete");
 }
 

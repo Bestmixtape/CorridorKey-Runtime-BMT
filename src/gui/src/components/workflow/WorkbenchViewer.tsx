@@ -1,19 +1,27 @@
 import {
   Activity,
   ArrowLeftRight,
+  Blend,
+  Columns2,
+  Contrast,
   FileVideo,
   FolderDown,
-  Layers
+  Layers,
+  MousePointer2,
+  Rows2,
+  Slash,
+  Square,
+  type LucideIcon
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/media";
 import {
-  comparisonPairOptions,
   availableComparisonPairOptions,
   resolveComparisonState,
   type ViewerComparisonPairId,
-  type ViewerComparisonMode
+  type ViewerComparisonMode,
+  type ViewerComparisonWipeMode
 } from "@/lib/viewerCompare";
 import type { OutputRecipeSettings } from "@/lib/outputRecipe";
 import { ComparisonSurface } from "@/components/workflow/ComparisonSurface";
@@ -44,7 +52,8 @@ export function WorkbenchViewer({
   outputRecipe: OutputRecipeSettings;
 }) {
   const [activePreview, setActivePreview] = useState<PreviewMode>("source");
-  const [comparisonMode, setComparisonMode] = useState<ViewerComparisonMode>("single");
+  const [comparisonMode, setComparisonMode] = useState<ViewerComparisonMode>("auto");
+  const [autoComparisonMode, setAutoComparisonMode] = useState<ViewerComparisonWipeMode>("vertical");
   const [comparisonPairId, setComparisonPairId] = useState<ViewerComparisonPairId>("source-result");
   const [comparisonPosition, setComparisonPosition] = useState(50);
   const [comparisonSwapped, setComparisonSwapped] = useState(false);
@@ -80,7 +89,6 @@ export function WorkbenchViewer({
     }
   ];
   const activeItem = previewItems.find((item) => item.id === activePreview) ?? previewItems[0];
-  const pairOptions = comparisonPairOptions(previewItems, comparisonSwapped);
   const availablePairOptions = availableComparisonPairOptions(previewItems, comparisonSwapped);
   const activePair =
     availablePairOptions.find((pair) => pair.id === comparisonPairId) ?? availablePairOptions[0];
@@ -90,6 +98,8 @@ export function WorkbenchViewer({
   });
   const primaryItem = previewItems.find((item) => item.id === comparisonState.primary?.id) ?? previewItems[0];
   const secondaryItem = previewItems.find((item) => item.id === comparisonState.secondary?.id) ?? activeItem;
+  const effectiveComparisonMode =
+    comparisonState.mode === "auto" ? autoComparisonMode : comparisonState.mode;
 
   useEffect(() => {
     if (artifactPath) {
@@ -99,9 +109,6 @@ export function WorkbenchViewer({
 
   useEffect(() => {
     if (availablePairOptions.length === 0) {
-      if (comparisonMode !== "single") {
-        setComparisonMode("single");
-      }
       return;
     }
 
@@ -116,7 +123,8 @@ export function WorkbenchViewer({
 
   useEffect(() => {
     setActivePreview("source");
-    setComparisonMode("single");
+    setComparisonMode("auto");
+    setAutoComparisonMode("vertical");
     setComparisonPairId("source-result");
     setComparisonPosition(50);
     setComparisonSwapped(false);
@@ -182,27 +190,31 @@ export function WorkbenchViewer({
                 type="button"
                 disabled={!activePair}
                 onClick={() => setComparisonSwapped((value) => !value)}
-                className="flex h-10 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs font-bold text-zinc-400 transition-colors hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Swap comparison sides"
+                title="Swap comparison sides"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 transition-colors hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <ArrowLeftRight className="h-4 w-4" />
-                Swap sides
               </button>
 
-              <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 xl:grid-cols-6">
+              <div className="grid grid-cols-7 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
                 {COMPARISON_MODES.map((mode) => (
                   <button
                     key={mode.id}
                     type="button"
                     disabled={mode.id !== "single" && !comparisonState.canCompare}
+                    aria-label={mode.label}
+                    title={mode.tooltip}
                     onClick={() => setComparisonMode(mode.id)}
                     className={cn(
-                      "h-8 rounded-md px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                       comparisonMode === mode.id
                         ? "bg-brand text-white"
                         : "text-zinc-400 hover:text-zinc-100"
                     )}
                   >
-                    {mode.label}
+                    <mode.icon className="h-4 w-4" />
+                    <span className="sr-only">{mode.label}</span>
                   </button>
                 ))}
               </div>
@@ -214,13 +226,15 @@ export function WorkbenchViewer({
       <div className="relative bg-black">
         {comparisonState.canCompare && comparisonState.mode !== "single" ? (
           <ComparisonSurface
-            mode={comparisonState.mode}
+            mode={effectiveComparisonMode}
+            autoMode={comparisonState.mode === "auto"}
             position={comparisonPosition}
             primary={primaryItem}
             secondary={secondaryItem}
             title={comparisonState.title}
             outputRecipe={outputRecipe}
             onPositionChange={setComparisonPosition}
+            onAutoModeChange={setAutoComparisonMode}
           />
         ) : (
           <PreviewSurface
@@ -235,13 +249,19 @@ export function WorkbenchViewer({
   );
 }
 
-const COMPARISON_MODES: Array<{ id: ViewerComparisonMode; label: string }> = [
-  { id: "single", label: "Single" },
-  { id: "vertical", label: "Vertical" },
-  { id: "horizontal", label: "Horizontal" },
-  { id: "diagonal", label: "Diagonal" },
-  { id: "overlay", label: "Overlay" },
-  { id: "difference", label: "Difference" }
+const COMPARISON_MODES: Array<{
+  id: ViewerComparisonMode;
+  label: string;
+  tooltip: string;
+  icon: LucideIcon;
+}> = [
+  { id: "single", label: "Single view", tooltip: "Show one buffer", icon: Square },
+  { id: "auto", label: "Auto compare", tooltip: "Drag the handle to choose vertical, horizontal, or diagonal wipe", icon: MousePointer2 },
+  { id: "vertical", label: "Vertical wipe", tooltip: "Compare with a vertical wipe", icon: Columns2 },
+  { id: "horizontal", label: "Horizontal wipe", tooltip: "Compare with a horizontal wipe", icon: Rows2 },
+  { id: "diagonal", label: "Diagonal wipe", tooltip: "Compare with a diagonal wipe", icon: Slash },
+  { id: "overlay", label: "Overlay blend", tooltip: "Blend both buffers", icon: Blend },
+  { id: "difference", label: "Difference blend", tooltip: "Show the difference between buffers", icon: Contrast }
 ];
 
 function readinessStatusLabel(status: string): string {

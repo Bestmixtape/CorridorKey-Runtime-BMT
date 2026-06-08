@@ -4,7 +4,9 @@ import {
   comparisonPairOptions,
   comparisonClipStyle,
   comparisonDividerGeometry,
+  comparisonDividerHandlePoint,
   comparisonPositionFromPoint,
+  autoComparisonModeFromPoint,
   resolveComparisonState
 } from "@/lib/viewerCompare";
 
@@ -44,6 +46,22 @@ describe("viewer comparison", () => {
     expect(state.mode).toBe("single");
     expect(state.canCompare).toBe(false);
     expect(state.title).toBe("Source");
+  });
+
+  test("keeps auto compare active when comparison buffers are available", () => {
+    const state = resolveComparisonState(
+      [
+        { id: "source", label: "Source", path: "C:\\Shots\\input.mp4" },
+        { id: "hint", label: "Alpha Hint", path: null },
+        { id: "result", label: "Result", path: "C:\\Shots\\output.mov" }
+      ],
+      "result",
+      "auto"
+    );
+
+    expect(state.mode).toBe("auto");
+    expect(state.canCompare).toBe(true);
+    expect(state.title).toBe("Source vs Result");
   });
 
   test("describes comparison pair availability and swapped labels", () => {
@@ -163,10 +181,23 @@ describe("viewer comparison", () => {
     });
   });
 
+  test("places the draggable handle at the center of each divider", () => {
+    expect(comparisonDividerHandlePoint("vertical", 35)).toEqual({ x: 35, y: 50 });
+    expect(comparisonDividerHandlePoint("horizontal", 65)).toEqual({ x: 50, y: 65 });
+    expect(comparisonDividerHandlePoint("diagonal", 75)).toEqual({ x: 75, y: 75 });
+  });
+
   test("derives wipe position from pointer coordinates", () => {
     expect(comparisonPositionFromPoint("vertical", 10, 90)).toBe(10);
     expect(comparisonPositionFromPoint("horizontal", 10, 90)).toBe(90);
     expect(comparisonPositionFromPoint("diagonal", 80, 20)).toBe(50);
     expect(comparisonPositionFromPoint("diagonal", 200, 200)).toBe(100);
+  });
+
+  test("chooses an auto wipe mode from the drag direction", () => {
+    expect(autoComparisonModeFromPoint(90, 52)).toBe("vertical");
+    expect(autoComparisonModeFromPoint(52, 90)).toBe("horizontal");
+    expect(autoComparisonModeFromPoint(82, 82)).toBe("diagonal");
+    expect(autoComparisonModeFromPoint(50, 50)).toBe("vertical");
   });
 });
