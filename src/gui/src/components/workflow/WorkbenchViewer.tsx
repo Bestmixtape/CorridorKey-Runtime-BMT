@@ -88,6 +88,7 @@ export function WorkbenchViewer({
       emptySubtitle: outputPath ? fileName(outputPath) : "Choose output file"
     }
   ];
+  const selectablePreviewItems = previewItems.filter((item) => Boolean(item.path));
   const activeItem = previewItems.find((item) => item.id === activePreview) ?? previewItems[0];
   const availablePairOptions = availableComparisonPairOptions(previewItems, comparisonSwapped);
   const activePair =
@@ -106,6 +107,18 @@ export function WorkbenchViewer({
       setActivePreview("result");
     }
   }, [artifactPath]);
+
+  useEffect(() => {
+    if (
+      selectablePreviewItems.length > 0 &&
+      !selectablePreviewItems.some((item) => item.id === activePreview)
+    ) {
+      setActivePreview(selectablePreviewItems[0].id);
+    }
+  }, [
+    selectablePreviewItems.map((item) => item.id).join("|"),
+    activePreview
+  ]);
 
   useEffect(() => {
     if (availablePairOptions.length === 0) {
@@ -147,23 +160,25 @@ export function WorkbenchViewer({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-            {previewItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActivePreview(item.id)}
-                className={cn(
-                  "h-8 rounded-md px-3 text-xs font-bold transition-colors",
-                  activePreview === item.id
-                    ? "bg-brand text-white"
-                    : "text-zinc-400 hover:text-zinc-100"
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+          {selectablePreviewItems.length > 1 && (
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 sm:grid-cols-3">
+              {selectablePreviewItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActivePreview(item.id)}
+                  className={cn(
+                    "h-8 rounded-md px-3 text-xs font-bold transition-colors",
+                    activePreview === item.id
+                      ? "bg-brand text-white"
+                      : "text-zinc-400 hover:text-zinc-100"
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {availablePairOptions.length > 0 && (
             <>

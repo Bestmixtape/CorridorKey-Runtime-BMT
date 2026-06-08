@@ -599,6 +599,11 @@ async function runScenario(context, baseUrl, scenario) {
     await waitForBody(page, "Keying Workbench");
     await waitForBody(page, "Alpha Hint");
     await waitForBody(page, "Result");
+    assert.equal(
+      await page.getByRole("button", { name: "Result", exact: true }).count(),
+      0,
+      "viewer should not render unavailable preview tabs before media exists"
+    );
     await waitForBody(page, "Preview");
     await waitForBody(page, "corridorkey_fp16_1024.onnx");
     await waitForBody(page, "Encoding");

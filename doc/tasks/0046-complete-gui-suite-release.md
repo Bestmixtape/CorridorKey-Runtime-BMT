@@ -364,6 +364,21 @@ Coverage closure:
   `build\debug\tests\unit\test_unit.exe "[runtime]"`; this includes the runtime
   preset/model contract used by the GUI.
 
+Viewer shell de-duplication TDD slice:
+
+- Source C: `src/gui/src/components/workflow/WorkbenchViewer.tsx` showed Source,
+  Alpha Hint, and Result preview tabs even before the corresponding media
+  existed, duplicating the right-side input slots and presenting unavailable
+  actions as primary viewer controls.
+- Source C: `src/gui/scripts/smoke-job-lifecycle.mjs` already verifies the full
+  job lifecycle and can assert accessibility-visible viewer controls.
+
+Decision: preview tabs now render only when at least two actual preview buffers
+are available. The input rail remains the loading surface for missing media,
+while the viewer selector becomes a comparison/navigation surface once there is
+something real to switch between. Verification passed with `pnpm build` and
+`pnpm smoke:job` in `src/gui`.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
