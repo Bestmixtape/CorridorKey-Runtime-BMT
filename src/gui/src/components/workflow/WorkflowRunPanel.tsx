@@ -6,9 +6,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { RuntimeReadiness } from "@/lib/engine";
+import { fileName } from "@/lib/media";
 import { jobStatusTitle } from "@/lib/jobStatus";
 import { readinessLabel } from "@/lib/workflowLabels";
 import { cn } from "@/lib/utils";
+import {
+  AdvancedInfo,
+  DisclosureSection
+} from "@/components/workflow/WorkflowPanelPrimitives";
 
 export function WorkflowRunPanel({
   isProcessing,
@@ -89,6 +94,22 @@ export function WorkflowRunPanel({
           <RotateCcw className="h-4 w-4" />
           Reset Workbench
         </Button>
+      </div>
+
+      <div className="mt-4">
+        <DisclosureSection
+          title="Runtime diagnostics"
+          description="Readiness and resolved engine path"
+        >
+          <AdvancedInfo
+            label="Readiness"
+            value={readiness ? readinessLabel(readiness.status) : "Probe pending"}
+          />
+          <AdvancedInfo
+            label="Runtime path"
+            value={readiness?.runtime_path ? fileName(readiness.runtime_path) : "Not resolved"}
+          />
+        </DisclosureSection>
       </div>
     </section>
   );

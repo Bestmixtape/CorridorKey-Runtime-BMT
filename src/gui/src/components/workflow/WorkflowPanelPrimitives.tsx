@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ChevronRight, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function PanelTitle({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
@@ -78,6 +78,41 @@ export function AdvancedGroup({ title, children }: { title: string; children: Re
       <div className="grid grid-cols-1 gap-3">
         {children}
       </div>
+    </div>
+  );
+}
+
+export function DisclosureSection({
+  title,
+  description,
+  children
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-zinc-900"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-bold text-zinc-100">{title}</span>
+          <span className="mt-0.5 block text-xs text-zinc-500">{description}</span>
+        </span>
+        <ChevronRight className={cn("h-4 w-4 shrink-0 text-zinc-500 transition-transform", open && "rotate-90")} />
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t border-zinc-800 p-3">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

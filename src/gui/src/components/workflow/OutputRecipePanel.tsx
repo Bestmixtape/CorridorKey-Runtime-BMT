@@ -13,6 +13,7 @@ import { artifactOptionStatusLabel } from "@/lib/workflowLabels";
 import { cn } from "@/lib/utils";
 import {
   AdvancedSelect,
+  DisclosureSection,
   PanelTitle
 } from "@/components/workflow/WorkflowPanelPrimitives";
 
@@ -64,74 +65,79 @@ export function OutputRecipePanel({
           ))}
         </div>
 
-        <AdvancedSelect
-          label="Alpha"
-          value={outputRecipe.alphaMode}
-          options={recipeControls.alphaModes}
-          disabled={isProcessing}
-          onChange={(value) => onOutputRecipeSetting("alphaMode", value as OutputAlphaMode)}
-        />
+        <DisclosureSection
+          title="Delivery details"
+          description="Alpha, preview background, and color handling"
+        >
+          <AdvancedSelect
+            label="Alpha"
+            value={outputRecipe.alphaMode}
+            options={recipeControls.alphaModes}
+            disabled={isProcessing}
+            onChange={(value) => onOutputRecipeSetting("alphaMode", value as OutputAlphaMode)}
+          />
 
-        <AdvancedSelect
-          label="Preview background"
-          value={outputRecipe.previewBackground}
-          options={recipeControls.previewBackgrounds}
-          disabled={isProcessing}
-          onChange={(value) => onOutputRecipeSetting("previewBackground", value as PreviewBackgroundMode)}
-        />
+          <AdvancedSelect
+            label="Preview background"
+            value={outputRecipe.previewBackground}
+            options={recipeControls.previewBackgrounds}
+            disabled={isProcessing}
+            onChange={(value) => onOutputRecipeSetting("previewBackground", value as PreviewBackgroundMode)}
+          />
 
-        {outputRecipe.previewBackground === "solid" && (
-          <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-300">
-            <span>Preview color</span>
-            <input
-              aria-label="Preview color"
-              type="color"
-              value={outputRecipe.previewSolidColor}
-              disabled={isProcessing}
-              onChange={(event) => onOutputRecipeSetting("previewSolidColor", event.target.value)}
-              className="h-8 w-12 rounded border border-zinc-800 bg-zinc-950 disabled:opacity-50"
-            />
-          </label>
-        )}
-
-        {outputRecipe.previewBackground === "replacement_media" && (
-          <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-              Replacement media
-            </div>
-            <div className="truncate text-xs font-medium text-zinc-300">
-              {outputRecipe.replacementMediaPath
-                ? `Replacement media selected: ${fileName(outputRecipe.replacementMediaPath)}`
-                : "No replacement media selected"}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
+          {outputRecipe.previewBackground === "solid" && (
+            <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-300">
+              <span>Preview color</span>
+              <input
+                aria-label="Preview color"
+                type="color"
+                value={outputRecipe.previewSolidColor}
                 disabled={isProcessing}
-                onClick={onSelectReplacementMedia}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Select replacement media
-              </button>
-              <button
-                type="button"
-                disabled={isProcessing || !outputRecipe.replacementMediaPath}
-                onClick={onClearReplacementMedia}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Clear replacement
-              </button>
-            </div>
-          </div>
-        )}
+                onChange={(event) => onOutputRecipeSetting("previewSolidColor", event.target.value)}
+                className="h-8 w-12 rounded border border-zinc-800 bg-zinc-950 disabled:opacity-50"
+              />
+            </label>
+          )}
 
-        <AdvancedSelect
-          label="Color intent"
-          value={outputRecipe.colorIntent}
-          options={recipeControls.colorIntents}
-          disabled={isProcessing}
-          onChange={(value) => onOutputRecipeSetting("colorIntent", value as OutputColorIntent)}
-        />
+          {outputRecipe.previewBackground === "replacement_media" && (
+            <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                Replacement media
+              </div>
+              <div className="truncate text-xs font-medium text-zinc-300">
+                {outputRecipe.replacementMediaPath
+                  ? `Replacement media selected: ${fileName(outputRecipe.replacementMediaPath)}`
+                  : "No replacement media selected"}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={onSelectReplacementMedia}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Select replacement media
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessing || !outputRecipe.replacementMediaPath}
+                  onClick={onClearReplacementMedia}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Clear replacement
+                </button>
+              </div>
+            </div>
+          )}
+
+          <AdvancedSelect
+            label="Color intent"
+            value={outputRecipe.colorIntent}
+            options={recipeControls.colorIntents}
+            disabled={isProcessing}
+            onChange={(value) => onOutputRecipeSetting("colorIntent", value as OutputColorIntent)}
+          />
+        </DisclosureSection>
       </div>
     </section>
   );

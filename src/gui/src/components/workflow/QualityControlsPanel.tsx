@@ -1,6 +1,5 @@
-import { ChevronRight, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import type { RuntimeCatalogEntry, RuntimeReadiness } from "@/lib/engine";
-import { fileName } from "@/lib/media";
 import {
   PRECISION_OPTIONS,
   QUALITY_FALLBACK_OPTIONS,
@@ -12,16 +11,13 @@ import {
   type RefinementMode,
   type RuntimeResolution
 } from "@/lib/advancedSettings";
-import { outputRecipeLabel, type OutputRecipeSettings } from "@/lib/outputRecipe";
 import {
-  displayModeLabel,
   modelOptionLabel,
   modelOptionValue,
   presetOptionHelp,
   presetOptionLabel,
   presetOptionValue,
   presetUnavailableLabel,
-  readinessLabel,
   screenColorLabel
 } from "@/lib/workflowLabels";
 import { cn } from "@/lib/utils";
@@ -31,12 +27,11 @@ import {
   AdvancedInfo,
   AdvancedNumber,
   AdvancedSelect,
+  DisclosureSection,
   PanelTitle
 } from "@/components/workflow/WorkflowPanelPrimitives";
 
 export function QualityControlsPanel({
-  hintPath,
-  outputRecipe,
   isProcessing,
   runtimeUsable,
   presetChoices,
@@ -47,16 +42,12 @@ export function QualityControlsPanel({
   selectedModel,
   videoEncodeMode,
   advancedSettings,
-  showAdvanced,
   readiness,
   onSelectedPreset,
   onSelectedModel,
   onVideoEncodeMode,
-  onAdvancedSetting,
-  onToggleAdvanced
+  onAdvancedSetting
 }: {
-  hintPath: string | null;
-  outputRecipe: OutputRecipeSettings;
   isProcessing: boolean;
   runtimeUsable: boolean;
   presetChoices: RuntimeCatalogEntry[];
@@ -67,7 +58,6 @@ export function QualityControlsPanel({
   selectedModel: RuntimeCatalogEntry | null;
   videoEncodeMode: "lossless" | "balanced";
   advancedSettings: AdvancedProcessingSettings;
-  showAdvanced: boolean;
   readiness: RuntimeReadiness | null;
   onSelectedPreset: (presetId: string | null) => void;
   onSelectedModel: (modelId: string | null) => void;
@@ -76,7 +66,6 @@ export function QualityControlsPanel({
     key: Key,
     value: AdvancedProcessingSettings[Key]
   ) => void;
-  onToggleAdvanced: () => void;
 }) {
   const selectedPresetModel = selectedPreset
     ? modelChoices.find((model) => model.filename === selectedPreset.recommended_model) ?? null
@@ -144,146 +133,106 @@ export function QualityControlsPanel({
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
-          <button
-            type="button"
-            aria-expanded={showAdvanced}
-            onClick={onToggleAdvanced}
-            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-zinc-900"
-          >
-            <span>
-              <span className="block text-sm font-bold text-zinc-100">Advanced controls</span>
-              <span className="mt-0.5 block text-xs text-zinc-500">Runtime-backed process options</span>
-            </span>
-            <ChevronRight className={cn("h-4 w-4 text-zinc-500 transition-transform", showAdvanced && "rotate-90")} />
-          </button>
-
-          {showAdvanced && (
-            <div className="space-y-4 border-t border-zinc-800 p-3">
-              {showRuntimeOverride && (
-                <AdvancedGroup title="Runtime override">
-                  <label className="space-y-1.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Model</span>
-                    <select
-                      value={selectedModelId ?? ""}
-                      disabled={isProcessing || !runtimeUsable}
-                      onChange={(event) => onSelectedModel(event.target.value || null)}
-                      className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-100 outline-none transition-colors focus:border-brand disabled:opacity-50"
-                    >
-                      <option value="">Runtime preset default</option>
-                      {modelChoices.map((model) => (
-                        <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
-                          {modelOptionLabel(model)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <AdvancedInfo
-                    label="Selection policy"
-                    value={selectedModel ? "Explicit model override" : "Preset chooses the model"}
-                  />
-                </AdvancedGroup>
-              )}
-
-              <AdvancedGroup title="Screen color">
-                <AdvancedInfo
-                  label="Active screen color"
-                  value={screenColorLabel(selectedModel ?? selectedPresetModel ?? null)}
-                />
-              </AdvancedGroup>
-
-              <AdvancedGroup title="Quality">
-                <AdvancedSelect
-                  label="Quality fallback"
-                  value={advancedSettings.qualityFallback}
-                  options={QUALITY_FALLBACK_OPTIONS}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("qualityFallback", value as QualityFallbackMode)}
-                />
-                <AdvancedSelect
-                  label="Precision"
-                  value={advancedSettings.precision}
-                  options={PRECISION_OPTIONS}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("precision", value as PrecisionMode)}
-                />
-                <AdvancedSelect
-                  label="Resolution"
-                  value={advancedSettings.resolution}
-                  options={RESOLUTION_OPTIONS}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("resolution", Number(value) as RuntimeResolution)}
-                />
-                <AdvancedNumber
-                  label="Batch size"
-                  value={advancedSettings.batchSize}
-                  min={1}
-                  max={64}
-                  step={1}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("batchSize", value)}
-                />
-              </AdvancedGroup>
-
-              <AdvancedGroup title="Alpha hint">
-                <AdvancedInfo
-                  label="Hint mode"
-                  value={hintPath ? "External alpha hint" : "Runtime rough-matte fallback"}
-                />
-                <AdvancedInfo
-                  label="Hint source"
-                  value={hintPath ? fileName(hintPath) : "No hint selected"}
-                />
-              </AdvancedGroup>
-
-              <AdvancedGroup title="Despill">
-                <AdvancedNumber
-                  label="Despill"
-                  value={advancedSettings.despill}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("despill", value)}
-                />
-                <AdvancedCheckbox
-                  label="Despeckle cleanup"
-                  checked={advancedSettings.despeckle}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("despeckle", value)}
-                />
-              </AdvancedGroup>
-
-              <AdvancedGroup title="Output mode">
-                <AdvancedInfo label="Artifact family" value={outputRecipeLabel(outputRecipe)} />
-                <AdvancedInfo label="Alpha output" value={displayModeLabel(outputRecipe.alphaMode)} />
-                <AdvancedInfo label="Preview background" value={displayModeLabel(outputRecipe.previewBackground)} />
-                <AdvancedInfo label="Color intent" value={displayModeLabel(outputRecipe.colorIntent)} />
-              </AdvancedGroup>
-
-              <AdvancedGroup title="Tiling and refinement">
-                <AdvancedSelect
-                  label="Refinement mode"
-                  value={advancedSettings.refinementMode}
-                  options={REFINEMENT_MODE_OPTIONS}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("refinementMode", value as RefinementMode)}
-                />
-                <AdvancedCheckbox
-                  label="Force tiled processing"
-                  checked={advancedSettings.tiled}
-                  disabled={isProcessing}
-                  onChange={(value) => onAdvancedSetting("tiled", value)}
-                />
-              </AdvancedGroup>
-
-              <AdvancedGroup title="Runtime diagnostics">
-                <AdvancedInfo label="Readiness" value={readiness ? readinessLabel(readiness.status) : "Probe pending"} />
-                <AdvancedInfo label="Runtime path" value={readiness?.runtime_path ? fileName(readiness.runtime_path) : "Not resolved"} />
-              </AdvancedGroup>
-            </div>
+        <DisclosureSection
+          title="Process options"
+          description="Overrides for quality, cleanup, and tiling"
+        >
+          {showRuntimeOverride && (
+            <AdvancedGroup title="Runtime override">
+              <label className="space-y-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Model</span>
+                <select
+                  value={selectedModelId ?? ""}
+                  disabled={isProcessing || !runtimeUsable}
+                  onChange={(event) => onSelectedModel(event.target.value || null)}
+                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-100 outline-none transition-colors focus:border-brand disabled:opacity-50"
+                >
+                  <option value="">Runtime preset default</option>
+                  {modelChoices.map((model) => (
+                    <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
+                      {modelOptionLabel(model)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <AdvancedInfo
+                label="Selection policy"
+                value={selectedModel ? "Explicit model override" : "Preset chooses the model"}
+              />
+            </AdvancedGroup>
           )}
-        </div>
+
+          <AdvancedGroup title="Quality">
+            <AdvancedSelect
+              label="Quality fallback"
+              value={advancedSettings.qualityFallback}
+              options={QUALITY_FALLBACK_OPTIONS}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("qualityFallback", value as QualityFallbackMode)}
+            />
+            <AdvancedSelect
+              label="Precision"
+              value={advancedSettings.precision}
+              options={PRECISION_OPTIONS}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("precision", value as PrecisionMode)}
+            />
+            <AdvancedSelect
+              label="Resolution"
+              value={advancedSettings.resolution}
+              options={RESOLUTION_OPTIONS}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("resolution", Number(value) as RuntimeResolution)}
+            />
+            <AdvancedNumber
+              label="Batch size"
+              value={advancedSettings.batchSize}
+              min={1}
+              max={64}
+              step={1}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("batchSize", value)}
+            />
+            <AdvancedInfo
+              label="Active screen color"
+              value={screenColorLabel(selectedModel ?? selectedPresetModel ?? null)}
+            />
+          </AdvancedGroup>
+
+          <AdvancedGroup title="Despill">
+            <AdvancedNumber
+              label="Despill"
+              value={advancedSettings.despill}
+              min={0}
+              max={1}
+              step={0.05}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("despill", value)}
+            />
+            <AdvancedCheckbox
+              label="Despeckle cleanup"
+              checked={advancedSettings.despeckle}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("despeckle", value)}
+            />
+          </AdvancedGroup>
+
+          <AdvancedGroup title="Tiling and refinement">
+            <AdvancedSelect
+              label="Refinement mode"
+              value={advancedSettings.refinementMode}
+              options={REFINEMENT_MODE_OPTIONS}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("refinementMode", value as RefinementMode)}
+            />
+            <AdvancedCheckbox
+              label="Force tiled processing"
+              checked={advancedSettings.tiled}
+              disabled={isProcessing}
+              onChange={(value) => onAdvancedSetting("tiled", value)}
+            />
+          </AdvancedGroup>
+        </DisclosureSection>
       </div>
     </section>
   );

@@ -30,7 +30,6 @@ export function WorkflowSetupRail({
   selectedModel,
   videoEncodeMode,
   advancedSettings,
-  showAdvanced,
   readiness,
   terminalStatus,
   currentProgress,
@@ -50,7 +49,6 @@ export function WorkflowSetupRail({
   onSelectedModel,
   onVideoEncodeMode,
   onAdvancedSetting,
-  onToggleAdvanced,
   onStartJob,
   onCancelJob,
   onResetWorkbench
@@ -72,7 +70,6 @@ export function WorkflowSetupRail({
   selectedModel: RuntimeCatalogEntry | null;
   videoEncodeMode: "lossless" | "balanced";
   advancedSettings: AdvancedProcessingSettings;
-  showAdvanced: boolean;
   readiness: RuntimeReadiness | null;
   terminalStatus: string;
   currentProgress: number;
@@ -98,7 +95,6 @@ export function WorkflowSetupRail({
     key: Key,
     value: AdvancedProcessingSettings[Key]
   ) => void;
-  onToggleAdvanced: () => void;
   onStartJob: () => void;
   onCancelJob: () => void;
   onResetWorkbench: () => void;
@@ -130,8 +126,6 @@ export function WorkflowSetupRail({
       />
 
       <QualityControlsPanel
-        hintPath={hintPath}
-        outputRecipe={outputRecipe}
         isProcessing={isProcessing}
         runtimeUsable={runtimeUsable}
         presetChoices={presetChoices}
@@ -142,13 +136,11 @@ export function WorkflowSetupRail({
         selectedModel={selectedModel}
         videoEncodeMode={videoEncodeMode}
         advancedSettings={advancedSettings}
-        showAdvanced={showAdvanced}
         readiness={readiness}
         onSelectedPreset={onSelectedPreset}
         onSelectedModel={onSelectedModel}
         onVideoEncodeMode={onVideoEncodeMode}
         onAdvancedSetting={onAdvancedSetting}
-        onToggleAdvanced={onToggleAdvanced}
       />
 
       <WorkflowRunPanel

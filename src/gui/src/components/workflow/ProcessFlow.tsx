@@ -74,7 +74,6 @@ export function ProcessFlow() {
   const viewerArtifactPath = previewArtifactPath || artifactPath;
 
   const [showLogs, setShowLogs] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [resetCount, setResetCount] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -337,7 +336,6 @@ export function ProcessFlow() {
 
   const handleResetWorkbench = () => {
     reset();
-    setShowAdvanced(false);
     setShowLogs(false);
     setResetCount((value) => value + 1);
   };
@@ -394,7 +392,6 @@ export function ProcessFlow() {
         selectedModel={selectedModel}
         videoEncodeMode={videoEncodeMode}
         advancedSettings={advancedSettings}
-        showAdvanced={showAdvanced}
         readiness={readiness}
         terminalStatus={terminalStatus}
         currentProgress={currentProgress}
@@ -414,7 +411,6 @@ export function ProcessFlow() {
         onSelectedModel={setSelectedModelId}
         onVideoEncodeMode={setVideoEncodeMode}
         onAdvancedSetting={setAdvancedSetting}
-        onToggleAdvanced={() => setShowAdvanced((value) => !value)}
         onStartJob={() => void startJob()}
         onCancelJob={() => void cancelJob()}
         onResetWorkbench={handleResetWorkbench}

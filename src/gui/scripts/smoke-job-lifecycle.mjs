@@ -664,6 +664,8 @@ async function configureOutputRecipe(page) {
   await waitForBody(page, "Output Recipe");
   await waitForBody(page, "Movie");
   await expectBodyMissing(page, "EXR sequence");
+  await expectBodyMissing(page, "Advanced controls");
+  await page.getByRole("button", { name: /Delivery details/i }).click();
   await waitForBody(page, "Matte only (needs runtime support)");
   await waitForBody(page, "Composite preview");
   await page.getByLabel("Preview background").selectOption("replacement_media");
@@ -677,14 +679,11 @@ async function configureOutputRecipe(page) {
 
 async function configureAdvancedControls(page) {
   await page.getByRole("button", { name: /^balanced$/i }).click();
-  await page.getByRole("button", { name: /Advanced controls/i }).click();
-  await waitForBody(page, "Screen color");
+  await expectBodyMissing(page, "Advanced controls");
+  await page.getByRole("button", { name: /Process options/i }).click();
   await waitForBody(page, "Quality");
-  await waitForBody(page, "Alpha hint");
   await waitForBody(page, "Despill");
-  await waitForBody(page, "Output mode");
   await waitForBody(page, "Tiling and refinement");
-  await waitForBody(page, "Runtime diagnostics");
   await waitForBody(page, "Tiled (needs runtime support)");
   const tiledRefinementDisabled = await page
     .getByLabel("Refinement mode")

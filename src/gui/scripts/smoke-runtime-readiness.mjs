@@ -302,8 +302,8 @@ async function assertSidebarCollapse(page) {
 }
 
 async function openAdvancedControls(page) {
-  await page.getByRole("button", { name: /Advanced controls/i }).click();
-  await waitForBody(page, "Runtime diagnostics");
+  await page.getByRole("button", { name: /Process options/i }).click();
+  await waitForBody(page, "Quality fallback");
 }
 
 function handleInvoke(runtime, scenarioName, command, args) {

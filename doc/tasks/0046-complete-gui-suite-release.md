@@ -35,7 +35,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] Result preview proxy generation succeeds for a real `.mov` result whose
       browser playback requires an MP4/H.264 proxy, while preserving atomic
       cache writes and surfacing actionable proxy diagnostics.
-- [ ] The main GUI flow is a viewer-centered workbench: sidebar collapsed by
+- [x] The main GUI flow is a viewer-centered workbench: sidebar collapsed by
       default, no duplicated source/result tabs or tags, and only controls that
       are valid for the current media/job state are visible at the primary
       level.
@@ -43,7 +43,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       the lowest compatible preset, persists the user's selected preset locally,
       and explains each option with model, resolution, backend, precision,
       tiling, and cost information when available.
-- [ ] Manual model selection and other advanced runtime controls are removed
+- [x] Manual model selection and other advanced runtime controls are removed
       from the primary flow and exposed through contextual disclosure sections
       only when the runtime contract supports them.
 - [x] Export/Delivery supports the agreed professional set: MOV/MP4
@@ -77,10 +77,10 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       regression test that proves FFmpeg can write the temporary MP4 output.
 - [x] Update `src/gui/src/lib/job.ts`, `src/gui/src/components/workflow/*`, and
       related tests so preset selection is compact, persisted, and explained.
-- [ ] Refactor the workflow shell so the sidebar starts collapsed, the viewer is
+- [x] Refactor the workflow shell so the sidebar starts collapsed, the viewer is
       the visual center, and primary controls are state-driven rather than
       duplicated.
-- [ ] Replace the global advanced panel with contextual disclosure sections for
+- [x] Replace the global advanced panel with contextual disclosure sections for
       preset/runtime, output/export, alpha hint, processing, and diagnostics.
 - [x] Audit and wire export gating across `src/gui/src/lib/outputRecipe.ts`,
       `src/gui/src/components/workflow/OutputRecipePanel.tsx`, Tauri process
@@ -378,6 +378,24 @@ are available. The input rail remains the loading surface for missing media,
 while the viewer selector becomes a comparison/navigation surface once there is
 something real to switch between. Verification passed with `pnpm build` and
 `pnpm smoke:job` in `src/gui`.
+
+Contextual disclosure TDD slice:
+
+- Source C: `src/gui/src/components/workflow/QualityControlsPanel.tsx`
+  previously exposed one generic Advanced controls block for model overrides,
+  quality, alpha hints, output mode, tiling, and runtime diagnostics.
+- Source C: `src/gui/src/components/workflow/OutputRecipePanel.tsx`
+  previously rendered alpha, preview background, and color-intent controls at
+  the primary level even when the user only needed to select the output family.
+- Source C: `src/gui/src/components/workflow/WorkflowRunPanel.tsx` already
+  owned run readiness and is the contextual place for runtime diagnostics.
+
+Decision: remove the generic Advanced controls block from the workflow. Output
+details now live under Delivery details, processing overrides under Process
+options, and readiness/path diagnostics under Runtime diagnostics. Manual model
+override remains hidden unless more than one useful model is available or no
+preset exists. Verification passed with `pnpm build`, `pnpm smoke:job`, and
+`pnpm smoke:readiness` in `src/gui`.
 
 ## Definition of Done
 
