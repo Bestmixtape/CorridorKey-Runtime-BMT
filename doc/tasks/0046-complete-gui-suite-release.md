@@ -53,7 +53,7 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
 - [x] During processing, the job status headline shows FPS and ETA when enough
       data exists, with phase/frame/backend/preset visible and technical logs
       or rich metrics behind disclosure.
-- [ ] On completion, the workbench switches to Result automatically and loads a
+- [x] On completion, the workbench switches to Result automatically and loads a
       previewable result through the direct asset path or generated proxy.
 - [x] Comparison controls appear only when at least two buffers are available,
       use icon buttons with tooltips, and include Auto Compare with a central
@@ -87,7 +87,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
       payloads, CLI/App contracts, and tests.
 - [x] Add render status headline behavior in the job telemetry/status
       components and prove FPS/ETA fallback behavior with tests.
-- [ ] Implement Result auto-focus and preview retry/error reporting in the
+- [x] Implement Result auto-focus and preview retry/error reporting in the
       viewer flow, with E2E coverage for completed jobs.
 - [x] Replace comparison controls with the icon toolbar and Auto Compare handle,
       keeping available-buffer gating and synchronized playback coverage.
@@ -295,6 +295,22 @@ vertical, horizontal, or diagonal wipe from the drag direction while preserving
 explicit split, overlay, difference, swap, and synchronized playback controls.
 Verification passed with `pnpm vitest run src/lib/viewerCompare.test.ts`,
 `pnpm test:unit`, `pnpm build`, and `pnpm smoke:job` in `src/gui`.
+
+Result preview retry TDD slice:
+
+- Source C: `src/gui/src/components/workflow/WorkbenchViewer.tsx` already
+  switches to Result when an artifact path becomes available.
+- Source C: `src/gui/src/components/workflow/PreviewSurface.tsx` already
+  requests a browser-friendly proxy when direct video playback fails, but the
+  error state had no user action to retry a transient proxy failure.
+- Source C: `src/gui/scripts/smoke-job-lifecycle.mjs` already covers completed
+  job preview fallback, synchronized comparison videos, reset, and history.
+
+Decision: keep Result auto-focus on artifact availability and add a retry action
+to the preview error state. The job E2E smoke now forces one transient preview
+proxy failure, verifies the actionable error, clicks `Retry preview`, and then
+expects the generated proxy video to load. Verification passed with
+`pnpm build`, `pnpm smoke:job`, and `pnpm test:unit` in `src/gui`.
 
 ## Definition of Done
 

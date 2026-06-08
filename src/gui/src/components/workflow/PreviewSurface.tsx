@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { AlertCircle, FileImage, FileVideo, Zap } from "lucide-react";
+import { AlertCircle, FileImage, FileVideo, RefreshCw, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   fileExtension,
@@ -93,16 +93,7 @@ export function PreviewSurface({
   const src = toAssetUrl(previewPath);
   const usingProxy = Boolean(proxyPath);
 
-  const handleVideoError = () => {
-    if (proxyPath || isCreatingProxy) {
-      setPreviewError(
-        proxyPath
-          ? "Preview proxy could not be loaded."
-          : "Preview could not be loaded."
-      );
-      return;
-    }
-
+  const requestPreviewProxy = () => {
     const requestedPath = item.path;
     if (!requestedPath) {
       return;
@@ -110,6 +101,7 @@ export function PreviewSurface({
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    setProxyPath(null);
     setIsCreatingProxy(true);
     setPreviewError(null);
     createPreviewProxy(requestedPath)
@@ -125,6 +117,19 @@ export function PreviewSurface({
         if (requestIdRef.current !== requestId) return;
         setIsCreatingProxy(false);
       });
+  };
+
+  const handleVideoError = () => {
+    if (proxyPath || isCreatingProxy) {
+      setPreviewError(
+        proxyPath
+          ? "Preview proxy could not be loaded."
+          : "Preview could not be loaded."
+      );
+      return;
+    }
+
+    requestPreviewProxy();
   };
 
   const emitPlaybackSnapshot = (video: HTMLVideoElement) => {
@@ -190,6 +195,14 @@ export function PreviewSurface({
             {previewError}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={requestPreviewProxy}
+          className="mt-1 inline-flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Retry preview
+        </button>
       </div>
     );
   }

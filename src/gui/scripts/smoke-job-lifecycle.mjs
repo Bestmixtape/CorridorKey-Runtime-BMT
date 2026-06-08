@@ -232,6 +232,7 @@ async function runScenario(context, baseUrl, scenario) {
       const timers = [];
       let nextCallbackId = 1;
       window.__corridorkeyPreviewProxyCalls = 0;
+      window.__corridorkeyPreviewProxyFailuresRemaining = 0;
       window.__corridorkeyLastProcessArgs = null;
       window.__corridorkeySourceSelectionModes = [];
       window.__corridorkeyHintSelections = 0;
@@ -450,6 +451,10 @@ async function runScenario(context, baseUrl, scenario) {
 
           if (command === "create_preview_proxy") {
             window.__corridorkeyPreviewProxyCalls += 1;
+            if (window.__corridorkeyPreviewProxyFailuresRemaining > 0) {
+              window.__corridorkeyPreviewProxyFailuresRemaining -= 1;
+              return Promise.reject(new Error("Transient preview proxy failure"));
+            }
             return Promise.resolve({
               source_path: args.source,
               path: args.source.replace(/\.mov$/i, "_preview.mp4"),
@@ -781,6 +786,9 @@ async function assertClearHistory(page) {
 async function assertPreviewProxyFallback(page) {
   const before = await page.evaluate(() => window.__corridorkeyPreviewProxyCalls || 0);
   if (before === 0 && await page.locator("video").count() > 0) {
+    await page.evaluate(() => {
+      window.__corridorkeyPreviewProxyFailuresRemaining = 1;
+    });
     await page.locator("video").first().evaluate((video) => {
       video.dispatchEvent(new Event("error"));
     });
@@ -790,6 +798,9 @@ async function assertPreviewProxyFallback(page) {
       before,
       { timeout: 15000 }
     );
+    await waitForBody(page, "Preview unavailable");
+    await waitForBody(page, "Transient preview proxy failure");
+    await page.getByRole("button", { name: /Retry preview/i }).click();
   }
 
   await waitForBody(page, "Preview proxy");
