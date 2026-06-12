@@ -1,7 +1,10 @@
 #include <catch2/catch_all.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <string>
 
 #include "app/host_plugin_runtime_client.hpp"
 #include "app/host_plugin_runtime_family.hpp"
@@ -12,6 +15,40 @@
 
 using namespace corridorkey;
 using namespace corridorkey::app;
+
+namespace {
+
+#ifdef _WIN32
+class ScopedEnvironmentVariable {
+public:
+    ScopedEnvironmentVariable(const char* name, std::optional<std::string> value)
+        : m_name(name) {
+        m_previous = common::environment_variable_copy(m_name.c_str());
+        if (value.has_value()) {
+            _putenv_s(m_name.c_str(), value->c_str());
+        } else {
+            _putenv_s(m_name.c_str(), "");
+        }
+    }
+
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
+
+    ~ScopedEnvironmentVariable() {
+        if (m_previous.has_value()) {
+            _putenv_s(m_name.c_str(), m_previous->c_str());
+        } else {
+            _putenv_s(m_name.c_str(), "");
+        }
+    }
+
+private:
+    std::string m_name;
+    std::optional<std::string> m_previous;
+};
+#endif
+
+}  // namespace
 
 //
 // Test-file tidy-suppression rationale.
@@ -85,6 +122,46 @@ TEST_CASE("windows suite runtime config points host plugins at shared runtime ro
     REQUIRE(*resolved_root == shared_root);
 
     const auto runtime_server = resolve_host_plugin_runtime_server_binary(plugin_path);
+    REQUIRE(runtime_server == shared_root / "Contents" / "Win64" /
+                                  "corridorkey_host_plugin_runtime_server.exe");
+
+    std::filesystem::remove_all(temp_root);
+#endif
+}
+
+TEST_CASE("windows suite runtime config falls back to installed OFX sidecar for host cache paths",
+          "[unit][ofx][runtime][regression]") {
+#if !defined(_WIN32)
+    SUCCEED("The Windows suite runtime config is only consumed on Windows.");
+#else
+    const auto temp_root = std::filesystem::temp_directory_path() /
+                           ("corridorkey-suite-runtime-standard-sidecar-" +
+                            std::to_string(Catch::getSeed()));
+    std::filesystem::remove_all(temp_root);
+    const auto common_files_root = temp_root / "Common Files";
+    const auto shared_root = temp_root / "SharedRuntime";
+    const auto config_path = common_files_root / "OFX" / "Plugins" /
+                             "CorridorKey.ofx.bundle" / "Contents" / "Resources" /
+                             "corridorkey_runtime.ini";
+    const auto host_cache_plugin_path =
+        temp_root / "ResolveCache" / "CorridorKey.ofx";
+
+    ScopedEnvironmentVariable common_files("CommonProgramFiles",
+                                           common_files_root.string());
+    ScopedEnvironmentVariable shared_runtime_override("CORRIDORKEY_SHARED_RUNTIME_ROOT",
+                                                      std::nullopt);
+    ScopedEnvironmentVariable runtime_server_override("CORRIDORKEY_HOST_PLUGIN_RUNTIME_SERVER",
+                                                      std::nullopt);
+
+    std::filesystem::create_directories(config_path.parent_path());
+    std::ofstream(config_path) << "[runtime]\nshared_root=" << shared_root.string() << "\n";
+
+    const auto resolved_root = common::host_plugin_shared_runtime_root(host_cache_plugin_path);
+    REQUIRE(resolved_root.has_value());
+    REQUIRE(*resolved_root == shared_root);
+
+    const auto runtime_server =
+        resolve_host_plugin_runtime_server_binary(host_cache_plugin_path);
     REQUIRE(runtime_server == shared_root / "Contents" / "Win64" /
                                   "corridorkey_host_plugin_runtime_server.exe");
 

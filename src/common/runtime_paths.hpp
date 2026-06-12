@@ -325,23 +325,52 @@ inline std::optional<std::filesystem::path> suite_runtime_root_from_config_file(
 #endif
 }
 
+inline void append_windows_suite_host_runtime_config_candidates(
+    std::vector<std::filesystem::path>& candidates) {
+#if defined(_WIN32)
+    // Resolve can keep OFX cache state separate from the installed bundle.
+    // The suite sidecar remains the authority when the host-provided module
+    // path cannot lead back to Contents\Resources.
+    if (auto common_files = environment_variable_copy("CommonProgramFiles");
+        common_files.has_value()) {
+        detail::append_unique_path(candidates,
+                                   std::filesystem::path(*common_files) / "OFX" / "Plugins" /
+                                       "CorridorKey.ofx.bundle" / "Contents" / "Resources" /
+                                       "corridorkey_runtime.ini");
+    }
+    if (auto program_files = environment_variable_copy("ProgramFiles");
+        program_files.has_value()) {
+        detail::append_unique_path(candidates,
+                                   std::filesystem::path(*program_files) / "Adobe" /
+                                       "Common" / "Plug-ins" / "7.0" / "MediaCore" /
+                                       "CorridorKey" / "Contents" / "Resources" /
+                                       "corridorkey_runtime.ini");
+    }
+#else
+    (void)candidates;
+#endif
+}
+
 inline std::vector<std::filesystem::path> host_plugin_runtime_config_candidates(
     const std::filesystem::path& plugin_module_path) {
     std::vector<std::filesystem::path> candidates;
-    if (plugin_module_path.empty()) {
-        return candidates;
+    bool host_bundle_layout = false;
+    if (!plugin_module_path.empty()) {
+        const auto plugin_dir = plugin_module_path.parent_path();
+        if (!plugin_dir.empty()) {
+            const auto contents_dir = plugin_dir.parent_path();
+            if (plugin_dir.filename() == "Win64" && contents_dir.filename() == "Contents") {
+                host_bundle_layout = true;
+                detail::append_unique_path(candidates,
+                                           contents_dir / "Resources" /
+                                               "corridorkey_runtime.ini");
+            }
+            detail::append_unique_path(candidates, plugin_dir / "corridorkey_runtime.ini");
+        }
     }
-
-    const auto plugin_dir = plugin_module_path.parent_path();
-    if (plugin_dir.empty()) {
-        return candidates;
+    if (!host_bundle_layout) {
+        append_windows_suite_host_runtime_config_candidates(candidates);
     }
-
-    const auto contents_dir = plugin_dir.parent_path();
-    if (plugin_dir.filename() == "Win64" && contents_dir.filename() == "Contents") {
-        candidates.push_back(contents_dir / "Resources" / "corridorkey_runtime.ini");
-    }
-    candidates.push_back(plugin_dir / "corridorkey_runtime.ini");
     return candidates;
 }
 
