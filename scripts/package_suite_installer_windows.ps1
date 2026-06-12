@@ -399,7 +399,7 @@ function New-CorridorKeySuiteManifest {
     )
     $components = @(
         (New-CorridorKeySuiteComponent -Id "runtime-core" -Label "CLI/runtime core" -Types @("runtimeonly", "greenonly", "blueonly", "recommended", "custom") -Destination "$sharedRuntimeRoot\Contents\Win64" -Fixed $true),
-        (New-CorridorKeySuiteComponent -Id "gui" -Label "Tauri GUI" -Types @("recommended", "custom") -Destination $guiRoot -Requires @("runtime-core")),
+        (New-CorridorKeySuiteComponent -Id "gui" -Label "CorridorKey GUI" -Types @("recommended", "custom") -Destination $guiRoot -Requires @("runtime-core")),
         (New-CorridorKeySuiteComponent -Id "ofx-resolve-fusion" -Label "OFX Resolve/Fusion" -Types @("recommended", "custom") -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -Requires @("runtime-core")),
         (New-CorridorKeySuiteComponent -Id "ofx-nuke" -Label "OFX Nuke" -Types @("recommended", "custom") -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -Requires @("runtime-core")),
         (New-CorridorKeySuiteComponent -Id "adobe" -Label "Adobe plugins" -Types @("recommended", "custom") -Destination "%ProgramFiles%\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey" -Requires @("runtime-core")),
@@ -434,7 +434,7 @@ function New-CorridorKeySuiteManifest {
             (New-CorridorKeySuiteHost -Id "nuke" -Label "Nuke" -Component "ofx-nuke" -Detection "%ProgramFiles%\Nuke*; Nuke*.exe" -Destination "%CommonProgramFiles%\OFX\Plugins\CorridorKey.ofx.bundle" -CacheDeletes @("%LocalAppData%\Temp\nuke\ofxplugincache\ofxplugincache_Nuke*-64.xml")),
             (New-CorridorKeySuiteHost -Id "adobe" -Label "Adobe" -Component "adobe" -Detection "HKLM:\SOFTWARE\Adobe\After Effects; HKLM:\SOFTWARE\WOW6432Node\Adobe\After Effects; CommonPluginInstallPath" -Destination "%ProgramFiles%\Adobe\Common\Plug-ins\7.0\MediaCore\CorridorKey"),
             (New-CorridorKeySuiteHost -Id "cli-runtime" -Label "CLI/runtime core" -Component "runtime-core" -Detection "$sharedRuntimeRoot\Contents\Win64\corridorkey.exe" -Destination "$sharedRuntimeRoot\Contents\Win64"),
-            (New-CorridorKeySuiteHost -Id "gui" -Label "Tauri GUI" -Component "gui" -Detection "$guiRoot\CorridorKey.exe" -Destination $guiRoot)
+            (New-CorridorKeySuiteHost -Id "gui" -Label "CorridorKey GUI" -Component "gui" -Detection "$guiRoot\CorridorKey.exe" -Destination $guiRoot)
         )
         install_modes = [ordered]@{
             online = [ordered]@{
@@ -1197,6 +1197,9 @@ function New-CorridorKeySuiteIss {
     Add-CorridorKeySuiteLine -Lines $lines -Value "OutputDir=@@OUTPUT_DIR@@"
     Add-CorridorKeySuiteLine -Lines $lines -Value "OutputBaseFilename=@@OUTPUT_BASE_FILENAME@@"
     Add-CorridorKeySuiteLine -Lines $lines -Value "SetupIconFile={#InstallerIcon}"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "AlwaysShowComponentsList=yes"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "UsePreviousSetupType=no"
+    Add-CorridorKeySuiteLine -Lines $lines -Value "UsePreviousTasks=no"
     Add-CorridorKeySuiteLine -Lines $lines -Value "PrivilegesRequired=admin"
     Add-CorridorKeySuiteLine -Lines $lines -Value "PrivilegesRequiredOverridesAllowed=dialog"
     Add-CorridorKeySuiteLine -Lines $lines -Value "ShowLanguageDialog=no"
