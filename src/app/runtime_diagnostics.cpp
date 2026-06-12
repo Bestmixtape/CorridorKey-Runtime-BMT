@@ -698,8 +698,147 @@ std::vector<std::filesystem::path> packaged_model_inventory_candidates(
     return candidates;
 }
 
+std::string trim_ascii(std::string value) {
+    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.front()))) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.back()))) {
+        value.pop_back();
+    }
+    return value;
+}
+
+struct SuiteInventorySelection {
+    std::vector<std::string> model_packs;
+    std::vector<std::string> expected_models;
+    std::vector<std::string> expected_compiled_context_models;
+    std::string release_label;
+};
+
+std::optional<SuiteInventorySelection> load_suite_inventory_selection(
+    const std::filesystem::path& models_dir) {
+    if (models_dir.filename() != "models") {
+        return std::nullopt;
+    }
+
+    const auto suite_inventory_path = models_dir.parent_path() / "suite_inventory.ini";
+    std::ifstream stream(suite_inventory_path);
+    if (!stream.is_open()) {
+        return std::nullopt;
+    }
+
+    SuiteInventorySelection selection;
+    std::string section;
+    std::string line;
+    while (std::getline(stream, line)) {
+        auto trimmed = trim_ascii(line);
+        if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') {
+            continue;
+        }
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            section = trim_ascii(trimmed.substr(1, trimmed.size() - 2));
+            continue;
+        }
+        const auto separator = trimmed.find('=');
+        if (separator == std::string::npos) {
+            continue;
+        }
+        auto key = trim_ascii(trimmed.substr(0, separator));
+        auto value = trim_ascii(trimmed.substr(separator + 1));
+        if (section == "suite" && key == "display_version_label") {
+            selection.release_label = value;
+        } else if (section == "suite" && key == "version" && selection.release_label.empty()) {
+            selection.release_label = value;
+        } else if (section == "model_packs") {
+            selection.model_packs.push_back(key);
+        } else if (section == "model_files") {
+            selection.expected_models.push_back(key);
+        } else if (section == "compiled_context_models") {
+            selection.expected_compiled_context_models.push_back(key);
+        }
+    }
+
+    if (selection.release_label.empty()) {
+        selection.release_label = "CorridorKey Suite";
+    }
+    return selection;
+}
+
+bool suite_pack_selected(const SuiteInventorySelection& selection, std::string_view pack_id) {
+    return std::find(selection.model_packs.begin(), selection.model_packs.end(), pack_id) !=
+           selection.model_packs.end();
+}
+
+std::optional<PackagedModelInventory> load_suite_model_inventory(
+    const std::filesystem::path& models_dir) {
+    auto selection = load_suite_inventory_selection(models_dir);
+    if (!selection.has_value()) {
+        return std::nullopt;
+    }
+
+    const bool green_selected = suite_pack_selected(*selection, "green-models");
+    const bool blue_selected = suite_pack_selected(*selection, "blue-models");
+
+    PackagedModelInventory inventory;
+    inventory.package_type = "windows_suite";
+    inventory.model_profile = "windows-rtx";
+    inventory.bundle_track = "rtx";
+    inventory.release_label = selection->release_label;
+    inventory.optimization_profile_id = "windows-rtx";
+    inventory.optimization_profile_label = "Windows RTX";
+    inventory.backend_intent = "tensorrt_rtx";
+    inventory.fallback_policy = "suite_selected_model_packs";
+    inventory.warmup_policy = "provider_specific_session_warmup";
+    inventory.certification_tier = "suite_selected_components";
+    inventory.unrestricted_quality_attempt = true;
+    inventory.unrestricted_quality_attempt_set = true;
+
+    if (!selection->expected_models.empty() ||
+        !selection->expected_compiled_context_models.empty()) {
+        inventory.expected_models = selection->expected_models;
+        inventory.expected_compiled_context_models = selection->expected_compiled_context_models;
+    } else {
+        for (const auto& model : model_catalog()) {
+            if (!model.packaged_for_windows) {
+                continue;
+            }
+            if (green_selected && model.screen_color != "blue") {
+                inventory.expected_models.push_back(model.filename);
+            } else if (blue_selected && model.screen_color == "blue") {
+                inventory.expected_models.push_back(model.filename);
+            }
+        }
+
+        if (green_selected) {
+            inventory.expected_compiled_context_models = {
+                "corridorkey_fp16_512_ctx.onnx",
+                "corridorkey_fp16_1024_ctx.onnx",
+                "corridorkey_fp16_1536_ctx.onnx",
+                "corridorkey_fp16_2048_ctx.onnx",
+            };
+        }
+    }
+    for (const auto& filename : inventory.expected_compiled_context_models) {
+        std::error_code error;
+        if (std::filesystem::exists(models_dir / filename, error) && !error) {
+            inventory.compiled_context_models.push_back(filename);
+        } else {
+            inventory.missing_compiled_context_models.push_back(filename);
+        }
+    }
+    inventory.compiled_context_complete = inventory.missing_compiled_context_models.empty();
+    inventory.compiled_context_complete_set = true;
+
+    return inventory;
+}
+
 std::optional<PackagedModelInventory> load_packaged_model_inventory(
     const std::filesystem::path& models_dir) {
+    if (auto suite_inventory = load_suite_model_inventory(models_dir); suite_inventory.has_value()) {
+        return suite_inventory;
+    }
+
     for (const auto& candidate : packaged_model_inventory_candidates(models_dir)) {
         std::error_code error;
         if (!std::filesystem::exists(candidate, error) || error) {
@@ -790,6 +929,33 @@ std::vector<std::string> expected_packaged_models_for_platform(
         expected_models.push_back(model.filename);
     }
     return expected_models;
+}
+
+bool includes_dynamic_blue_pack(const std::vector<std::string>& expected_models) {
+    return std::find(expected_models.begin(), expected_models.end(),
+                     "corridorkey_dynamic_blue_fp16.ts") != expected_models.end();
+}
+
+nlohmann::json inspect_blue_torchtrt_runtime(const std::filesystem::path& models_dir,
+                                             bool required) {
+    const auto runtime_bin = models_dir.parent_path() / "torchtrt-runtime" / "bin";
+    std::error_code error;
+    const bool directory_found = std::filesystem::exists(runtime_bin, error) && !error;
+    error.clear();
+    const bool torchtrt_found = std::filesystem::exists(runtime_bin / "torchtrt.dll", error) &&
+                                !error;
+    error.clear();
+    const bool wrapper_found =
+        std::filesystem::exists(runtime_bin / "corridorkey_torchtrt.dll", error) && !error;
+
+    nlohmann::json json;
+    json["required"] = required;
+    json["path"] = runtime_bin.string();
+    json["directory_found"] = directory_found;
+    json["torchtrt_dll_found"] = torchtrt_found;
+    json["corridorkey_torchtrt_dll_found"] = wrapper_found;
+    json["ready"] = !required || (torchtrt_found && wrapper_found);
+    return json;
 }
 
 BundleLayoutInfo detect_bundle_layout(const std::filesystem::path& executable_dir) {
@@ -998,6 +1164,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                                             layout.kind == "linux_ofx";
     const auto expected_packaged_models =
         expected_packaged_models_for_platform(models_dir, uses_windows_model_catalog);
+    const auto blue_runtime =
+        inspect_blue_torchtrt_runtime(models_dir, includes_dynamic_blue_pack(expected_packaged_models));
 
     nlohmann::json packaged_models = nlohmann::json::array();
     bool packaged_models_ready = !expected_packaged_models.empty();
@@ -1184,6 +1352,7 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
     json["dependency_references"] = references;
     json["core_dependency_references"] = core_references;
     json["packaged_models"] = packaged_models;
+    json["blue_runtime"] = blue_runtime;
     json["signature"] = inspect_signature(executable_path);
     if (windows_plugin_layout) {
         const bool compiled_contexts_ready =
@@ -1192,7 +1361,8 @@ nlohmann::json inspect_bundle(const std::filesystem::path& models_dir,
                 : !windows_rtx_bundle;
         json["healthy"] = packaged_layout_detected && packaged_models_ready &&
                           json["model_inventory_contract_complete"].get<bool>() &&
-                          compiled_contexts_ready && runtime_backend_bundle_ready;
+                          compiled_contexts_ready && runtime_backend_bundle_ready &&
+                          blue_runtime["ready"].get<bool>();
     } else if (linux_ofx_layout) {
         // Linux RTX bundle uses ONNX Runtime CUDA EP loading .onnx models
         // directly. There are no precompiled TensorRT contexts to validate
@@ -1569,6 +1739,8 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
 
     const auto packaged_inventory = load_packaged_model_inventory(models_dir);
     const auto expected_windows_models = expected_packaged_models_for_platform(models_dir, true);
+    const auto blue_runtime =
+        inspect_blue_torchtrt_runtime(models_dir, includes_dynamic_blue_pack(expected_windows_models));
     bool packaged_models_ready = !expected_windows_models.empty();
     bool any_packaged_model_found = false;
     std::error_code error;
@@ -1635,6 +1807,7 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
             : false;
     json["model_inventory_contract_complete"] = inventory_contract_complete;
     json["packaged_models_ready"] = any_packaged_model_found && packaged_models_ready;
+    json["blue_runtime"] = blue_runtime;
 
     auto preferred_probe = preferred_windows_probe(probes);
     if (preferred_probe.has_value()) {
@@ -1668,7 +1841,8 @@ nlohmann::json inspect_windows_rtx_track(const std::filesystem::path& models_dir
     bool inventory_contract_ok = json.value("model_inventory_contract_complete", true);
     bool compiled_contexts_ok = compiled_contexts_ready;
 
-    json["healthy"] = backend_ok && models_ok && inventory_contract_ok && compiled_contexts_ok;
+    json["healthy"] = backend_ok && models_ok && inventory_contract_ok && compiled_contexts_ok &&
+                      blue_runtime["ready"].get<bool>();
 #endif
 
     return json;

@@ -57,16 +57,15 @@ rules here.
 - `scripts/windows.ps1` is the only Windows entrypoint. Every Windows
   build, package, certification, and release runs through it via
   `-Task build | prepare-rtx | certify-rtx-artifacts | package-ofx |
-  package-adobe | package-runtime | release | regen-rtx-release |
-  sync-version`. Never
+  package-adobe | package-runtime | package-suite | release |
+  regen-rtx-release | sync-version`. Never
   call `scripts/build.ps1`, `scripts/prepare_windows_rtx_release.ps1`,
   `scripts/release_pipeline_windows.ps1`, or any other sub-script
   directly; they are internal delegates and skip the version metadata
   sync, track resolution, and validation the wrapper applies.
 - When any prerequisite is missing (TensorRT-RTX SDK at
-  `vendor/TensorRT-RTX/`, `vcpkg` at `VCPKG_ROOT`, `uv`, CUDA Toolkit
-  12.8), fix the prerequisite. Do not route around the canonical
-  pipeline.
+  `vendor/TensorRT-RTX/`, `vcpkg` at `VCPKG_ROOT`, `uv`, CUDA Toolkit 12.9),
+  fix the prerequisite. Do not route around the canonical pipeline.
 - The only supported repo-local Windows runtime roots are
   `vendor/onnxruntime-windows-rtx` and `vendor/onnxruntime-windows-dml`
 - Do not use `vendor/onnxruntime-universal` or a globally installed ONNX Runtime

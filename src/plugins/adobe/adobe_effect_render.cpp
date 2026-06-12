@@ -997,6 +997,11 @@ std::filesystem::path resolve_adobe_models_root(const std::filesystem::path& plu
 
     const auto plugin_dir = plugin_module_path.parent_path();
     if (!plugin_module_path.empty() && !plugin_dir.empty()) {
+        if (auto shared_root = common::host_plugin_shared_runtime_root(plugin_module_path);
+            shared_root.has_value()) {
+            return *shared_root / "Contents" / "Resources" / "models";
+        }
+
         const auto contents_dir = plugin_dir.parent_path();
         if (plugin_dir.filename() == "Win64" && contents_dir.filename() == "Contents") {
             return contents_dir / "Resources" / "models";

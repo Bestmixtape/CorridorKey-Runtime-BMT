@@ -1,0 +1,182 @@
+# Spec `0005`: Build Unified Windows Installer
+
+**Status:** accepted
+**Created:** 2026-05-26
+**Owner:** Runtime maintainers
+
+## Context
+
+Windows users need one installer surface that lets them choose the CorridorKey
+runtime pieces they actually use without understanding the repository's
+separate package flows. The project already ships or stages OFX, Adobe,
+Tauri GUI, CLI/runtime, and model-pack artifacts through Windows packaging
+scripts. Leaving those as unrelated install experiences makes first setup,
+repair, offline installation, and support harder than the product needs to be.
+
+The feature is a top-level Windows suite installer that coordinates existing
+packaged payloads. It must preserve portable CLI/runtime and GUI package paths
+where those remain useful for support, smoke testing, or minimal installs. It
+must not duplicate multi-GB runtime or model payloads when a user selects more
+than one host surface.
+
+## User Scenarios
+
+- **Scenario 1:** A user installs only the surfaces they need
+  - Given a Windows user runs the CorridorKey suite installer
+  - When they select Resolve/Fusion, Nuke, Adobe, CLI/runtime core, GUI, and
+    Green or Blue model packs
+  - Then the installer stages only the selected components and records enough
+    inventory for repair and diagnostics.
+
+- **Scenario 2:** A user installs both Green and Blue capability
+  - Given a Windows RTX user wants the recommended full local install
+  - When they choose Green plus Blue
+  - Then the installer stages the required model/runtime packs once in the
+    shared installation layout used by every selected surface.
+
+- **Scenario 3:** A user repairs or changes an install
+  - Given CorridorKey is already installed
+  - When the user reruns the suite installer and changes selected components
+  - Then install, repair, clean install, and deselection behavior is explicit
+    and does not leave stale host plugins pointing at missing runtime assets.
+
+- **Scenario 4:** A maintainer builds online and offline installers
+  - Given release artifacts have been staged through the canonical Windows
+    wrapper
+  - When the maintainer builds online or offline installer flavors
+  - Then checksum validation, payload inventory, and generated installer
+    scripts prove which payloads are included or downloaded.
+
+## Requirements
+
+### Functional
+
+- The installer must expose selectable components for CLI/runtime core,
+  Tauri GUI, OFX Resolve/Fusion, OFX Nuke, Adobe plugins, Green model pack,
+  Blue model/runtime pack, and the recommended Green plus Blue install.
+- CLI/runtime core is the fixed base component. Tauri GUI, every host plugin
+  surface, and every Green/Blue model/runtime pack must remain optional even
+  when a recommended setup type preselects them.
+- The installer must define one shared runtime/model installation root or
+  cache strategy used by selected host and GUI surfaces.
+- The installer must reuse existing package outputs where possible and define
+  which Windows wrapper tasks stage those payloads.
+- Portable CLI/runtime and GUI packaging must remain available for support,
+  smoke testing, and minimal installs.
+- Online and offline installer behavior must include checksum verification,
+  repair behavior, clean install behavior, and deselection behavior for
+  previously installed components.
+- Host detection and install destinations must be documented for
+  Resolve/Fusion, Nuke, Adobe, CLI/runtime core, and GUI.
+- Generated installer outputs must include enough inventory for diagnostics
+  to report installed surfaces, model packs, and runtime roots.
+
+### Non-functional
+
+- Windows build and packaging entrypoints must continue to route through
+  `scripts/windows.ps1`.
+- The suite installer must not introduce a second, divergent model-pack
+  contract from the runtime `doctor`, `models`, and package validation flows.
+- Generated installer tests must verify component declarations, staged payload
+  paths, checksums, and host-surface destinations before release.
+
+## Success Criteria
+
+Definitional. Measurable conditions; pass/fail observable, not aspirational.
+Per-criterion progress tracking lives in per-Spec tasks.
+
+- A generated suite installer script contains all supported component choices
+  and maps each choice to a staged payload or download manifest entry.
+- A custom install can leave every component deselected except CLI/runtime
+  core, and the generated installer does not force GUI, host plugins, or model
+  packs outside an explicit setup recommendation.
+- Selecting multiple host surfaces uses one shared runtime/model payload root
+  instead of duplicating the same model pack per host.
+- The online flavor uses installer-managed downloads for every selected
+  payload that can be represented by a checksummed manifest entry; embedded
+  bytes are limited to the fixed bootstrap/base payloads and any explicitly
+  documented payload that cannot yet be externalized safely.
+- Online and offline installer builds fail when required checksums or staged
+  payload inventory entries are missing.
+- Repair, clean install, and component deselection behavior are documented and
+  covered by generated-installer regression tests.
+- Host install destinations for Resolve/Fusion, Nuke, Adobe, CLI/runtime, and
+  GUI are documented in the suite installer plan.
+- Portable CLI/runtime and GUI package flows still build after the suite
+  installer is added.
+
+## Edge Cases
+
+- User selects Adobe but Adobe host locations are not present.
+- User selects OFX Nuke but Resolve/Fusion is absent, or the reverse.
+- User selects GUI without host plugins.
+- User selects CLI/runtime core only.
+- User selects no optional GUI, host plugin, or model pack components.
+- User selects both Green and Blue packs.
+- User reruns the installer with a previously installed pack deselected.
+- Offline payload is missing, corrupt, or has a checksum mismatch.
+- Online payload download fails after some components have already been staged.
+- Existing runtime root contains stale model packs from an older packaging
+  contract.
+- Install destination requires elevation or is locked by a running host app.
+
+## Out of Scope
+
+This spec does not require changing the native runtime processing contract,
+changing model formats, replacing existing standalone package flows, or
+building macOS/Linux installers. It does not require the Tauri app packager to
+embed the full RTX runtime payload; the suite installer owns multi-surface
+component selection.
+
+## Open Questions
+
+- None for the first suite-installer implementation slice.
+
+### Resolved Decisions
+
+- Wrapper shape: the suite installer is a new `scripts/windows.ps1` task. It
+  does not overload `package-ofx`, `package-adobe`, or `package-runtime`,
+  because those remain standalone support and release surfaces.
+- Installer shell: the suite installer uses the existing Inno Setup packaging
+  family. The Windows `package-runtime` support path emits the portable
+  runtime/GUI package; a full-payload Tauri/NSIS installer is not a supported
+  Windows RTX artifact.
+- Shared runtime root: suite installs use one shared product root under
+  `{autopf}\CorridorKey\Runtime` for CLI/runtime binaries and
+  `Contents\Resources`. Host destinations receive only the surface payload
+  needed for host discovery plus configuration that points to that shared root.
+- Shared model/runtime payloads: Green installs the manifest `green-models`
+  pack into `Contents\Resources\models`; Blue installs `blue-models` into
+  `Contents\Resources\models` and `blue-runtime` into
+  `Contents\Resources\torchtrt-runtime\bin`. The suite model list is the
+  Windows RTX product contract, not the maintainer reference catalog.
+- Component optionality: CLI/runtime core is fixed and not deselectable. Tauri
+  GUI, OFX Resolve/Fusion, OFX Nuke, Adobe plugins, Green model pack, and Blue
+  model/runtime pack are optional components. Recommended setup types may
+  preselect them, but custom installs must be able to install only the fixed
+  CLI/runtime core.
+- Online payloads: online suite installers prefer Inno Setup's download flow
+  for selected payloads represented by checksummed manifest entries. The online
+  flavor should download model/runtime packs and should also externalize
+  optional GUI/host payloads when those package outputs have stable URLs,
+  sizes, and SHA-256 values. Any embedded optional payload must be explicit in
+  the generated inventory until it can move to the online manifest.
+- Offline payloads: offline suite installers bundle every distribution-manifest
+  pack and expose the same Green, Blue, and Green plus Blue component choices
+  as the online flavor. The bundled bytes stay in the installer; the selected
+  components decide what is installed.
+- Deselection: removing a host surface removes that host payload only. Removing
+  a model pack removes shared pack files and pack markers only when no selected
+  remaining surface requires the pack. The suite must write an installed
+  inventory for repair, diagnostics, and clean reinstall decisions.
+- Release smoke scope: a suite installer cannot ship until generated installer
+  regression tests, package validation, CLI/runtime smoke, GUI launch smoke,
+  OFX discovery smoke, Nuke discovery smoke, and Adobe MediaCore smoke cover
+  the selected surfaces.
+
+## Related
+
+- ADRs: none yet
+- Tasks: `doc/tasks/0028-plan-unified-windows-installer.md`,
+  `doc/tasks/0037-implement-windows-suite-installer-scaffold.md`
+- Supersedes / Depends on: depends on `doc/specs/0003-useful-tauri-gui.md`

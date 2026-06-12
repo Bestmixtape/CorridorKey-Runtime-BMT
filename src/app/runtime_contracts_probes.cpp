@@ -67,7 +67,13 @@ std::optional<std::string> normalize_preset_selector(const std::string& selector
 
 std::string resolve_platform_preset_alias(const std::string& selector,
                                           const RuntimeCapabilities& capabilities) {
-    if (selector == "balanced" || selector == "default") {
+    if (selector == "default" || selector == "draft") {
+        if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
+            return "win-rtx-draft";
+        }
+        return "mac-balanced";
+    }
+    if (selector == "balanced") {
         if (capabilities.platform == "windows" && has_backend(capabilities, Backend::TensorRT)) {
             return "win-rtx-balanced";
         }

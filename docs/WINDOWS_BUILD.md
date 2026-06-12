@@ -28,7 +28,7 @@ clones one (the OpenFX SDK). Everything else must be installed by the operator.
 | CUDA Toolkit | `12.9` (mandatory) | Required for CUDA headers, `nvcc`, and the NPP DLLs the OFX bundle ships. The contract pins `required_cuda_version = 12.9` because TensorRT-RTX 1.2.0.54 only ships against CUDA 12.9 and 13.x ([NVIDIA prerequisites](https://docs.nvidia.com/deeplearning/tensorrt-rtx/latest/installing-tensorrt-rtx/prerequisites.html)) and CUDA Minor Version Compatibility is forward-only ([NVIDIA compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)) — building against 12.8 produces `ERROR_DLL_INIT_FAILED` (1114) inside `onnxruntime_providers_nv_tensorrt_rtx.dll` at host load time. Install to the default path `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\`. Coexists with an existing 12.8 install. |
 | vcpkg | manifest mode | Clone `microsoft/vcpkg`, run `bootstrap-vcpkg.bat`, then export `VCPKG_ROOT=<path>`. Prefer a short path such as `C:\tools\vcpkg` to avoid Windows long-path issues in vcpkg build output. |
 | Inno Setup | `6.x` | Required for modern `-Flavor online|offline` OFX installers. `ISCC.exe` is auto-discovered under `%LOCALAPPDATA%\Programs\Inno Setup 6\`, the machine-wide `Program Files` locations, or `PATH`. |
-| NSIS | `3.x` | Required only for the legacy OFX installer path used when no modern `-Flavor` is selected. Default install location (`C:\Program Files (x86)\NSIS\`) is auto-discovered. |
+| NSIS | `3.x` | Required only for the legacy standalone OFX installer path used when no modern `-Flavor` is selected. Default install location (`C:\Program Files (x86)\NSIS\`) is auto-discovered. |
 | Git for Windows | latest | Needed by the OpenFX SDK shallow-clone step and the ORT source checkout. |
 
 All of these are available on a stock Windows 11 developer box once the
@@ -63,7 +63,9 @@ What `prepare-rtx` does:
 5. Builds ONNX Runtime from source with `--use_nv_tensorrt_rtx` and stages the result into `vendor\onnxruntime-windows-rtx\`.
 6. Auto-clones the pinned OpenFX SDK tag into `vendor\openfx\`.
 7. Activates the MSVC environment and builds the CorridorKey C++ tree (library, CLI, OFX plugin, tests).
-8. (Optional) Packages the portable runtime bundle — skipped when the Tauri GUI binary is absent, since that path belongs to the `package-runtime` track.
+
+Portable Runtime/GUI packaging belongs to `.\scripts\windows.ps1 -Task
+package-runtime` and is not run from `prepare-rtx`.
 
 Expected completion time on a fresh clone: **45 min – 2 h**, dominated by the ORT source build. Subsequent `prepare-rtx` runs that reuse the staged ORT finish in under a minute.
 
@@ -72,10 +74,15 @@ Expected completion time on a fresh clone: **45 min – 2 h**, dominated by the 
 ```powershell
 $env:VCPKG_ROOT = "C:\tools\vcpkg"
 
-# Public release. Produces CorridorKey_OFX_v0.8.2_Windows_RTX_Install.exe
-# plus the matching bundle_validation.json.
-.\scripts\windows.ps1 -Task release -Version 0.8.2
+# Public release track packaging. Produces the online Windows RTX host package
+# plus the matching validation report.
+.\scripts\windows.ps1 -Task release -Version 0.8.2 -Flavor online
 ```
+
+The top-level suite installer is built with `.\scripts\windows.ps1 -Task
+package-suite` after the runtime, OFX, and Adobe package roots have been
+staged. The suite keeps runtime/CLI core fixed and exposes GUI, host plugins,
+Green, and Blue as optional components.
 
 ### 2.3 Pre-release
 

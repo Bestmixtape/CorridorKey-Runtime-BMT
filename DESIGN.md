@@ -15,6 +15,58 @@ tokens:
       $value: "#fafafa"
       $type: color
       $description: "Default foreground. Tailwind zinc-50, applied to body via text-zinc-50."
+    background:
+      $value: "#09090b"
+      $type: color
+      $description: "Semantic application background. Alias of surface for bg-background."
+    foreground:
+      $value: "#fafafa"
+      $type: color
+      $description: "Semantic default foreground. Alias of text for text-foreground."
+    card:
+      $value: "#18181b"
+      $type: color
+      $description: "Panel and card surface. Tailwind zinc-900."
+    muted-foreground:
+      $value: "#a1a1aa"
+      $type: color
+      $description: "Secondary text. Tailwind zinc-400."
+    accent:
+      $value: "#27272a"
+      $type: color
+      $description: "Subtle interactive surface. Tailwind zinc-800."
+    accent-foreground:
+      $value: "#fafafa"
+      $type: color
+      $description: "Foreground used on accent surfaces."
+    primary:
+      $value: "#0ea5e9"
+      $type: color
+      $description: "Primary action color. Alias of brand."
+    primary-foreground:
+      $value: "#ffffff"
+      $type: color
+      $description: "Foreground used on primary action surfaces."
+    secondary:
+      $value: "#27272a"
+      $type: color
+      $description: "Secondary action surface. Tailwind zinc-800."
+    secondary-foreground:
+      $value: "#fafafa"
+      $type: color
+      $description: "Foreground used on secondary action surfaces."
+    destructive:
+      $value: "#ef4444"
+      $type: color
+      $description: "Error and destructive action color. Tailwind red-500."
+    destructive-foreground:
+      $value: "#ffffff"
+      $type: color
+      $description: "Foreground used on destructive surfaces."
+    ring:
+      $value: "#0ea5e9"
+      $type: color
+      $description: "Focus ring color. Alias of brand."
   font:
     body:
       $value: "-apple-system, system-ui, sans-serif"
@@ -50,13 +102,18 @@ yet - do not invent it in code.
 ## Colors
 
 CorridorKey's brand is **sky-blue on zinc-near-black**, not yellow-on-warm-black.
-Three semantic colors carry the surface today: `brand`, `surface`, `text`.
+The core identity colors are `brand`, `surface`, and `text`; UI role aliases
+map existing components to that same zinc/sky-blue system.
 
 - `brand` (`#0ea5e9`) is reserved for primary action, focus, and the wordmark.
   Do not use it for body text or background.
 - `surface` (`#09090b`) is the page background. All overlays sit on top of it.
 - `text` (`#fafafa`) is the only default foreground. Disabled and muted variants
-  are TODO; until they exist, use Tailwind opacity utilities sparingly.
+  derive from the zinc role aliases.
+- `background`, `foreground`, `card`, `muted-foreground`, `accent`,
+  `primary`, `secondary`, `destructive`, and `ring` are semantic utility
+  aliases used by existing React components. They do not create a second brand
+  palette; they bind component roles to zinc, sky-blue, and error red.
 
 The raw Tailwind palette (`zinc-*`, `sky-*`) is available through Tailwind's
 default theme. Prefer the semantic tokens above for any role-bearing color;
@@ -67,8 +124,8 @@ reach for raw scale values only inside Tailwind utility classes.
 A single font stack: `-apple-system, system-ui, sans-serif`. No web fonts are
 loaded - shipping a native-feeling Tauri desktop and a fast browser POC both
 benefit from the platform-provided UI font. A typographic scale (sizes,
-weights, line-heights) is `<TODO: not yet wired>`; until then, rely on
-Tailwind's default type ramp.
+weights, line-heights) is not declared; until then, rely on Tailwind's default
+type ramp.
 
 ## Shapes
 
@@ -88,16 +145,29 @@ elevation used in macOS-style desktop UIs and survives on zinc-950 because it
 is colored, not just opaque. There is intentionally no shadow ramp; the
 single elevation matches the flat, native-feeling surface.
 
+## Derived Surface Utilities
+
+The GUI may define named utility classes when a visual is a reusable composition
+of existing tokens rather than a new token value.
+
+- `ck-preview-empty` is the empty media viewer background. It derives from
+  `card` and `background`.
+- `ck-preview-checkerboard` is the transparent-preview checkerboard. It derives
+  from `card` and `background`.
+- `ck-wipe-divider` is the comparison divider glow. It derives from `brand`.
+- `ck-wipe-handle` is the Auto Compare draggable handle. It derives from
+  `brand`, `background`, `radius.md`, and `shadow.apple`.
+
 ## Layout
 
-Spacing scale: `<TODO: not yet wired>` - use Tailwind's default spacing utilities
-until project-specific tokens are pinned.
+Spacing scale is not declared; use Tailwind's default spacing utilities until
+project-specific tokens are pinned.
 
 ## Motion
 
-Easings and durations: `<TODO: not yet wired>` - use Tailwind's default
-transition utilities (`transition`, `duration-150`, `ease-in-out`) until a
-motion contract is pinned.
+Easings and durations are not declared; use Tailwind's default transition
+utilities (`transition`, `duration-150`, `ease-in-out`) until a motion contract
+is pinned.
 
 ## Do's and Don'ts
 

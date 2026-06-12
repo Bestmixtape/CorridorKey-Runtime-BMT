@@ -4,7 +4,10 @@
 #include <array>
 #include <chrono>
 #include <corridorkey/version.hpp>
+#include <cctype>
+#include <cstdint>
 #include <optional>
+#include <string_view>
 
 #include "../core/engine_internal.hpp"
 #include "../core/inference_session_metadata.hpp"
@@ -40,9 +43,165 @@ nlohmann::json metrics_to_json(const common::SystemMetrics& m) {
     nlohmann::json j;
     j["ram_usage_mb"] = m.ram_usage_mb;
     j["cpu_usage_percent"] = m.cpu_usage_percent;
+    j["vram_usage_mb"] = m.vram_usage_mb;
     j["peak_ram_mb"] = m.peak_ram_mb;
     j["system_wired_mb"] = m.system_wired_mb;
     return j;
+}
+
+struct ProgressTelemetrySnapshot {
+    std::optional<std::int64_t> processed_frames;
+    std::optional<std::int64_t> total_frames;
+};
+
+std::string lowercase_copy(std::string_view value) {
+    std::string lowered(value);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lowered;
+}
+
+std::string active_stage_from_status(std::string_view status) {
+    const auto lowered = lowercase_copy(status);
+    const auto contains = [&](std::string_view token) {
+        return lowered.find(token) != std::string::npos;
+    };
+
+    if (contains("proxy") || contains("preview")) {
+        return "proxy_generation";
+    }
+    if (contains("decode") || contains("read")) {
+        return "decode";
+    }
+    if (contains("encode") || contains("write") || contains("artifact")) {
+        return "encode";
+    }
+    if (contains("done") || contains("finish") || contains("complete")) {
+        return "complete";
+    }
+    return "inference";
+}
+
+std::optional<std::int64_t> parsed_frame_count(std::string_view status) {
+    const auto lowered = lowercase_copy(status);
+    const std::string_view token = "frames ";
+    const auto token_pos = lowered.find(token);
+    if (token_pos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    std::int64_t value = 0;
+    bool found_digit = false;
+    for (auto index = token_pos + token.size(); index < lowered.size(); ++index) {
+        const char c = lowered[index];
+        if (c < '0' || c > '9') {
+            break;
+        }
+        found_digit = true;
+        value = (value * 10) + (c - '0');
+    }
+
+    return found_digit ? std::optional<std::int64_t>{value} : std::nullopt;
+}
+
+std::optional<double> timing_fps(const StageTiming& timing) {
+    if (timing.total_ms <= 0.0) {
+        return std::nullopt;
+    }
+    const auto units = timing.work_units > 0 ? timing.work_units : timing.sample_count;
+    if (units <= 0) {
+        return std::nullopt;
+    }
+    return static_cast<double>(units) / (timing.total_ms / 1000.0);
+}
+
+nlohmann::json telemetry_metrics_from_timings(const std::vector<StageTiming>& timings) {
+    nlohmann::json metrics;
+    for (const auto& timing : timings) {
+        const auto fps = timing_fps(timing);
+        if (!fps.has_value()) {
+            continue;
+        }
+
+        const auto name = lowercase_copy(timing.name);
+        if (name == "video_decode_frame" || name == "video_decode_hint" ||
+            name == "sequence_read_input" || name == "sequence_read_hint") {
+            metrics["decode_fps"] = *fps;
+        } else if (name == "video_encode_frame" || name == "sequence_write_output") {
+            metrics["encode_fps"] = *fps;
+        } else if (name == "video_infer_batch" || name == "sequence_infer_batch" ||
+                   name == "render_frame" || name == "render_batch") {
+            metrics["render_fps"] = *fps;
+        }
+    }
+    return metrics;
+}
+
+void merge_metrics(nlohmann::json& target, const nlohmann::json& source) {
+    for (const auto& item : source.items()) {
+        target[item.key()] = item.value();
+    }
+}
+
+void append_progress_snapshot_metrics(nlohmann::json& metrics,
+                                      const std::optional<std::int64_t>& processed_frames,
+                                      const std::optional<std::int64_t>& total_frames,
+                                      int worker_count) {
+    if (worker_count > 0) {
+        metrics["worker_count"] = worker_count;
+    }
+    if (processed_frames.has_value()) {
+        metrics["processed_frames"] = *processed_frames;
+    }
+    if (total_frames.has_value()) {
+        metrics["total_frames"] = *total_frames;
+    }
+}
+
+ProgressTelemetrySnapshot append_progress_metrics(
+    nlohmann::json& metrics, std::string_view status, float progress,
+    const std::chrono::steady_clock::time_point& job_start,
+    const std::optional<std::int64_t>& known_total_frames, int worker_count) {
+    const auto active_stage = active_stage_from_status(status);
+    metrics["active_stage"] = active_stage;
+    if (active_stage == "proxy_generation") {
+        metrics["proxy_state"] = "building_preview";
+    }
+    if (worker_count > 0) {
+        metrics["worker_count"] = worker_count;
+    }
+
+    auto processed_frames = parsed_frame_count(status);
+    if (!processed_frames.has_value() && known_total_frames.has_value() && progress >= 0.0F &&
+        progress <= 1.0F) {
+        processed_frames = static_cast<std::int64_t>(
+            (static_cast<double>(*known_total_frames) * static_cast<double>(progress)) + 0.5);
+    }
+
+    std::optional<std::int64_t> total_frames;
+    if (known_total_frames.has_value()) {
+        total_frames = known_total_frames;
+        metrics["total_frames"] = *total_frames;
+    } else if (processed_frames.has_value() && *processed_frames > 0 && progress > 0.0F &&
+               progress <= 1.0F) {
+        total_frames = static_cast<std::int64_t>(
+            (static_cast<double>(*processed_frames) / static_cast<double>(progress)) + 0.5);
+        metrics["total_frames"] = *total_frames;
+    }
+
+    if (processed_frames.has_value()) {
+        metrics["processed_frames"] = *processed_frames;
+        const auto elapsed =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - job_start);
+        if (*processed_frames > 0 && elapsed.count() > 0.0) {
+            metrics["render_fps"] = static_cast<double>(*processed_frames) / elapsed.count();
+        }
+    }
+
+    return ProgressTelemetrySnapshot{
+        processed_frames,
+        total_frames,
+    };
 }
 
 Result<void> emit_event(const JobEventCallback& callback, const JobEvent& event) {
@@ -344,6 +503,18 @@ std::pair<bool, bool> windows_packaged_model_presence(const nlohmann::json& repo
         return {any_models, !any_models || all_found};
     }
 
+    const auto windows_universal =
+        report.contains("windows_universal") ? report["windows_universal"] : nlohmann::json::object();
+    if (windows_universal.contains("packaged_models") &&
+        windows_universal["packaged_models"].is_array()) {
+        const auto& packaged_models = windows_universal["packaged_models"];
+        const bool any_models = !packaged_models.empty();
+        const bool all_found = std::all_of(
+            packaged_models.begin(), packaged_models.end(),
+            [](const auto& entry) { return entry.value("usable", entry.value("found", false)); });
+        return {any_models, !any_models || all_found};
+    }
+
     bool packaged_windows_models_present = true;
     bool any_packaged_windows_model = false;
     for (const auto& entry : models) {
@@ -438,6 +609,10 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
     auto stage_callback = [&](const StageTiming& timing) { profiler.record(timing); };
     auto job_start = std::chrono::steady_clock::now();
     bool total_recorded = false;
+    std::optional<std::int64_t> known_total_frames;
+    std::optional<std::int64_t> last_processed_frames;
+    std::optional<std::int64_t> last_total_frames;
+    const int telemetry_worker_count = std::max(1, req.params.batch_size);
 
     auto started_event =
         JobEvent{JobEventType::JobStarted, "prepare", 0.0F, Backend::Auto, "Job accepted"};
@@ -577,6 +752,15 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         // Capture system metrics without performance cost
         auto metrics = common::get_current_metrics();
         progress_event.metrics = metrics_to_json(metrics);
+        const auto snapshot =
+            append_progress_metrics(progress_event.metrics, status, progress, job_start,
+                                    known_total_frames, telemetry_worker_count);
+        if (snapshot.processed_frames.has_value()) {
+            last_processed_frames = snapshot.processed_frames;
+        }
+        if (snapshot.total_frames.has_value()) {
+            last_total_frames = snapshot.total_frames;
+        }
 
         auto progress_res = emit_event(on_event, progress_event);
         return progress_res.has_value();
@@ -595,6 +779,11 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             failed_event.fallback = engine->backend_fallback();
         }
         failed_event.timings = finalize_timings(profiler, job_start, total_recorded);
+        failed_event.metrics = metrics_to_json(common::get_current_metrics());
+        failed_event.metrics["active_stage"] = "complete";
+        append_progress_snapshot_metrics(failed_event.metrics, last_processed_frames,
+                                         last_total_frames, telemetry_worker_count);
+        merge_metrics(failed_event.metrics, telemetry_metrics_from_timings(failed_event.timings));
         auto emit_res = emit_event(on_event, failed_event);
         if (!emit_res) return Unexpected(emit_res.error());
         return Unexpected(error);
@@ -662,6 +851,7 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
             Error error{ErrorCode::InvalidParameters, "No valid input files found."};
             return finalize_failure(error);
         }
+        known_total_frames = static_cast<std::int64_t>(inputs.size());
 
         auto result = profiler.measure(
             "sequence_pipeline",
@@ -700,6 +890,16 @@ Result<void> JobOrchestrator::run(const JobRequest& request, ProgressCallback on
         completed_event.fallback = engine->backend_fallback();
     }
     completed_event.timings = finalize_timings(profiler, job_start, total_recorded);
+    completed_event.metrics = metrics_to_json(common::get_current_metrics());
+    completed_event.metrics["active_stage"] = "complete";
+    if (known_total_frames.has_value()) {
+        last_processed_frames = known_total_frames;
+        last_total_frames = known_total_frames;
+    }
+    append_progress_snapshot_metrics(completed_event.metrics, last_processed_frames,
+                                     last_total_frames, telemetry_worker_count);
+    merge_metrics(completed_event.metrics,
+                  telemetry_metrics_from_timings(completed_event.timings));
     auto emit_completed_res = emit_event(on_event, completed_event);
     if (!emit_completed_res) return Unexpected(emit_completed_res.error());
 
@@ -824,6 +1024,10 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     nlohmann::json summary;
     const auto platform = report["system"]["capabilities"].value("platform", "");
     const bool bundle_healthy = report_flag(report, "bundle", "healthy", false);
+    const bool packaged_bundle_layout =
+        report_flag(report, "bundle", "packaged_layout_detected", false);
+    const bool bundle_health_required = platform != "windows" || packaged_bundle_layout;
+    const bool bundle_requirement_healthy = !bundle_health_required || bundle_healthy;
     const bool video_healthy = report_flag(report, "video", "healthy", false);
     const bool cache_healthy = report_flag(report, "cache", "healthy", false);
     const bool coreml_healthy = !report_flag(report, "coreml", "applicable", false) ||
@@ -890,7 +1094,7 @@ nlohmann::json summarize_doctor_report(const nlohmann::json& report) {
     summary["windows_universal_healthy"] =
         !report_flag(report, "windows_universal", "applicable", false) ||
         report_flag(report, "windows_universal", "healthy", false);
-    summary["healthy"] = bundle_healthy && video_healthy && cache_healthy && apple_healthy &&
+    summary["healthy"] = bundle_requirement_healthy && video_healthy && cache_healthy && apple_healthy &&
                          summary["windows_universal_healthy"].get<bool>() &&
                          validated_models_present &&
                          summary["bundle_inventory_contract_healthy"].get<bool>() &&
@@ -916,8 +1120,29 @@ nlohmann::json JobOrchestrator::run_doctor(const std::filesystem::path& models_d
     report["mlx"] = health["mlx"];
     report["windows_universal"] = health["windows_universal"];
 
+    std::vector<std::string> suite_model_filter;
+    const auto& bundle = report["bundle"];
+    if (bundle.contains("model_inventory") && bundle["model_inventory"].is_object() &&
+        bundle["model_inventory"].value("package_type", "") == "windows_suite" &&
+        bundle.contains("packaged_models") && bundle["packaged_models"].is_array()) {
+        for (const auto& model : bundle["packaged_models"]) {
+            if (model.contains("filename") && model["filename"].is_string()) {
+                suite_model_filter.push_back(model["filename"].get<std::string>());
+            }
+        }
+    }
+    const bool filter_doctor_models_for_suite = bundle.contains("model_inventory") &&
+                                                bundle["model_inventory"].is_object() &&
+                                                bundle["model_inventory"].value("package_type", "") ==
+                                                    "windows_suite";
+
     nlohmann::json models = nlohmann::json::array();
     for (const auto& model : model_catalog()) {
+        if (filter_doctor_models_for_suite &&
+            std::find(suite_model_filter.begin(), suite_model_filter.end(), model.filename) ==
+                suite_model_filter.end()) {
+            continue;
+        }
         std::filesystem::path path = models_dir / model.filename;
         const auto artifact = common::inspect_model_artifact(path);
         nlohmann::json entry = to_json(model);

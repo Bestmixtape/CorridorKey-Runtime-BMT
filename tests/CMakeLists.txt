@@ -50,6 +50,10 @@ function(corridorkey_stage_ort_runtime target_name)
             ${_corridorkey_test_vcredist_dlls}
             "$<TARGET_FILE_DIR:${target_name}>"
         COMMAND_EXPAND_LISTS
+        # Several test executables share tests/integration as an output
+        # directory; serialize these copies so parallel Ninja builds do not
+        # race on the same VC++ runtime DLL.
+        USES_TERMINAL
         COMMENT "Staging ONNX Runtime / NPP / VC++ Redist DLLs for ${target_name}"
     )
 endfunction()

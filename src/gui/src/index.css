@@ -2,6 +2,19 @@
 
 @theme {
   --color-brand: #0ea5e9;
+  --color-background: #09090b;
+  --color-foreground: #fafafa;
+  --color-card: #18181b;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #27272a;
+  --color-accent-foreground: #fafafa;
+  --color-primary: #0ea5e9;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #fafafa;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-ring: #0ea5e9;
   --radius-xl: 16px;
   --radius-lg: 12px;
   --radius-md: 8px;
@@ -18,5 +31,31 @@
 @layer utilities {
   .backdrop-blur-xl {
     backdrop-filter: blur(24px);
+  }
+
+  .ck-preview-empty {
+    background: radial-gradient(circle at center, var(--color-card) 0, var(--color-background) 56%);
+  }
+
+  .ck-preview-checkerboard {
+    background-color: var(--color-background);
+    background-image:
+      linear-gradient(45deg, var(--color-card) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--color-card) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--color-card) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--color-card) 75%);
+    background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+    background-size: 24px 24px;
+  }
+
+  .ck-wipe-divider {
+    filter: drop-shadow(0 0 8px var(--color-brand));
+  }
+
+  .ck-wipe-handle {
+    border: 1px solid var(--color-brand);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-background) 85%, transparent);
+    box-shadow: var(--shadow-apple);
   }
 }

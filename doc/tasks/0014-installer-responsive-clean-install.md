@@ -3,7 +3,7 @@
 **Status:** in-progress
 **Created:** 2026-05-11
 **Owner:** alexandremendoncaalvaro
-**Spec ref:**
+**Spec ref:** doc/specs/0002-dedicated-screen-nodes.md
 **Board ref:**
 
 ## Context

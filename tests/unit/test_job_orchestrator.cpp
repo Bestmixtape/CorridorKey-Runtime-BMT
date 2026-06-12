@@ -110,6 +110,41 @@ TEST_CASE("doctor summary fails when an expected packaged bundle model is missin
     REQUIRE_FALSE(summary["healthy"].get<bool>());
 }
 
+TEST_CASE("doctor summary accepts portable Windows runtime without plugin bundle layout",
+          "[unit][doctor][regression]") {
+    nlohmann::json report;
+    report["system"]["capabilities"]["platform"] = "windows";
+    report["bundle"]["healthy"] = false;
+    report["bundle"]["packaged_layout_detected"] = false;
+    report["bundle"]["model_inventory_contract_complete"] = true;
+    report["bundle"]["model_profile"] = "windows-rtx";
+    report["video"]["healthy"] = true;
+    report["cache"]["healthy"] = true;
+    report["coreml"]["applicable"] = false;
+    report["mlx"]["applicable"] = false;
+    report["windows_universal"]["applicable"] = true;
+    report["windows_universal"]["provider_available"] = true;
+    report["windows_universal"]["backend_integrated"] = true;
+    report["windows_universal"]["healthy"] = true;
+    report["windows_universal"]["recommended_backend"] = "tensorrt";
+    report["windows_universal"]["recommended_model"] = "corridorkey_fp16_1024.onnx";
+    report["windows_universal"]["packaged_models"] =
+        nlohmann::json::array({{{"filename", "corridorkey_fp16_512.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_fp16_1024.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_fp16_1536.onnx"}, {"found", true}},
+                               {{"filename", "corridorkey_fp16_2048.onnx"}, {"found", true}}});
+    report["optimization_profile"]["id"] = "windows-rtx";
+    report["models"] = nlohmann::json::array();
+
+    auto summary = summarize_doctor_report(report);
+
+    REQUIRE(summary["validated_models_present"].get<bool>());
+    REQUIRE(summary["windows_universal_packaged_models_present"].get<bool>());
+    REQUIRE(summary["windows_universal_healthy"].get<bool>());
+    REQUIRE_FALSE(summary["bundle_healthy"].get<bool>());
+    REQUIRE(summary["healthy"].get<bool>());
+}
+
 TEST_CASE("doctor summary reports recommended and certified artifact state",
           "[unit][doctor][regression]") {
     nlohmann::json report;

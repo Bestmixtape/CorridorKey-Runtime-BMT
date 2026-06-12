@@ -1,259 +1,407 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { useJobStore } from "@/lib/job";
-import { Button } from "@/components/ui/button";
+import { invoke } from "@tauri-apps/api/core";
+import { loadSelectedPresetPreference, useJobStore } from "@/lib/job";
+import { useEngineStore } from "@/lib/store";
+import { useEffect, useMemo, useState } from "react";
+import { selectAlphaHintAsset, selectSourceAsset } from "@/lib/preview";
+import { preferredPresetId } from "@/lib/catalog";
+import { jobTelemetrySummary } from "@/lib/jobTelemetry";
 import {
-  FileVideo,
-  FolderDown,
-  Zap,
-  AlertCircle,
-  CheckCircle2,
-  ChevronRight,
-  Terminal,
-  Layers
-} from "lucide-react";
-import { useState } from "react";
-import { cn } from "@/lib/utils";
-
-interface JobMetrics {
-  ram_usage_mb?: number;
-  cpu_usage_percent?: number;
-}
+  isOutputPathReady,
+  outputArtifactOptions,
+  preferredOutputArtifactFamily,
+  outputRecipeControlOptions,
+  outputRecipeLabel,
+  suggestOutputPathForRecipe,
+} from "@/lib/outputRecipe";
+import { jobRecipeChips } from "@/lib/jobRecipe";
+import {
+  modelOptionLabel,
+  modelOptionValue,
+  presetOptionLabel,
+  presetOptionValue
+} from "@/lib/workflowLabels";
+import { JobStatusPanel } from "@/components/workflow/JobStatusPanel";
+import { WorkbenchViewer } from "@/components/workflow/WorkbenchViewer";
+import { WorkflowSetupRail } from "@/components/workflow/WorkflowSetupRail";
 
 export function ProcessFlow() {
   const {
-    inputPath, setInput,
+    inputPath, inputSourceMode, setInput,
     outputPath, setOutput,
     hintPath, setHint,
-    startJob, isProcessing,
+    selectedModelId, setSelectedModelId,
+    selectedPresetId, setSelectedPresetId, restoreSelectedPresetId,
+    videoEncodeMode, setVideoEncodeMode,
+    outputRecipe, setOutputRecipeSetting,
+    advancedSettings, setAdvancedSetting,
+    defaultOutputDir,
+    startJob, cancelJob, isProcessing,
+    terminalStatus,
     currentProgress, statusMessage,
+    startedAtMs, finishedAtMs,
     error, activeBackend,
-    logs
+    artifactPath, previewArtifactPath, warnings,
+    timings, metrics, logs,
+    reset
   } = useJobStore();
+  const { readiness, getModelChoices, getPresetChoices } = useEngineStore();
+  const modelChoices = getModelChoices();
+  const presetChoices = getPresetChoices();
+  const presetChoiceValues = presetChoices.map(presetOptionValue).filter(Boolean);
+  const modelChoiceValues = modelChoices.map(modelOptionValue).filter(Boolean);
+  const runtimeUsable = Boolean(readiness && readiness.status !== "error");
+  const runtimeOutputRecipeCapabilities = readiness?.info.ok
+    ? readiness.info.value?.capabilities?.output_recipe
+    : undefined;
+  const sourceContext = useMemo(() => ({
+    selectedAsFolder: inputSourceMode === "folder"
+  }), [inputSourceMode]);
+  const artifactOptions = outputArtifactOptions(
+    inputPath,
+    sourceContext,
+    runtimeOutputRecipeCapabilities
+  );
+  const artifactOption = artifactOptions.find((option) => option.value === outputRecipe.artifactFamily) ?? artifactOptions[0];
+  const recipeControls = useMemo(
+    () => outputRecipeControlOptions(outputRecipe, runtimeOutputRecipeCapabilities),
+    [outputRecipe, runtimeOutputRecipeCapabilities]
+  );
+  const outputReady = isOutputPathReady(outputPath, outputRecipe);
+  const hasRunnableSelection = Boolean(selectedPresetId || selectedModelId);
+  const canStart = Boolean(inputPath && outputReady && runtimeUsable && hasRunnableSelection && artifactOption.enabled);
+  const canRetry = terminalStatus === "completed" || terminalStatus === "failed" || terminalStatus === "cancelled";
+  const viewerArtifactPath = previewArtifactPath || artifactPath;
 
   const [showLogs, setShowLogs] = useState(false);
+  const [resetCount, setResetCount] = useState(0);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // Extract metrics from the last log entry if possible
-  const lastLog = logs[logs.length - 1];
-  let metrics: JobMetrics = {};
-  if (lastLog) {
-    try {
-      const parsed = JSON.parse(lastLog);
-      if (parsed.metrics) metrics = parsed.metrics;
-    } catch (e) {}
-  }
+  useEffect(() => {
+    const preferredId = preferredPresetId(
+      presetChoices,
+      selectedPresetId ?? loadSelectedPresetPreference()
+    );
+    if (preferredId !== selectedPresetId) {
+      restoreSelectedPresetId(preferredId);
+    }
+  }, [
+    presetChoiceValues.join("|"),
+    selectedPresetId,
+    presetChoices,
+    restoreSelectedPresetId
+  ]);
+
+  useEffect(() => {
+    if (selectedModelId && !modelChoiceValues.includes(selectedModelId)) {
+      setSelectedModelId(null);
+    }
+  }, [
+    modelChoiceValues.join("|"),
+    selectedModelId,
+    setSelectedModelId
+  ]);
+
+  useEffect(() => {
+    if (artifactOption.enabled) {
+      return;
+    }
+    const nextOption = artifactOptions.find((option) => option.enabled);
+    if (nextOption) {
+      setOutputRecipeSetting("artifactFamily", nextOption.value);
+    }
+  }, [
+    artifactOptions.map((option) => `${option.value}:${option.enabled}`).join("|"),
+    artifactOption.enabled,
+    setOutputRecipeSetting
+  ]);
+
+  useEffect(() => {
+    const selectedAlpha = recipeControls.alphaModes.find((option) => option.value === outputRecipe.alphaMode);
+    if (selectedAlpha?.enabled) {
+      return;
+    }
+    const fallback = recipeControls.alphaModes.find((option) => option.enabled);
+    if (fallback) {
+      setOutputRecipeSetting("alphaMode", fallback.value);
+    }
+  }, [
+    outputRecipe.alphaMode,
+    recipeControls.alphaModes.map((option) => `${option.value}:${option.enabled}`).join("|"),
+    setOutputRecipeSetting
+  ]);
+
+  useEffect(() => {
+    const selectedColor = recipeControls.colorIntents.find((option) => option.value === outputRecipe.colorIntent);
+    if (selectedColor?.enabled) {
+      return;
+    }
+    const fallback = recipeControls.colorIntents.find((option) => option.enabled);
+    if (fallback) {
+      setOutputRecipeSetting("colorIntent", fallback.value);
+    }
+  }, [
+    outputRecipe.colorIntent,
+    recipeControls.colorIntents.map((option) => `${option.value}:${option.enabled}`).join("|"),
+    setOutputRecipeSetting
+  ]);
+
+  useEffect(() => {
+    if (!inputPath || outputPath) {
+      return;
+    }
+    const suggestedOutput = suggestOutputPathForRecipe(
+      inputPath,
+      null,
+      defaultOutputDir,
+      outputRecipe,
+      sourceContext,
+      runtimeOutputRecipeCapabilities
+    );
+    if (suggestedOutput) {
+      setOutput(suggestedOutput);
+    }
+  }, [
+    inputPath,
+    outputPath,
+    defaultOutputDir,
+    outputRecipe,
+    sourceContext,
+    runtimeOutputRecipeCapabilities,
+    setOutput
+  ]);
+
+  useEffect(() => {
+    if (!isProcessing) {
+      setNowMs(Date.now());
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [isProcessing]);
+
+  const telemetry = useMemo(() => jobTelemetrySummary({
+    progressPercent: currentProgress,
+    startedAtMs,
+    finishedAtMs,
+    nowMs,
+    timings,
+    metrics
+  }), [currentProgress, finishedAtMs, metrics, nowMs, startedAtMs, timings]);
+  const selectedPreset = selectedPresetId
+    ? presetChoices.find((entry) => presetOptionValue(entry) === selectedPresetId) ?? null
+    : null;
+  const selectedModel = selectedModelId
+    ? modelChoices.find((entry) => modelOptionValue(entry) === selectedModelId) ?? null
+    : null;
+  const recipeChips = useMemo(() => jobRecipeChips({
+    presetLabel: selectedPreset ? presetOptionLabel(selectedPreset) : null,
+    modelLabel: selectedModel ? modelOptionLabel(selectedModel) : null,
+    videoEncodeMode,
+    artifactPath,
+    outputRecipe
+  }), [
+    selectedPreset,
+    selectedModel,
+    videoEncodeMode,
+    artifactPath,
+    outputRecipe
+  ]);
+  const artifactMetadata = useMemo(() => ({
+    preset: selectedPreset ? presetOptionLabel(selectedPreset) : "default",
+    model: selectedModel ? modelOptionLabel(selectedModel) : "auto",
+    output_recipe: outputRecipeLabel(outputRecipe),
+    artifact_family: outputRecipe.artifactFamily,
+    alpha_mode: outputRecipe.alphaMode,
+    preview_background: outputRecipe.previewBackground,
+    color_intent: outputRecipe.colorIntent,
+    video_encode: videoEncodeMode,
+    quality_fallback: advancedSettings.qualityFallback,
+    refinement_mode: advancedSettings.refinementMode,
+    precision: advancedSettings.precision,
+    resolution: String(advancedSettings.resolution),
+    batch_size: String(advancedSettings.batchSize),
+    despill: advancedSettings.despill.toFixed(2),
+    despeckle: advancedSettings.despeckle ? "on" : "off",
+    tiling: advancedSettings.tiled ? "forced" : "off",
+    output_path: artifactPath || outputPath || ""
+  }), [
+    artifactPath,
+    outputPath,
+    outputRecipe,
+    selectedPreset,
+    selectedModel,
+    videoEncodeMode,
+    advancedSettings
+  ]);
 
   const handleSelectInput = async () => {
-    const selected = await open({
-      multiple: false,
-      filters: [{
-        name: 'Video/Images',
-        extensions: ['mp4', 'mov', 'exr', 'png', 'jpg']
-      }]
-    });
-    if (selected && !Array.isArray(selected)) {
-      setInput(selected);
+    await applySelectedInput(await selectSourceAsset("file"), "file");
+  };
+
+  const handleSelectInputFolder = async () => {
+    await applySelectedInput(await selectSourceAsset("folder"), "folder");
+  };
+
+  const applySelectedInput = async (selected: string | null, mode: "file" | "folder") => {
+    if (!selected) return;
+
+    const nextSourceContext = { selectedAsFolder: mode === "folder" };
+    const preferredArtifactFamily = preferredOutputArtifactFamily(
+      selected,
+      outputRecipe,
+      nextSourceContext,
+      runtimeOutputRecipeCapabilities
+    );
+    const nextRecipe = { ...outputRecipe, artifactFamily: preferredArtifactFamily };
+    setInput(selected, mode);
+    if (nextRecipe.artifactFamily !== outputRecipe.artifactFamily) {
+      setOutputRecipeSetting("artifactFamily", nextRecipe.artifactFamily);
+    }
+    const suggestedOutput = suggestOutputPathForRecipe(
+      selected,
+      null,
+      defaultOutputDir,
+      nextRecipe,
+      nextSourceContext,
+      runtimeOutputRecipeCapabilities
+    );
+    if (suggestedOutput) {
+      setOutput(suggestedOutput);
     }
   };
 
   const handleSelectHint = async () => {
-    const selected = await open({
-      multiple: false,
-      filters: [{
-        name: 'Video/Images',
-        extensions: ['mp4', 'mov', 'exr', 'png', 'jpg']
-      }]
-    });
-    if (selected && !Array.isArray(selected)) {
+    const selected = await selectAlphaHintAsset();
+    if (selected) {
       setHint(selected);
     }
   };
 
+  const handleClearHint = () => {
+    setHint(null);
+  };
+
   const handleSelectOutput = async () => {
-    const selected = await save({
-      defaultPath: outputPath || undefined,
-      filters: [{
-        name: 'Video',
-        extensions: ['mov', 'mkv', 'avi', 'mp4']
-      }]
-    });
+    const defaultPath = outputReady
+      ? outputPath || undefined
+      : suggestOutputPathForRecipe(
+          inputPath,
+          null,
+          defaultOutputDir,
+          outputRecipe,
+          sourceContext,
+          runtimeOutputRecipeCapabilities
+        ) || undefined;
+    const selected = outputRecipe.artifactFamily === "movie"
+      ? await save({
+          defaultPath,
+          filters: [{
+            name: "Video",
+            extensions: ["mov", "mkv", "avi", "mp4"]
+          }]
+        })
+      : await open({
+          directory: true,
+          multiple: false,
+          defaultPath
+        });
     if (selected) {
-      setOutput(selected);
+      setOutput(Array.isArray(selected) ? selected[0] : selected);
     }
   };
 
+  const handleRevealArtifact = async () => {
+    const path = artifactPath || outputPath;
+    if (!path) {
+      return;
+    }
+
+    await invoke("reveal_in_folder", { path });
+  };
+
+  const handleResetWorkbench = () => {
+    reset();
+    setShowLogs(false);
+    setResetCount((value) => value + 1);
+  };
+
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="grid min-h-[calc(100vh-12rem)] grid-cols-1 gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0 space-y-5">
+        <WorkbenchViewer
+          inputPath={inputPath}
+          hintPath={hintPath}
+          outputPath={outputPath}
+          artifactPath={viewerArtifactPath}
+          terminalStatus={terminalStatus}
+          activeBackend={activeBackend}
+          resetCount={resetCount}
+          outputRecipe={outputRecipe}
+        />
 
-      {/* Steps Container */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-        {/* Step 1: Input */}
-        <div
-          onClick={!isProcessing ? handleSelectInput : undefined}
-          className={cn(
-            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
-            inputPath
-              ? "border-brand/40 bg-brand/5"
-              : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
-            isProcessing && "opacity-50 cursor-not-allowed"
-          )}
-        >
-          <div className="p-3 rounded-full bg-background shadow-sm">
-            <FileVideo className={cn("w-6 h-6", inputPath ? "text-brand" : "text-muted-foreground")} />
-          </div>
-          <div className="space-y-1">
-            <h4 className="font-semibold text-sm text-foreground">1. Source</h4>
-            <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">
-              {inputPath ? (inputPath.split(/[\\/]/).pop()) : "Select footage"}
-            </p>
-          </div>
-        </div>
-
-        {/* Step 2: Alpha Hint (Optional) */}
-        <div
-          onClick={!isProcessing ? handleSelectHint : undefined}
-          className={cn(
-            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4 relative",
-            hintPath
-              ? "border-brand/40 bg-brand/5"
-              : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
-            isProcessing && "opacity-50 cursor-not-allowed"
-          )}
-        >
-          <div className="absolute top-2 right-3 text-[8px] font-bold text-muted-foreground/50 uppercase tracking-tighter">Optional</div>
-          <div className="p-3 rounded-full bg-background shadow-sm">
-            <Layers className={cn("w-6 h-6", hintPath ? "text-brand" : "text-muted-foreground")} />
-          </div>
-          <div className="space-y-1">
-            <h4 className="font-semibold text-sm text-foreground">2. Alpha Hint</h4>
-            <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">
-              {hintPath ? (hintPath.split(/[\\/]/).pop()) : "Select rough mask"}
-            </p>
-          </div>
-        </div>
-
-        {/* Step 3: Output */}
-        <div
-          onClick={!isProcessing ? handleSelectOutput : undefined}
-          className={cn(
-            "p-6 rounded-2xl border-2 border-dashed transition-all cursor-pointer flex flex-col items-center text-center space-y-4",
-            outputPath
-              ? "border-brand/40 bg-brand/5"
-              : "border-muted-foreground/20 bg-accent/5 hover:border-brand/50 hover:bg-brand/5",
-            isProcessing && "opacity-50 cursor-not-allowed"
-          )}
-        >
-          <div className="p-3 rounded-full bg-background shadow-sm">
-            <FolderDown className={cn("w-6 h-6", outputPath ? "text-brand" : "text-muted-foreground")} />
-          </div>
-          <div className="space-y-1">
-            <h4 className="font-semibold text-sm text-foreground">3. Destination</h4>
-            <p className="text-[10px] text-muted-foreground truncate max-w-[150px]">
-              {outputPath ? (outputPath.split(/[\\/]/).pop()) : "Choose where to save"}
-            </p>
-          </div>
-        </div>
-
+        <JobStatusPanel
+          terminalStatus={terminalStatus}
+          currentProgress={currentProgress}
+          statusMessage={statusMessage}
+          error={error}
+          activeBackend={activeBackend}
+          artifactPath={artifactPath}
+          warnings={warnings}
+          timings={timings}
+          logs={logs}
+          metrics={metrics}
+          telemetry={telemetry}
+          recipeChips={recipeChips}
+          artifactMetadata={artifactMetadata}
+          showLogs={showLogs}
+          onRevealArtifact={handleRevealArtifact}
+          onToggleLogs={() => setShowLogs(!showLogs)}
+        />
       </div>
 
-      {/* Progress Section */}
-      {(isProcessing || currentProgress > 0 || error) && (
-        <div className="p-8 rounded-2xl bg-card border border-zinc-800 shadow-apple space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {error ? (
-                <AlertCircle className="w-5 h-5 text-destructive" />
-              ) : currentProgress === 100 ? (
-                <CheckCircle2 className="w-5 h-5 text-green-500" />
-              ) : (
-                <Zap className="w-5 h-5 text-brand animate-pulse" />
-              )}
-              <div>
-                <h4 className="font-bold text-sm leading-none text-foreground">
-                  {error ? "Processing Failed" : currentProgress === 100 ? "Complete" : "In Progress"}
-                </h4>
-                <p className={cn(
-                  "text-xs mt-1 font-medium",
-                  error ? "text-destructive" : "text-muted-foreground"
-                )}>
-                  {statusMessage}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              {activeBackend && (
-                <div className="px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[10px] font-mono font-bold uppercase tracking-wider">
-                  {activeBackend}
-                </div>
-              )}
-              {metrics.ram_usage_mb && (
-                <div className="px-2 py-1 rounded bg-brand/10 text-brand text-[10px] font-mono font-bold">
-                  {metrics.ram_usage_mb}MB RAM
-                </div>
-              )}
-            </div>
-          </div>
-
-          {!error && (
-            <div className="space-y-2">
-              <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-brand transition-all duration-500 ease-out shadow-[0_0_10px_rgba(14,165,233,0.5)]"
-                  style={{ width: `${currentProgress}%` }}
-                />
-              </div>
-              <div className="flex justify-end">
-                <span className="text-[10px] font-mono text-muted-foreground">{Math.round(currentProgress)}%</span>
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="p-4 rounded-lg bg-destructive/5 border border-destructive/10 text-xs text-destructive font-mono overflow-auto max-h-32">
-              {error}
-            </div>
-          )}
-
-          {/* Log Toggle */}
-          <button
-            onClick={() => setShowLogs(!showLogs)}
-            className="flex items-center gap-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Terminal className="w-3 h-3" />
-            {showLogs ? "Hide Console Output" : "View Technical Logs"}
-          </button>
-
-          {showLogs && (
-            <div className="mt-4 p-4 rounded-lg bg-black/90 text-[10px] font-mono text-green-400/80 overflow-auto max-h-48 whitespace-pre-wrap">
-              {logs.length > 0 ? logs.join('\n') : "Waiting for engine output..."}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Action Area */}
-      <div className="flex items-center justify-center pt-4">
-        <Button
-          size="lg"
-          disabled={!inputPath || !outputPath || isProcessing}
-          onClick={startJob}
-          className="group px-12 relative overflow-hidden"
-        >
-          {isProcessing ? (
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-t-transparent border-white rounded-full animate-spin" />
-              Processing...
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              Run Neural Keyer
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </div>
-          )}
-        </Button>
-      </div>
-
+      <WorkflowSetupRail
+        inputPath={inputPath}
+        hintPath={hintPath}
+        outputPath={outputPath}
+        outputReady={outputReady}
+        outputRecipe={outputRecipe}
+        artifactOptions={artifactOptions}
+        recipeControls={recipeControls}
+        isProcessing={isProcessing}
+        runtimeUsable={runtimeUsable}
+        presetChoices={presetChoices}
+        modelChoices={modelChoices}
+        selectedPresetId={selectedPresetId}
+        selectedModelId={selectedModelId}
+        selectedPreset={selectedPreset}
+        selectedModel={selectedModel}
+        videoEncodeMode={videoEncodeMode}
+        advancedSettings={advancedSettings}
+        readiness={readiness}
+        terminalStatus={terminalStatus}
+        currentProgress={currentProgress}
+        statusMessage={statusMessage}
+        error={error}
+        canStart={canStart}
+        canRetry={canRetry}
+        onSelectInput={() => void handleSelectInput()}
+        onSelectInputFolder={() => void handleSelectInputFolder()}
+        onSelectHint={() => void handleSelectHint()}
+        onClearHint={handleClearHint}
+        onSelectOutput={() => void handleSelectOutput()}
+        onOutputRecipeSetting={setOutputRecipeSetting}
+        onSelectedPreset={setSelectedPresetId}
+        onSelectedModel={setSelectedModelId}
+        onVideoEncodeMode={setVideoEncodeMode}
+        onAdvancedSetting={setAdvancedSetting}
+        onStartJob={() => void startJob()}
+        onCancelJob={() => void cancelJob()}
+        onResetWorkbench={handleResetWorkbench}
+      />
     </div>
   );
 }

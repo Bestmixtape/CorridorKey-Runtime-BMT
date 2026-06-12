@@ -1,9 +1,9 @@
 # Task `0015`: Align Adobe Plugin Scope
 
-**Status:** in-progress
+**Status:** done
 **Created:** 2026-05-22
 **Owner:** Runtime maintainers
-**Spec ref:**
+**Spec ref:** doc/specs/0004-add-adobe-host-plugins.md
 **ADR ref:** doc/adr/0007-add-adobe-host-plugins.md
 **Board ref:**
 
@@ -63,7 +63,7 @@ Concrete sequential steps. Each as a checkbox. Reference file paths where applic
 - [x] Update `help/SUPPORT_MATRIX.md` with the initial Adobe host support
       designation and validation gate.
 - [x] Run `git diff --check`.
-- [ ] Run fresh-context review before marking this task done.
+- [x] Run fresh-context review before marking this task done.
 
 ## Notes
 
@@ -112,11 +112,19 @@ Task chain:
 `git diff --check` passed with only line-ending normalization warnings from
 tracked files.
 
+### 2026-05-25
+
+Closure review recorded at
+`.agentic/reviews/20260525T134322-task-0015-adobe-scope-closure.md`.
+Standards and Spec axes found no blocker or concern for the Adobe scope
+alignment slice. The task is documentation-only; local runtime tests are not
+applicable beyond the repository checks recorded for the implementation tasks.
+
 ## Definition of Done
 
 All Acceptance Criteria checked, plus:
 
-- [ ] Local tests pass (or N/A documented in Notes)
-- [ ] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
-- [ ] No orphan `TODO`/`FIXME` introduced
-- [ ] Status updated to `done` and Notes log closes the task
+- [x] Local tests pass (or N/A documented in Notes)
+- [x] Code review completed (human or fresh-context reviewer per WORKFLOW section 10)
+- [x] No orphan `TODO`/`FIXME` introduced
+- [x] Status updated to `done` and Notes log closes the task

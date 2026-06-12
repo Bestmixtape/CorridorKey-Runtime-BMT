@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release", "sync-version", "regen-rtx-release")]
+    [ValidateSet("build", "prepare-rtx", "prepare-models", "prepare-torchtrt", "certify-rtx-artifacts", "certify-torchtrt-artifacts", "package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "package-suite", "validate-suite", "release", "sync-version", "regen-rtx-release")]
     [string]$Task = "build",
     [ValidateSet("debug", "release", "release-lto")]
     [string]$Preset = "release",
@@ -15,6 +15,33 @@ param(
     # Inno Setup installer from the same staged OFX bundle.
     [ValidateSet("", "online", "offline")]
     [string]$Flavor = "",
+    [switch]$RenderOnly,
+    [string]$OutputManifestPath = "",
+    [Alias("RuntimeRoot")]
+    [string]$SuiteRuntimeRoot = "",
+    [Alias("DistributionManifestPath")]
+    [string]$SuiteDistributionManifestPath = "",
+    [Alias("ReportPath")]
+    [string]$SuiteReadinessReportPath = "",
+    [Alias("RunRuntimeCommands")]
+    [switch]$RunSuiteRuntimeCommands,
+    [Alias("RuntimeCommandPath")]
+    [string]$SuiteRuntimeCommandPath = "",
+    [Alias("RuntimeCommandTimeoutSeconds")]
+    [ValidateRange(1, 3600)]
+    [int]$SuiteRuntimeCommandTimeoutSeconds = 30,
+    [string]$SuitePayloadRoot = "",
+    [string]$SuitePayloadOutputRoot = "",
+    [string]$RuntimePackageRoot = "",
+    [string]$OfxPackageRoot = "",
+    [string]$AdobePackageRoot = "",
+    [string]$ModelPayloadDir = "",
+    [string]$ISCCPath = "",
+    [string]$SuitePackageDistributionManifestPath = "",
+    [string]$SuitePackageOutputDir = "",
+    [string]$SuitePackageOutputBaseFilename = "",
+    [string]$SuitePackageOutputIssPath = "",
+    [string]$FfmpegPath = "",
     [switch]$EnableAdobePlugin,
     [string]$AdobeSdkRoot = "",
     [string[]]$ForwardArguments = @()
@@ -28,6 +55,37 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if ($Task -ne "build" -and ($EnableAdobePlugin -or -not [string]::IsNullOrWhiteSpace($AdobeSdkRoot))) {
     throw "-EnableAdobePlugin and -AdobeSdkRoot are supported only with -Task build."
+}
+if ($Task -ne "package-suite" -and ($RenderOnly -or -not [string]::IsNullOrWhiteSpace($OutputManifestPath))) {
+    throw "-RenderOnly and -OutputManifestPath are supported only with -Task package-suite."
+}
+if ($Task -ne "package-suite" -and (
+        -not [string]::IsNullOrWhiteSpace($SuitePayloadRoot) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot) -or
+        -not [string]::IsNullOrWhiteSpace($RuntimePackageRoot) -or
+        -not [string]::IsNullOrWhiteSpace($OfxPackageRoot) -or
+        -not [string]::IsNullOrWhiteSpace($AdobePackageRoot) -or
+        -not [string]::IsNullOrWhiteSpace($ModelPayloadDir) -or
+        -not [string]::IsNullOrWhiteSpace($ISCCPath) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageDistributionManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageOutputDir) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageOutputBaseFilename) -or
+        -not [string]::IsNullOrWhiteSpace($SuitePackageOutputIssPath)
+    )) {
+    throw "Suite package payload arguments are supported only with -Task package-suite."
+}
+if ($Task -ne "package-runtime" -and -not [string]::IsNullOrWhiteSpace($FfmpegPath)) {
+    throw "-FfmpegPath is supported only with -Task package-runtime."
+}
+if ($Task -ne "validate-suite" -and (
+        -not [string]::IsNullOrWhiteSpace($SuiteRuntimeRoot) -or
+        -not [string]::IsNullOrWhiteSpace($SuiteDistributionManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($SuiteReadinessReportPath) -or
+        $RunSuiteRuntimeCommands -or
+        -not [string]::IsNullOrWhiteSpace($SuiteRuntimeCommandPath) -or
+        $PSBoundParameters.ContainsKey("SuiteRuntimeCommandTimeoutSeconds")
+    )) {
+    throw "Suite readiness arguments are supported only with -Task validate-suite."
 }
 
 function Assert-CorridorKeyWindowsReleaseLabelFormat {
@@ -86,17 +144,44 @@ function Invoke-CorridorKeyScript {
     }
 }
 
+function Get-CorridorKeyCurrentSourceRevision {
+    param([string]$RepoRoot)
+
+    $gitPath = Resolve-CorridorKeyGitPath
+    if ([string]::IsNullOrWhiteSpace($gitPath)) {
+        return ""
+    }
+
+    $revision = & $gitPath -C $RepoRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return ""
+    }
+
+    return ($revision | Out-String).Trim()
+}
+
 $resolvedTrack = $Track
-if ($Task -eq "release" -and -not $PSBoundParameters.ContainsKey("Track")) {
+if ($Task -in @("package-suite", "package-runtime", "release") -and -not $PSBoundParameters.ContainsKey("Track")) {
     $resolvedTrack = "rtx"
+}
+if ($Task -eq "package-suite" -and $resolvedTrack -ne "rtx") {
+    throw "Task 'package-suite' currently supports only -Track rtx because the suite manifest is bound to the Windows RTX Green/Blue model-pack contract."
 }
 
 $syncGuiMetadata = $Task -in @("package-runtime", "release", "sync-version")
 $additionalArguments = @($ForwardArguments)
-$resolvedVersion = Initialize-CorridorKeyVersion `
-    -RepoRoot $repoRoot `
-    -Version $Version `
-    -SyncGuiMetadata:$syncGuiMetadata
+$resolvedVersion = $Version
+$explicitDisplayVersionLabel = -not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)
+if ($Task -eq "validate-suite") {
+    if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
+        $resolvedVersion = Get-CorridorKeyProjectVersion -RepoRoot $repoRoot
+    }
+} else {
+    $resolvedVersion = Initialize-CorridorKeyVersion `
+        -RepoRoot $repoRoot `
+        -Version $Version `
+        -SyncGuiMetadata:$syncGuiMetadata
+}
 
 $publishGithubRequested = $additionalArguments | Where-Object { $_ -eq "-PublishGithub" -or $_ -eq "/PublishGithub" }
 if ($Task -eq "release" -and $publishGithubRequested -and $Flavor -ne "online") {
@@ -124,10 +209,14 @@ Assert-CorridorKeyWindowsReleaseLabelFormat `
 # Stable GitHub releases are the only clean-label path: when publishing
 # with no prerelease label, the release pipeline keeps X.Y.Z as the tag,
 # installer name, and panel version.
-if ([string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+if ($Task -eq "package-suite" -and [string]::IsNullOrWhiteSpace($Flavor)) {
+    $Flavor = "online"
+}
+
+if ($Task -ne "validate-suite" -and [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     if ($stableGithubReleaseRequested) {
         Write-Host "[windows] Stable GitHub release requested; using clean version label $resolvedVersion." -ForegroundColor Yellow
-    } elseif ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host")) {
+    } elseif ($Task -in @("package-ofx", "package-adobe", "package-suite", "smoke-adobe-host")) {
         $buildDir = Join-Path $repoRoot ("build\" + $Preset)
         $builtLabel = Get-CorridorKeyBuiltCliDisplayLabel -BuildDir $buildDir
         if ([string]::IsNullOrWhiteSpace($builtLabel)) {
@@ -163,7 +252,7 @@ Write-Host "[windows] Version: $resolvedVersion" -ForegroundColor Cyan
 if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
     Write-Host "[windows] Display version label: $DisplayVersionLabel" -ForegroundColor Cyan
 }
-if ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "release")) {
+if ($Task -in @("package-ofx", "package-adobe", "smoke-adobe-host", "package-runtime", "package-suite", "release")) {
     Write-Host "[windows] Track: $resolvedTrack" -ForegroundColor Cyan
 }
 
@@ -333,15 +422,120 @@ switch ($Task) {
         break
     }
     "package-runtime" {
+        if ($resolvedTrack -ne "rtx") {
+            throw "Task 'package-runtime' currently supports only -Track rtx because the portable runtime/GUI package is bound to the Windows RTX contract. DirectML portable runtime packaging is not implemented."
+        }
+
+        $runtimeBuildDir = Join-Path $repoRoot ("build\" + $Preset)
+        $expectedDisplayVersionLabel = ""
+        $expectedSourceRevision = ""
+        if ($explicitDisplayVersionLabel) {
+            $expectedDisplayVersionLabel = $DisplayVersionLabel
+        } else {
+            $expectedSourceRevision = Get-CorridorKeyCurrentSourceRevision -RepoRoot $repoRoot
+            if ([string]::IsNullOrWhiteSpace($expectedSourceRevision)) {
+                throw "Task 'package-runtime' could not resolve the current git source revision for stale-build validation."
+            }
+        }
+
         $runtimeSuffixes = switch ($resolvedTrack) {
             "rtx" { @("RTX") }
-            "dml" { @("DirectML") }
-            default { @("DirectML", "RTX") }
+            default { @("RTX") }
         }
         foreach ($suffix in $runtimeSuffixes) {
-            $arguments = @("-Version", $resolvedVersion, "-ReleaseSuffix", $suffix) + $additionalArguments
+            $arguments = @(
+                "-Version", $resolvedVersion,
+                "-ReleaseSuffix", $suffix,
+                "-BuildDir", $runtimeBuildDir
+            )
+            if (-not [string]::IsNullOrWhiteSpace($expectedDisplayVersionLabel)) {
+                $arguments += @("-ExpectedDisplayVersionLabel", $expectedDisplayVersionLabel)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($expectedSourceRevision)) {
+                $arguments += @("-ExpectedSourceRevision", $expectedSourceRevision)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($FfmpegPath)) {
+                $arguments += @("-FfmpegPath", $FfmpegPath)
+            }
+            $arguments += $additionalArguments
             Invoke-CorridorKeyScript -ScriptName "package_runtime_installer_windows.ps1" -Arguments $arguments
         }
+        break
+    }
+    "package-suite" {
+        $arguments = @(
+            "-Version", $resolvedVersion,
+            "-Track", $resolvedTrack
+        )
+        if (-not [string]::IsNullOrWhiteSpace($DisplayVersionLabel)) {
+            $arguments += @("-DisplayVersionLabel", $DisplayVersionLabel)
+        }
+        $arguments += @("-Flavor", $Flavor)
+        if ($RenderOnly) {
+            $arguments += @("-RenderOnly")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($OutputManifestPath)) {
+            $arguments += @("-OutputManifestPath", $OutputManifestPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePayloadRoot)) {
+            $arguments += @("-SuitePayloadRoot", $SuitePayloadRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePayloadOutputRoot)) {
+            $arguments += @("-SuitePayloadOutputRoot", $SuitePayloadOutputRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($RuntimePackageRoot)) {
+            $arguments += @("-RuntimePackageRoot", $RuntimePackageRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($OfxPackageRoot)) {
+            $arguments += @("-OfxPackageRoot", $OfxPackageRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($AdobePackageRoot)) {
+            $arguments += @("-AdobePackageRoot", $AdobePackageRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ModelPayloadDir)) {
+            $arguments += @("-ModelPayloadDir", $ModelPayloadDir)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ISCCPath)) {
+            $arguments += @("-ISCCPath", $ISCCPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageDistributionManifestPath)) {
+            $arguments += @("-DistributionManifestPath", $SuitePackageDistributionManifestPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageOutputDir)) {
+            $arguments += @("-OutputDir", $SuitePackageOutputDir)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageOutputBaseFilename)) {
+            $arguments += @("-OutputBaseFilename", $SuitePackageOutputBaseFilename)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuitePackageOutputIssPath)) {
+            $arguments += @("-OutputIssPath", $SuitePackageOutputIssPath)
+        }
+        $arguments += $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "package_suite_installer_windows.ps1" -Arguments $arguments
+        break
+    }
+    "validate-suite" {
+        $arguments = @()
+        if (-not [string]::IsNullOrWhiteSpace($SuiteRuntimeRoot)) {
+            $arguments += @("-RuntimeRoot", $SuiteRuntimeRoot)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuiteDistributionManifestPath)) {
+            $arguments += @("-DistributionManifestPath", $SuiteDistributionManifestPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuiteReadinessReportPath)) {
+            $arguments += @("-ReportPath", $SuiteReadinessReportPath)
+        }
+        if ($RunSuiteRuntimeCommands) {
+            $arguments += @("-RunRuntimeCommands")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SuiteRuntimeCommandPath)) {
+            $arguments += @("-RuntimeCommandPath", $SuiteRuntimeCommandPath)
+        }
+        if ($PSBoundParameters.ContainsKey("SuiteRuntimeCommandTimeoutSeconds")) {
+            $arguments += @("-RuntimeCommandTimeoutSeconds", [string]$SuiteRuntimeCommandTimeoutSeconds)
+        }
+        $arguments += $additionalArguments
+        Invoke-CorridorKeyScript -ScriptName "validate_suite_install_windows.ps1" -Arguments $arguments
         break
     }
     "release" {

@@ -142,8 +142,26 @@ nlohmann::json event_to_json(const JobEvent& event) {
             json["timings"].push_back(std::move(timing_json));
         }
     }
+    if (!event.metrics.empty()) {
+        json["metrics"] = event.metrics;
+    }
 
     return json;
+}
+
+void print_process_error(bool use_json, const Error& error) {
+    if (use_json) {
+        JobEvent event;
+        event.type = JobEventType::Failed;
+        event.phase = "failed";
+        event.progress = 0.0F;
+        event.message = error.message;
+        event.error = error;
+        std::cout << common::safe_json_dump(event_to_json(event)) << "\n";
+        return;
+    }
+
+    std::cerr << "Error: " << error.message << "\n";
 }
 
 bool option_present(int argc, char* argv[], std::initializer_list<std::string_view> option_names) {
@@ -286,7 +304,6 @@ Result<int> parse_coarse_resolution_override(const std::string& value) {
     const int resolution = std::stoi(value);
     switch (resolution) {
         case 512:
-        case 768:
         case 1024:
         case 1536:
         case 2048:
@@ -296,8 +313,43 @@ Result<int> parse_coarse_resolution_override(const std::string& value) {
     }
     return Unexpected<Error>{Error{
         ErrorCode::InvalidParameters,
-        "Invalid --coarse-resolution value. Use 0, 512, 768, 1024, 1536, or 2048.",
+        "Invalid --coarse-resolution value. Use 0, 512, 1024, 1536, or 2048.",
     }};
+}
+
+struct DownloadArtifact {
+    std::filesystem::path relative_path;
+    std::string url;
+};
+
+std::vector<DownloadArtifact> green_download_artifacts() {
+    const std::string base_url =
+        "https://huggingface.co/alexandrealvaro/CorridorKey/resolve/main/";
+    return {
+        {std::filesystem::path("models") / "corridorkey_fp16_512.onnx",
+         base_url + "onnx/fp16/corridorkey_fp16_512.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_1024.onnx",
+         base_url + "onnx/fp16/corridorkey_fp16_1024.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_1536.onnx",
+         base_url + "onnx/fp16/corridorkey_fp16_1536.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_2048.onnx",
+         base_url + "onnx/fp16/corridorkey_fp16_2048.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_512_ctx.onnx",
+         base_url + "onnx/fp16_ctx/corridorkey_fp16_512_ctx.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_1024_ctx.onnx",
+         base_url + "onnx/fp16_ctx/corridorkey_fp16_1024_ctx.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_1536_ctx.onnx",
+         base_url + "onnx/fp16_ctx/corridorkey_fp16_1536_ctx.onnx"},
+        {std::filesystem::path("models") / "corridorkey_fp16_2048_ctx.onnx",
+         base_url + "onnx/fp16_ctx/corridorkey_fp16_2048_ctx.onnx"},
+    };
+}
+
+std::vector<DownloadArtifact> download_artifacts_for_pack(const std::string& pack) {
+    if (pack == "green") {
+        return green_download_artifacts();
+    }
+    return {};
 }
 
 InferenceParams build_inference_params(const cxxopts::ParseResult& result,
@@ -598,15 +650,15 @@ int main(int argc, char* argv[]) {
                                        cxxopts::value<std::string>())(
         "preset", "Preset (preview, balanced, max)", cxxopts::value<std::string>())(
         "quality", "Alias for --preset", cxxopts::value<std::string>())(
-        "r,resolution", "Resolution (0=auto, 512, 768, 1024, 1536, 2048)",
+        "r,resolution", "Resolution (0=auto, 512, 1024, 1536, 2048)",
         cxxopts::value<int>()->default_value("0"))(
         "quality-fallback", "Quality fallback mode (auto, direct, coarse_to_fine)",
         cxxopts::value<std::string>()->default_value("auto"))(
         "refinement-mode", "Validated refinement strategy override (auto, full_frame, tiled)",
         cxxopts::value<std::string>()->default_value("auto"))(
-        "precision", "Runtime precision preference for process/benchmark (auto, fp16, int8)",
+        "precision", "Runtime precision preference for process/benchmark (auto, fp16)",
         cxxopts::value<std::string>()->default_value("auto"))(
-        "coarse-resolution", "Coarse artifact override (0, 512, 768, 1024, 1536, 2048)",
+        "coarse-resolution", "Coarse artifact override (0, 512, 1024, 1536, 2048)",
         cxxopts::value<std::string>()->default_value("0"))(
         "d,device", "Device (auto, cpu, tensorrt, rtx, mlx, coreml, cuda, dml)",
         cxxopts::value<std::string>()->default_value("auto"))(
@@ -614,7 +666,7 @@ int main(int argc, char* argv[]) {
         "idle-timeout-ms", "Local host plugin runtime server idle timeout in milliseconds",
         cxxopts::value<int>())("video-encode", "Video output encoding (lossless, balanced)",
                                cxxopts::value<std::string>()->default_value("lossless"))(
-        "variant", "ONNX model variant for download only (int8, fp16, fp32)",
+        "variant", "Model pack for download only (green)",
         cxxopts::value<std::string>())("batch-size",
                                        "Number of frames to process in a single GPU call",
                                        cxxopts::value<int>()->default_value("1"))(
@@ -981,69 +1033,61 @@ int main(int argc, char* argv[]) {
         }
 
         if (cmd == "download") {
-            std::string variant =
-                result.count("variant") ? result["variant"].as<std::string>() : "int8";
-            std::vector<std::string> variants_to_download;
+            std::string pack =
+                result.count("variant") ? normalized_lower(result["variant"].as<std::string>())
+                                        : "green";
+            auto artifacts = download_artifacts_for_pack(pack);
 
-            if (variant == "all") {
-                variants_to_download = {"int8", "fp16", "fp32"};
-            } else if (variant == "int8" || variant == "fp16" || variant == "fp32") {
-                variants_to_download.push_back(variant);
-            } else {
-                std::cerr << "Error: Invalid variant. Allowed values are 'int8', 'fp16', 'fp32', "
-                             "or 'all'."
-                          << "\n";
+            if (artifacts.empty()) {
+                std::cerr << "Error: Unsupported download variant '" << pack
+                          << "'. Allowed value is 'green'." << "\n";
                 return 1;
             }
 
-            std::filesystem::create_directory("models");
+            for (const auto& artifact : artifacts) {
+                const auto parent = artifact.relative_path.parent_path();
+                if (!parent.empty()) {
+                    std::filesystem::create_directories(parent);
+                }
 
-            const std::vector<int> available_resolutions = {512, 768, 1024, 1536, 2048};
+                std::cout << "Downloading " << artifact.relative_path.filename().string() << "..."
+                          << "\n";
+                std::ofstream of(artifact.relative_path, std::ios::binary);
 
-            for (const auto& v : variants_to_download) {
-                for (const int resolution : available_resolutions) {
-                    std::string filename =
-                        "corridorkey_" + v + "_" + std::to_string(resolution) + ".onnx";
-                    std::filesystem::path output_path = std::filesystem::path("models") / filename;
-                    std::string url =
-                        "https://huggingface.co/corridorkey/models/resolve/main/" + filename;
-
-                    std::cout << "Downloading " << filename << "..." << "\n";
-                    std::ofstream of(output_path, std::ios::binary);
-
-                    cpr::Response r = cpr::Download(
-                        of, cpr::Url{url},
-                        cpr::ProgressCallback([](size_t downloadTotal, size_t downloadNow, size_t,
-                                                 size_t, intptr_t) -> bool {
-                            if (downloadTotal > 0) {
-                                float p = static_cast<float>(downloadNow) / downloadTotal;
-                                int bar_width = 50;
-                                auto filled =
-                                    static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
-                                auto empty = static_cast<size_t>(bar_width) - filled;
-                                std::cout << "\r[" << std::string(filled, '=')
-                                          << std::string(empty, ' ') << "] " << int(p * 100.0)
-                                          << "% " << std::flush;
-                            }
-                            return true;
-                        }));
-
-                    std::cout << "\n";
-                    of.close();
-
-                    if (r.status_code == 200) {
-                        std::cout << "Successfully downloaded " << filename << " to models/"
-                                  << "\n";
-                    } else {
-                        std::cerr << "Failed to download " << filename
-                                  << ". HTTP Status: " << r.status_code << "\n";
-                        if (r.status_code == 401 || r.status_code == 404) {
-                            std::cerr << "Note: The HuggingFace repository may be private or not "
-                                         "yet created."
-                                      << "\n";
+                cpr::Response r = cpr::Download(
+                    of, cpr::Url{artifact.url},
+                    cpr::ProgressCallback([](size_t downloadTotal, size_t downloadNow, size_t,
+                                             size_t, intptr_t) -> bool {
+                        if (downloadTotal > 0) {
+                            float p = static_cast<float>(downloadNow) / downloadTotal;
+                            int bar_width = 50;
+                            auto filled =
+                                static_cast<size_t>(std::clamp(bar_width * p, 0.0F, 50.0F));
+                            auto empty = static_cast<size_t>(bar_width) - filled;
+                            std::cout << "\r[" << std::string(filled, '=')
+                                      << std::string(empty, ' ') << "] " << int(p * 100.0)
+                                      << "% " << std::flush;
                         }
-                        std::filesystem::remove(output_path);
+                        return true;
+                    }));
+
+                std::cout << "\n";
+                of.close();
+
+                if (r.status_code == 200) {
+                    std::cout << "Successfully downloaded "
+                              << artifact.relative_path.filename().string() << " to "
+                              << artifact.relative_path.parent_path().string() << "\n";
+                } else {
+                    std::cerr << "Failed to download "
+                              << artifact.relative_path.filename().string()
+                              << ". HTTP Status: " << r.status_code << "\n";
+                    if (r.status_code == 401 || r.status_code == 404) {
+                        std::cerr << "Note: The HuggingFace repository may be private or not "
+                                     "yet created."
+                                  << "\n";
                     }
+                    std::filesystem::remove(artifact.relative_path);
                 }
             }
             return 0;
@@ -1059,7 +1103,7 @@ int main(int argc, char* argv[]) {
                                        : std::nullopt,
                 args);
             if (!resolved_paths) {
-                std::cout << "Error: " << resolved_paths.error().message << "\n";
+                print_process_error(use_json, resolved_paths.error());
                 return 1;
             }
 
@@ -1067,7 +1111,9 @@ int main(int argc, char* argv[]) {
             std::filesystem::path output_path = resolved_paths->output_path;
 
             if (input_path.empty()) {
-                std::cout << "Error: 'process' requires an input path." << "\n";
+                print_process_error(
+                    use_json,
+                    Error{ErrorCode::InvalidParameters, "'process' requires an input path."});
                 return 1;
             }
 
@@ -1076,19 +1122,19 @@ int main(int argc, char* argv[]) {
             DeviceInfo device = cli::select_device(devices, device_str);
             auto video_output_options_res = resolve_video_output_options(result);
             if (!video_output_options_res) {
-                std::cerr << "Error: " << video_output_options_res.error().message << "\n";
+                print_process_error(use_json, video_output_options_res.error());
                 return 1;
             }
             auto resolved = resolve_execution_defaults(result, argc, argv, device, true);
             if (!resolved) {
-                std::cerr << "Error: " << resolved.error().message << "\n";
+                print_process_error(use_json, resolved.error());
                 return 1;
             }
             if (output_path.empty()) {
                 auto default_output =
                     default_output_path_for_input(input_path, *video_output_options_res);
                 if (!default_output) {
-                    std::cerr << "Error: " << default_output.error().message << "\n";
+                    print_process_error(use_json, default_output.error());
                     return 1;
                 }
                 output_path = *default_output;
@@ -1182,9 +1228,7 @@ int main(int argc, char* argv[]) {
             if (!use_json) std::cout << "\n";
 
             if (!process_res) {
-                if (!use_json) {
-                    std::cerr << "Error: " << process_res.error().message << "\n";
-                }
+                print_process_error(use_json, process_res.error());
                 return 1;
             }
 

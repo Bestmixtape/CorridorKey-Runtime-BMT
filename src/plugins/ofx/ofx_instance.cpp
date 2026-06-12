@@ -1024,7 +1024,17 @@ std::filesystem::path resolve_models_root() {
         return {*override_path};
     }
 
-    if (auto module_path = plugin_module_path(); module_path.has_value()) {
+    auto module_path = plugin_module_path();
+    if (auto shared_root =
+            common::host_plugin_shared_runtime_root(module_path.value_or(std::filesystem::path{}));
+        shared_root.has_value()) {
+        auto models = *shared_root / "Contents" / "Resources" / "models";
+        log_message("resolve_models_root",
+                    std::string("Using suite shared runtime models: ") + models.string());
+        return models;
+    }
+
+    if (module_path.has_value()) {
         auto resources = module_path->parent_path().parent_path() / "Resources" / "models";
         std::error_code error;
         if (std::filesystem::exists(resources, error) && !error) {
@@ -1163,6 +1173,8 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         data->runtime_server_path =
             app::resolve_host_plugin_runtime_server_binary(plugin_module_path().value_or(""));
     }
+    log_message("ensure_runtime_client",
+                std::string("Resolved runtime server: ") + data->runtime_server_path.string());
     if (!runtime_server_binary_present(data->runtime_server_path)) {
         // The .ofx is the host's address space; running ORT/TRT-RTX in it
         // collides with hosts that pre-load their own CUDA stack (Foundry
@@ -1171,7 +1183,8 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
         // uniqueness is keyed on basename). The runtime server lives in a
         // separate process, so its loader is independent. Refuse to start
         // without it rather than papering over the failure.
-        data->last_error = "CorridorKey runtime server binary not found alongside the OFX bundle.";
+        data->last_error =
+            "CorridorKey runtime server binary not found: " + data->runtime_server_path.string();
         log_message("ensure_runtime_client", data->last_error);
         post_message(kOfxMessageError, data->last_error.c_str(), instance);
         return false;

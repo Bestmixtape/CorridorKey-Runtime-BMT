@@ -104,4 +104,128 @@ if (Test-CorridorKeyDoctorMissingModelBundleFailuresOnly `
     throw "Did not expect invalid present bundle models to be tolerated as missing-model-only issues."
 }
 
+$doctorAdobeOnlineBlueRuntimePending = [pscustomobject]@{
+    bundle = [pscustomobject]@{
+        healthy = $false
+        layout_kind = "windows_adobe"
+        packaged_layout_detected = $true
+        runtime_backend_bundle_ready = $true
+        blue_runtime = [pscustomobject]@{
+            required = $true
+            ready = $false
+            directory_found = $true
+            corridorkey_torchtrt_dll_found = $true
+            torchtrt_dll_found = $false
+        }
+        packaged_models = @(
+            [pscustomobject]@{
+                filename = "corridorkey_fp16_1024.onnx"
+                found = $true
+                usable = $true
+                artifact_status = "usable"
+                error = ""
+            }
+        )
+    }
+}
+
+if (-not (Test-CorridorKeyDoctorAdobeOnlinePayloadFailuresOnly `
+        -Doctor $doctorAdobeOnlineBlueRuntimePending `
+        -MissingRuntimePacks @("blue-runtime"))) {
+    throw "Expected Adobe online payload validation to tolerate a pending blue-runtime pack."
+}
+
+$doctorAdobeRealBackendFailure = [pscustomobject]@{
+    bundle = [pscustomobject]@{
+        healthy = $false
+        layout_kind = "windows_adobe"
+        packaged_layout_detected = $true
+        runtime_backend_bundle_ready = $false
+        blue_runtime = [pscustomobject]@{
+            required = $true
+            ready = $false
+            directory_found = $true
+            corridorkey_torchtrt_dll_found = $true
+            torchtrt_dll_found = $false
+        }
+        packaged_models = @(
+            [pscustomobject]@{
+                filename = "corridorkey_fp16_1024.onnx"
+                found = $true
+                usable = $true
+                artifact_status = "usable"
+                error = ""
+            }
+        )
+    }
+}
+
+if (Test-CorridorKeyDoctorAdobeOnlinePayloadFailuresOnly `
+        -Doctor $doctorAdobeRealBackendFailure `
+        -MissingRuntimePacks @("blue-runtime")) {
+    throw "Did not expect Adobe online blue-runtime tolerance to hide a real backend bundle failure."
+}
+
+$adobeOnlineBlueRuntimeValidation = [pscustomobject]@{
+    validation_passed = $true
+    install = [pscustomobject]@{}
+    effects = @(
+        [pscustomobject]@{
+            match_name = "com.corridorkey.effect"
+            pipl_capabilities = @("PF_OutFlag2_SUPPORTS_SMART_RENDER")
+        },
+        [pscustomobject]@{
+            match_name = "com.corridorkey.effect.blue"
+            pipl_capabilities = @("PF_OutFlag2_SUPPORTS_SMART_RENDER")
+        }
+    )
+    runtime = [pscustomobject]@{}
+    models = [pscustomobject]@{
+        missing_count = 0
+    }
+    doctor = [pscustomobject]@{
+        succeeded = $true
+        failure_tolerated = $true
+        failure_reason = "Packaged runtime doctor reported failures only for the online blue-runtime pack."
+    }
+}
+
+$adobeOnlineBlueRuntimeIssues = @(
+    Get-CorridorKeyAdobePackageValidationIssues -Validation $adobeOnlineBlueRuntimeValidation
+)
+if ($adobeOnlineBlueRuntimeIssues.Count -gt 0) {
+    throw "Expected Adobe package validation to accept online blue-runtime-only doctor tolerance. Issues: $($adobeOnlineBlueRuntimeIssues -join ' | ')"
+}
+
+$adobeUnexpectedToleratedValidation = [pscustomobject]@{
+    validation_passed = $true
+    install = [pscustomobject]@{}
+    effects = @(
+        [pscustomobject]@{
+            match_name = "com.corridorkey.effect"
+            pipl_capabilities = @("PF_OutFlag2_SUPPORTS_SMART_RENDER")
+        },
+        [pscustomobject]@{
+            match_name = "com.corridorkey.effect.blue"
+            pipl_capabilities = @("PF_OutFlag2_SUPPORTS_SMART_RENDER")
+        }
+    )
+    runtime = [pscustomobject]@{}
+    models = [pscustomobject]@{
+        missing_count = 0
+    }
+    doctor = [pscustomobject]@{
+        succeeded = $true
+        failure_tolerated = $true
+        failure_reason = "Some unrelated tolerated failure."
+    }
+}
+
+$adobeUnexpectedToleratedIssues = @(
+    Get-CorridorKeyAdobePackageValidationIssues -Validation $adobeUnexpectedToleratedValidation
+)
+if ($adobeUnexpectedToleratedIssues -notcontains "Adobe package doctor failure was tolerated without missing model state or online runtime-pack state.") {
+    throw "Expected Adobe package validation to reject unrelated tolerated doctor failures."
+}
+
 Write-Host "[PASS] Windows doctor missing-model tolerance regression checks passed." -ForegroundColor Green

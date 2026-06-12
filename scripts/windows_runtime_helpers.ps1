@@ -1339,6 +1339,10 @@ function Get-CorridorKeyWindowsRtxPromotedModelList {
     return @(Get-CorridorKeyPreparedModelList -Variant $Variant)
 }
 
+function Get-CorridorKeyWindowsRtxInstallableModelList {
+    return @(Get-CorridorKeyPreparedModelList -Variant all)
+}
+
 function Get-CorridorKeyIntermediateModelList {
     return @(
         "corridorkey_fp32_512.onnx",
@@ -1438,6 +1442,14 @@ function Get-CorridorKeyExpectedCompiledContextModels {
     )
 }
 
+function Get-CorridorKeyTensorRtContextCompileModels {
+    param(
+        [string[]]$TargetModels
+    )
+
+    return @($TargetModels | Where-Object { $_ -match '^corridorkey_fp16_[0-9]+\.onnx$' })
+}
+
 function Get-CorridorKeyWindowsOfxReleaseVariants {
     param(
         [ValidateSet("rtx", "dml", "all")]
@@ -1468,9 +1480,26 @@ function Get-CorridorKeyWindowsOfxReleaseVariants {
 }
 
 function Get-CorridorKeyPortableRuntimeTargetModels {
+    $installableModels = @(Get-CorridorKeyPreparedModelList -Variant green)
+    $compiledContextModels = @(
+        Get-CorridorKeyExpectedCompiledContextModels `
+            -PresentModels $installableModels `
+            -ModelProfile "windows-rtx"
+    )
+
+    return @($installableModels + $compiledContextModels)
+}
+
+function Get-CorridorKeyPortableRuntimeForbiddenRootDlls {
     return @(
-        "corridorkey_fp16_512.onnx",
-        "corridorkey_fp16_1024.onnx"
+        "c10.dll",
+        "c10_cuda.dll",
+        "torch.dll",
+        "torch_cpu.dll",
+        "torch_cuda.dll",
+        "torch_global_deps.dll",
+        "torchtrt.dll",
+        "corridorkey_torchtrt.dll"
     )
 }
 
@@ -1652,6 +1681,100 @@ function Test-CorridorKeyDoctorMissingModelBundleFailuresOnly {
 
     foreach ($missingModel in @($MissingModels)) {
         if ($failedModels -notcontains $missingModel) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-CorridorKeyDoctorAdobeOnlinePayloadFailuresOnly {
+    param(
+        [object]$Doctor,
+        [string[]]$MissingModels = @(),
+        [string[]]$MissingRuntimePacks = @()
+    )
+
+    if ($null -eq $Doctor -or @($MissingRuntimePacks) -notcontains "blue-runtime") {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $Doctor -Name "bundle")) {
+        return $false
+    }
+
+    $bundle = $Doctor.bundle
+    if ($null -eq $bundle) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $bundle -Name "layout_kind") -and
+        [string]$bundle.layout_kind -ne "windows_adobe") {
+        return $false
+    }
+
+    foreach ($layoutProperty in @("packaged_layout_detected", "runtime_backend_bundle_ready")) {
+        if ((Test-CorridorKeyPsProperty -Object $bundle -Name $layoutProperty) -and
+            (-not [bool]$bundle.$layoutProperty)) {
+            return $false
+        }
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $bundle -Name "blue_runtime")) {
+        return $false
+    }
+
+    $blueRuntime = $bundle.blue_runtime
+    if ($null -eq $blueRuntime) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "required") -and
+        (-not [bool]$blueRuntime.required)) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "ready") -and
+        [bool]$blueRuntime.ready) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "corridorkey_torchtrt_dll_found") -and
+        (-not [bool]$blueRuntime.corridorkey_torchtrt_dll_found)) {
+        return $false
+    }
+
+    if ((Test-CorridorKeyPsProperty -Object $blueRuntime -Name "torchtrt_dll_found") -and
+        [bool]$blueRuntime.torchtrt_dll_found) {
+        return $false
+    }
+
+    if (-not (Test-CorridorKeyPsProperty -Object $bundle -Name "packaged_models")) {
+        return $false
+    }
+
+    foreach ($modelEntry in @($bundle.packaged_models)) {
+        if ($null -eq $modelEntry -or -not (Test-CorridorKeyPsProperty -Object $modelEntry -Name "filename")) {
+            return $false
+        }
+
+        $found = $true
+        if (Test-CorridorKeyPsProperty -Object $modelEntry -Name "found") {
+            $found = [bool]$modelEntry.found
+        }
+        $usable = $found
+        if (Test-CorridorKeyPsProperty -Object $modelEntry -Name "usable") {
+            $usable = [bool]$modelEntry.usable
+        }
+        if ($found -and $usable) {
+            continue
+        }
+
+        $filename = [string]$modelEntry.filename
+        if ([string]::IsNullOrWhiteSpace($filename) -or @($MissingModels) -notcontains $filename) {
+            return $false
+        }
+        if ($found) {
             return $false
         }
     }
@@ -1856,11 +1979,18 @@ function Get-CorridorKeyAdobePackageValidationIssues {
         $doctorFailureTolerated =
             (Test-CorridorKeyPsProperty -Object $Validation.doctor -Name "failure_tolerated") -and
             [bool]$Validation.doctor.failure_tolerated
+        $doctorFailureReason = ""
+        if (Test-CorridorKeyPsProperty -Object $Validation.doctor -Name "failure_reason") {
+            $doctorFailureReason = [string]$Validation.doctor.failure_reason
+        }
+        $onlineRuntimePackFailureTolerated =
+            $doctorFailureReason -eq "Packaged runtime doctor reported failures only for the online blue-runtime pack."
         if (-not $doctorSucceeded -and -not $doctorFailureTolerated) {
             $issues += "Adobe package doctor did not succeed."
         }
-        if ($doctorFailureTolerated -and $missingModelCount -le 0) {
-            $issues += "Adobe package doctor failure was tolerated without missing model state."
+        if ($doctorFailureTolerated -and $missingModelCount -le 0 -and
+            -not $onlineRuntimePackFailureTolerated) {
+            $issues += "Adobe package doctor failure was tolerated without missing model state or online runtime-pack state."
         }
     }
 

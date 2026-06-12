@@ -1,56 +1,164 @@
 import { create } from "zustand";
-import { SystemInfo, DeviceInfo, getEngineInfo } from "@/lib/engine";
+import {
+  DeviceInfo,
+  RuntimeCatalogEntry,
+  RuntimeReadiness,
+  RuntimeCommandError,
+  SystemInfo,
+  firstRuntimeError,
+  formatRuntimeError,
+  getRuntimeReadiness,
+} from "@/lib/engine";
+import {
+  doctorSummary,
+  missingModelList,
+  modelChoices,
+  presetChoices,
+  supportedTracks
+} from "@/lib/catalog";
+
+const RUNTIME_READINESS_TIMEOUT_MS = 30000;
+const RUNTIME_READINESS_RETRY_DELAYS_MS = [300, 1200];
 
 interface EngineState {
   info: SystemInfo | null;
+  readiness: RuntimeReadiness | null;
   isLoading: boolean;
   error: string | null;
 
-  // Computed helpers
   getPrimaryGpu: () => DeviceInfo | null;
+  getModelChoices: () => RuntimeCatalogEntry[];
+  getPresetChoices: () => RuntimeCatalogEntry[];
+  getMissingModels: () => string[];
+  getSupportedTracks: () => string[];
+  getDoctorSummary: () => string | null;
 
-  // Actions
   refreshInfo: () => Promise<void>;
+  refreshReadiness: () => Promise<void>;
 }
 
 export const useEngineStore = create<EngineState>((set, get) => ({
   info: null,
+  readiness: null,
   isLoading: false,
   error: null,
 
   getPrimaryGpu: () => {
-    const { info } = get();
-    if (!info || info.devices.length === 0) return null;
-    // Prefer TensorRT, then CUDA, then DirectML
-    return info.devices.find((d: DeviceInfo) => d.backend === "tensorrt") ||
-           info.devices.find((d: DeviceInfo) => d.backend === "cuda") ||
-           info.devices.find((d: DeviceInfo) => d.backend === "dml") ||
-           info.devices[0];
+    const devices = get().info?.devices ?? [];
+    if (devices.length === 0) return null;
+
+    return (
+      devices.find((device) => device.backend === "tensorrt") ||
+      devices.find((device) => device.backend === "cuda") ||
+      devices.find((device) => device.backend === "dml") ||
+      devices[0]
+    );
+  },
+
+  getModelChoices: () => {
+    return modelChoices(get().readiness);
+  },
+
+  getPresetChoices: () => {
+    return presetChoices(get().readiness);
+  },
+
+  getMissingModels: () => {
+    return missingModelList(get().readiness);
+  },
+
+  getSupportedTracks: () => {
+    return supportedTracks(get().readiness);
+  },
+
+  getDoctorSummary: () => {
+    return doctorSummary(get().readiness);
   },
 
   refreshInfo: async () => {
+    await get().refreshReadiness();
+  },
+
+  refreshReadiness: async () => {
     set({ isLoading: true, error: null });
 
-    // Add a safety timeout for the sidecar call
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Engine Probe Timeout")), 5000)
-    );
-
     try {
-      const info = await Promise.race([getEngineInfo(), timeoutPromise]) as SystemInfo;
-      set({ info, isLoading: false });
-    } catch (err: any) {
-      console.error("Hardware probe failed, using fallback:", err);
-      const msg = err && err.message ? err.message : String(err);
+      const readiness = await probeRuntimeReadiness();
+      const info = readiness.info.ok ? readiness.info.value : null;
+      const commandError = firstRuntimeError(readiness);
+      const error =
+        readiness.status === "error" && commandError
+          ? formatRuntimeError(commandError)
+          : null;
+
       set({
-        error: `Hardware Probe Failed: ${msg}`,
+        readiness,
+        info,
+        error,
         isLoading: false,
-        info: {
-          version: "0.4.0",
-          devices: [{ name: "CPU Baseline (Fallback)", memory_mb: 0, backend: "cpu" }],
-          capabilities: { tensorrt_rtx_available: false, multi_gpu_available: false, cpu_fallback_available: true }
-        }
+      });
+    } catch (error) {
+      set({
+        readiness: null,
+        info: null,
+        error: formatRuntimeError(error),
+        isLoading: false,
       });
     }
-  }
+  },
 }));
+
+async function probeRuntimeReadiness(): Promise<RuntimeReadiness> {
+  let lastReadiness: RuntimeReadiness | null = null;
+
+  for (let attempt = 0; attempt <= RUNTIME_READINESS_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const readiness = await withTimeout(getRuntimeReadiness(), RUNTIME_READINESS_TIMEOUT_MS);
+      if (!shouldRetryRuntimeReadiness(readiness) || attempt === RUNTIME_READINESS_RETRY_DELAYS_MS.length) {
+        return readiness;
+      }
+      lastReadiness = readiness;
+    } catch (error) {
+      if (!isRetryableRuntimeProbeError(error) || attempt === RUNTIME_READINESS_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+    }
+
+    await delay(RUNTIME_READINESS_RETRY_DELAYS_MS[attempt]);
+  }
+
+  return lastReadiness ?? withTimeout(getRuntimeReadiness(), RUNTIME_READINESS_TIMEOUT_MS);
+}
+
+function shouldRetryRuntimeReadiness(readiness: RuntimeReadiness): boolean {
+  if (readiness.status !== "error" || readiness.runtime_path) {
+    return false;
+  }
+
+  return isTransientRuntimeProbeError(firstRuntimeError(readiness));
+}
+
+function isRetryableRuntimeProbeError(error: unknown): boolean {
+  return error instanceof Error && error.message === "Runtime probe timeout";
+}
+
+function isTransientRuntimeProbeError(error: RuntimeCommandError | null): boolean {
+  return error?.kind === "missing_runtime";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error("Runtime probe timeout")), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}

@@ -558,73 +558,12 @@ if (-not $SkipRuntimeBuild.IsPresent) {
     ) -WorkingDirectory $repoRoot
 }
 
-$packageTauriGuiBinary = Join-Path $repoRoot "src\gui\src-tauri\target\release\corridorkey-gui.exe"
-$portableBundleApplicable = (-not $SkipPackage.IsPresent) -and (Test-Path $packageTauriGuiBinary)
-if ((-not $SkipPackage.IsPresent) -and (-not (Test-Path $packageTauriGuiBinary))) {
-    # The portable runtime bundle step downstream (package_windows.ps1)
-    # stages the Tauri GUI, which is produced by the Tauri track
-    # (`package-runtime`/pnpm tauri build), not by any step inside
-    # prepare-rtx itself. On the OFX release path the portable runtime
-    # bundle is unused, so rather than aborting the whole prepare flow
-    # (and blocking the subsequent `release` task that only needs the
-    # curated ORT we already built) we skip this step cleanly when the
-    # GUI binary is not present. Users targeting the Tauri/runtime
-    # track should run `scripts\\windows.ps1 -Task package-runtime` after
-    # building the GUI; that task owns the full Tauri flow.
-    Write-Host ("[package] Skipping portable runtime bundle: Tauri GUI not built at {0}. " +
-                "Run ``scripts\\windows.ps1 -Task package-runtime`` to build both the GUI and the portable bundle." `
-                -f $packageTauriGuiBinary) -ForegroundColor Yellow
-}
-if ($portableBundleApplicable) {
-    $forbiddenPaths = @(
-        $repoRoot,
-        $buildDir,
-        $ortInstallDir,
-        $sourceRepo,
-        $(if (-not [string]::IsNullOrWhiteSpace($checkpointPath)) { Split-Path -Parent $checkpointPath }),
-        $env:USERPROFILE,
-        $env:LOCALAPPDATA,
-        $CudaHome,
-        $TensorRtRtxHome
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
-
-    $packageArguments = @(
-        "-Version", $Version,
-        "-BuildDir", $buildDir,
-        "-OrtRoot", $ortInstallDir
-    )
-    if (-not $SkipCompileContexts.IsPresent) {
-        $packageArguments += "-CompileContexts"
-    }
-    if ($forbiddenPaths.Count -gt 0) {
-        # package_windows.ps1 declares -ForbiddenPathPrefix as [string[]]; passing
-        # the flag once followed by a comma-joined list is the PowerShell-native
-        # way to bind an array, whereas repeating the flag hits
-        # "ParameterAlreadyBound".
-        $packageArguments += "-ForbiddenPathPrefix"
-        $packageArguments += ($forbiddenPaths -join ",")
-    }
-
-    Write-Host "[package] Creating the portable Windows RTX bundle..."
-    Invoke-ExternalCommand -FilePath (Join-Path $repoRoot "scripts\package_windows.ps1") `
-        -Arguments $packageArguments
-
-    if (-not $SkipBundleValidation.IsPresent) {
-        $bundleRoot = Join-Path $repoRoot "dist\CorridorKey_Runtime_v${Version}_Windows"
-        Write-Host "[validate] Running the packaged smoke test..."
-        Invoke-ExternalCommand -FilePath (Join-Path $bundleRoot "smoke_test.bat") -WorkingDirectory $bundleRoot `
-            -Arguments @()
-    }
-}
-
 $summary = [ordered]@{
     version = $Version
     models_dir = [System.IO.Path]::GetFullPath($modelsDir)
     model_pack_status = [System.IO.Path]::GetFullPath($modelPackStatusPath)
     build_dir = [System.IO.Path]::GetFullPath($buildDir)
     ort_install_dir = [System.IO.Path]::GetFullPath($ortInstallDir)
-    packaged_bundle_dir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Runtime_v${Version}_Windows"))
-    packaged_bundle_zip = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "dist\CorridorKey_Runtime_v${Version}_Windows.zip"))
 }
 if (-not [string]::IsNullOrWhiteSpace($sourceRepo)) {
     $summary["corridorkey_repo"] = $sourceRepo

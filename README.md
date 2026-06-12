@@ -10,7 +10,10 @@ CorridorKey-Runtime provides three product surfaces:
 - **CLI** (`corridorkey`) for local processing, diagnostics, and automation
 - **GUI** (Tauri-based desktop app) for users who prefer a graphical workflow over the CLI
 
-The OFX plugin and the CLI ship in the same installer: the OFX bundle places `corridorkey.exe` next to `CorridorKey.ofx` and registers it on the system `PATH`, so the CLI is available after the OFX install. The GUI is distributed as a separate desktop installer that embeds its own copy of the runtime payload.
+The Windows suite installer installs the CLI/runtime core as the fixed base. The OFX plugin, Adobe plugins, GUI, Green model pack, and Blue model/runtime pack are optional suite components. Standalone OFX support packages may still place `corridorkey.exe` next to `CorridorKey.ofx`, but the CLI no longer depends on installing an OFX host surface. The GUI is distributed either as an optional suite component that points at the shared runtime root or as a portable Runtime bundle that carries the GUI and local runtime package together.
+
+Adobe After Effects and Premiere plugins are packaged implementation targets,
+but they are not supported public surfaces until host validation passes.
 
 Current public builds support:
 
@@ -39,7 +42,7 @@ Use CorridorKey directly inside DaVinci Resolve or Foundry Nuke through the OFX 
 
 ### CLI (`corridorkey`)
 
-The OFX installer ships the `corridorkey` CLI alongside the plugin and registers its directory on `PATH`. After installing the OFX bundle, `corridorkey` is callable from any terminal. Use it for:
+The Windows suite installs the `corridorkey` CLI as part of the fixed runtime/CLI core and registers its directory on `PATH`. The portable Runtime bundle also carries the CLI for minimal or support installs. Use it for:
 
 - environment diagnostics
 - scripted processing
@@ -48,7 +51,7 @@ The OFX installer ships the `corridorkey` CLI alongside the plugin and registers
 
 ### GUI (Tauri desktop app)
 
-A Tauri-based desktop application is available as a separate installer for users who prefer a graphical workflow over the CLI. The GUI embeds its own copy of the runtime payload, so it does not require the OFX bundle to be installed.
+A Tauri-based desktop application is available for users who prefer a graphical workflow over the CLI. It can be installed from the suite installer or launched from the portable Runtime bundle, so it does not require the OFX bundle to be installed.
 
 ## Documentation
 
@@ -171,11 +174,15 @@ cmake --build --preset release
 ```
 
 On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
-builds and `.\scripts\windows.ps1 -Task release -Version X.Y.Z` for official
-Windows release packaging. That canonical release command emits the official
-`Windows RTX` installer by default. Publish the experimental `DirectML` track
-only when you request it explicitly with
-`-Track dml` or `-Track all`.
+builds. Use `.\scripts\windows.ps1 -Task package-runtime -Preset release
+-FfmpegPath C:\path\to\ffmpeg.exe` for the portable Runtime/GUI ZIP, or set
+`CORRIDORKEY_FFMPEG_PATH` before running the command. Use
+`.\scripts\windows.ps1 -Task package-suite` for the top-level online suite
+installer once the runtime, OFX, and Adobe payload roots have been staged. The
+suite installer keeps the CLI/runtime core fixed and lets the user select GUI,
+host plugins, Green, and Blue components. Use
+`.\scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online` for the
+current automated release track packaging.
 
 Lower-level Windows scripts exist only as internal delegates for debugging the
 wrapper itself. If you invoke CMake directly, activate the MSVC developer

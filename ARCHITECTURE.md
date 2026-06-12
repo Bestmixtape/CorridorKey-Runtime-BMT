@@ -82,10 +82,11 @@ Orchestration of Core capabilities into coherent jobs and services.
 User-facing surfaces. Each is a thin consumer of App/Core contracts.
 
 - **CLI** (`src/cli`): Argument parsing, output formatting, command dispatch.
-  Ships inside the OFX installer alongside `CorridorKey.ofx` and is registered
-  on the system `PATH` so it is callable from any terminal after the OFX
-  install. Also available standalone in the portable runtime bundle that
-  feeds the Tauri GUI installer.
+  Installed by the Windows suite as part of the fixed runtime/CLI core and
+  registered on the system `PATH`. Also available in the portable
+  Runtime/GUI bundle. Standalone OFX support packages may carry a colocated
+  copy beside `CorridorKey.ofx` for host-plugin support, but the CLI surface
+  does not depend on installing OFX.
 - **OFX Plugin** (`src/plugins/ofx`): OpenFX host integration, render
   callback, and adapter code that communicates with the App-layer host plugin
   runtime service.
@@ -99,9 +100,9 @@ User-facing surfaces. Each is a thin consumer of App/Core contracts.
   host logging. Shared inference, model selection, diagnostics, runtime policy,
   and frame transport stay in App/Core or shared common infrastructure.
 - **Tauri GUI** (`src/gui`): Tauri 2 + React desktop application. Distributed
-  as a separate desktop installer that embeds its own copy of the runtime
-  payload (the staged output of `package_windows.ps1`); does not require the
-  OFX bundle to be installed.
+  as an optional suite component or portable Runtime bundle. It resolves either
+  the suite shared runtime root or the side-by-side packaged runtime and does
+  not require the OFX bundle to be installed.
 
 ---
 
@@ -240,12 +241,11 @@ tools/
 
 ### `scripts/installer/`
 
-Modern Windows installer authoring (Inno Setup 6). The canonical Windows
-release wrapper emits the legacy NSIS installer when no modern flavor is
-selected, and emits the selected Inno Setup installer when
-`-Flavor online|offline` is passed. See `docs/RELEASE_GUIDELINES.md`
-"Modern installer (Inno Setup)" for the operator workflow and the
-authoritative flavor matrix.
+Modern Windows installer authoring (Inno Setup 6). The suite installer is the
+top-level component selection surface. The legacy NSIS path is scoped to
+standalone OFX support packages only; it is not a Tauri or runtime installer
+path. See `docs/RELEASE_GUIDELINES.md` "Modern installer (Inno Setup)" for the
+operator workflow and the authoritative flavor matrix.
 
 ```text
 scripts/installer/

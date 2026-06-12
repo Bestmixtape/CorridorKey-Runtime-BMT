@@ -120,4 +120,81 @@ if(WIN32)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_build_label_reference.ps1
     )
     set_tests_properties(regression_windows_build_label_reference PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_runtime_product_contract
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_runtime_product_contract.ps1
+    )
+    set_tests_properties(regression_windows_runtime_product_contract PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_runtime_package_wrapper
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_runtime_package_wrapper.ps1
+    )
+    set_tests_properties(regression_windows_runtime_package_wrapper PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_runtime_package_label_guard
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_runtime_package_label_guard.ps1
+    )
+    set_tests_properties(regression_windows_runtime_package_label_guard PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_test_runtime_staging_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_test_runtime_staging_scaffold.ps1
+    )
+    set_tests_properties(regression_windows_test_runtime_staging_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_installer_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_installer_scaffold.ps1
+    )
+    set_tests_properties(regression_windows_suite_installer_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_iss_render
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_iss_render.ps1
+    )
+    set_tests_properties(regression_windows_suite_iss_render PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_compile_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_compile_scaffold.ps1
+    )
+    set_tests_properties(regression_windows_suite_compile_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_payload_staging
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_payload_staging.ps1
+    )
+    set_tests_properties(regression_windows_suite_payload_staging PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_online_optional_payloads
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_online_optional_payloads.ps1
+    )
+    set_tests_properties(regression_windows_suite_online_optional_payloads PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_install_readiness
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_install_readiness.ps1
+    )
+    set_tests_properties(regression_windows_suite_install_readiness PROPERTIES LABELS "regression")
+
+    add_test(
+        NAME regression_windows_suite_readiness_wrapper
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_readiness_wrapper.ps1
+    )
+    set_tests_properties(regression_windows_suite_readiness_wrapper PROPERTIES LABELS "regression")
 endif()

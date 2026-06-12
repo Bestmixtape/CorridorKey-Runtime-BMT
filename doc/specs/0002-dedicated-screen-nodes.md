@@ -136,6 +136,7 @@ Given a package has the Green ONNX runtime and models but is missing the Blue To
 - `doc/tasks/0010-isolate-runtime-node-state.md`
 - `doc/tasks/0011-prepare-mixed-windows-package.md`
 - `doc/tasks/0012-validate-dedicated-node-release.md`
+- `doc/tasks/0014-installer-responsive-clean-install.md`
 - `.agents/skills/ad-ground/SKILL.md`
 - `.agents/skills/ad-task/SKILL.md`
 - `.agents/skills/ad-adr/SKILL.md`
