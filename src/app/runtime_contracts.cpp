@@ -633,7 +633,7 @@ std::vector<PresetDefinition> preset_catalog() {
             .default_for_windows = true,
             .validated_platforms = {"windows_rtx_30_plus"},
             .intended_platforms = {"windows_rtx_30_plus"},
-            .validated_hardware_tiers = {"rtx_8gb_plus"},
+            .validated_hardware_tiers = {"rtx_8gb"},
         },
         PresetDefinition{
             .id = "win-rtx-balanced",

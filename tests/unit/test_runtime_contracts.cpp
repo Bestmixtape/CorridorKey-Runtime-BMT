@@ -281,6 +281,28 @@ TEST_CASE("preset catalog exposes a default macOS profile", "[unit][runtime]") {
     REQUIRE(windows_default_it->recommended_model == "corridorkey_fp16_512.onnx");
 }
 
+TEST_CASE("Windows presets use validation tiers from their recommended model", "[unit][runtime][regression]") {
+    const auto models = model_catalog();
+
+    for (const auto& preset : preset_catalog()) {
+        if (!preset.default_for_windows && preset.intended_use != "windows_rtx_primary") {
+            continue;
+        }
+
+        const auto model_it =
+            std::find_if(models.begin(), models.end(), [&](const ModelCatalogEntry& model) {
+                return model.filename == preset.recommended_model;
+            });
+        REQUIRE(model_it != models.end());
+
+        for (const auto& tier : preset.validated_hardware_tiers) {
+            INFO("preset " << preset.id << " tier " << tier);
+            REQUIRE(std::ranges::find(model_it->validated_hardware_tiers, tier) !=
+                    model_it->validated_hardware_tiers.end());
+        }
+    }
+}
+
 TEST_CASE("preset lookup accepts product-facing aliases", "[unit][runtime]") {
     auto capabilities = runtime_capabilities();
     bool windows_rtx_defaults =

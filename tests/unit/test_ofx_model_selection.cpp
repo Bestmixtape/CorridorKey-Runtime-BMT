@@ -490,10 +490,7 @@ TEST_CASE("kQualityAuto fails closed when the Draft (512) artifact is missing",
 
     auto candidates = build_bootstrap_candidates(
         windows_capabilities(), DeviceInfo{"RTX", 24576, Backend::TensorRT}, temp_dir.path());
-    REQUIRE_FALSE(candidates.empty());
-    REQUIRE(candidates.front().device.backend == Backend::TensorRT);
-    REQUIRE(candidates.front().requested_model_path.filename() == "corridorkey_fp16_1024.onnx");
-    REQUIRE(candidates.front().executable_model_path.filename() == "corridorkey_fp16_1024.onnx");
+    REQUIRE(candidates.empty());
 
     auto selection =
         select_quality_artifact(temp_dir.path(), Backend::TensorRT, kQualityAuto, 4096, 2160);
@@ -592,7 +589,7 @@ TEST_CASE("missing bootstrap artifact message lists the expected bootstrap files
     auto message = missing_bootstrap_artifact_message(
         windows_capabilities(), DeviceInfo{"RTX 3080", 10240, Backend::TensorRT}, temp_dir.path());
 
-    REQUIRE(message.find("corridorkey_fp16_1024.onnx") != std::string::npos);
+    REQUIRE(message.find("corridorkey_fp16_512.onnx") != std::string::npos);
     REQUIRE(message.find(temp_dir.path().string()) != std::string::npos);
 }
 TEST_CASE("auto windows tensorRT ignores the deprecated 768 fp16 artifact",
