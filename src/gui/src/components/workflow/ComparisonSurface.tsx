@@ -1,10 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import {
+  autoComparisonModeFromDrag,
   autoComparisonModeFromPoint,
   comparisonClipStyle,
   comparisonDividerGeometry,
   comparisonDividerHandlePoint,
   comparisonPositionFromPoint,
+  type ComparisonPointerPoint,
   type ViewerComparisonMode,
   type ViewerComparisonWipeMode
 } from "@/lib/viewerCompare";
@@ -43,6 +45,8 @@ export function ComparisonSurface({
   const secondaryVideoRef = useRef<HTMLVideoElement | null>(null);
   const isApplyingSyncRef = useRef(false);
   const isDraggingRef = useRef(false);
+  const autoDragModeRef = useRef<ViewerComparisonWipeMode | null>(null);
+  const autoDragStartRef = useRef<ComparisonPointerPoint | null>(null);
   const [syncStatusLabel, setSyncStatusLabel] = useState("Sync pending");
   const clipped = isWipeMode(mode);
   const adjustable = clipped || mode === "overlay";
@@ -126,21 +130,39 @@ export function ComparisonSurface({
     opacity: mode === "overlay" ? Math.max(0.05, Math.min(1, position / 100)) : 1,
     mixBlendMode: mode === "difference" ? "difference" as const : "normal" as const
   };
-  const updatePositionFromPointer = (clientX: number, clientY: number) => {
+  const pointerPointFromClient = (clientX: number, clientY: number): ComparisonPointerPoint | null => {
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || rect.height <= 0) {
-      return;
+      return null;
     }
-    const x = ((clientX - rect.left) / rect.width) * 100;
-    const y = ((clientY - rect.top) / rect.height) * 100;
-    if (autoMode) {
-      const nextMode = autoComparisonModeFromPoint(x, y);
-      onAutoModeChange?.(nextMode);
-      onPositionChange(comparisonPositionFromPoint(nextMode, x, y));
+
+    return {
+      xPercent: ((clientX - rect.left) / rect.width) * 100,
+      yPercent: ((clientY - rect.top) / rect.height) * 100
+    };
+  };
+  const updatePositionFromPointer = (clientX: number, clientY: number, allowAutoLock = true) => {
+    const point = pointerPointFromClient(clientX, clientY);
+    if (!point) {
       return;
     }
 
-    onPositionChange(comparisonPositionFromPoint(mode, x, y));
+    if (autoMode) {
+      let nextMode = autoDragModeRef.current;
+      if (!nextMode && allowAutoLock && autoDragStartRef.current) {
+        const dragMode = autoComparisonModeFromDrag(autoDragStartRef.current, point);
+        if (dragMode) {
+          nextMode = dragMode;
+          autoDragModeRef.current = nextMode;
+          onAutoModeChange?.(nextMode);
+        }
+      }
+      const resolvedMode = nextMode ?? (isWipeMode(mode) ? mode : autoComparisonModeFromPoint(point.xPercent, point.yPercent));
+      onPositionChange(comparisonPositionFromPoint(resolvedMode, point.xPercent, point.yPercent));
+      return;
+    }
+
+    onPositionChange(comparisonPositionFromPoint(mode, point.xPercent, point.yPercent));
   };
 
   return (
@@ -153,8 +175,12 @@ export function ComparisonSurface({
       onPointerDown={(event) => {
         if (!clipped) return;
         isDraggingRef.current = true;
+        autoDragModeRef.current = null;
+        autoDragStartRef.current = autoMode
+          ? pointerPointFromClient(event.clientX, event.clientY)
+          : null;
         event.currentTarget.setPointerCapture(event.pointerId);
-        updatePositionFromPointer(event.clientX, event.clientY);
+        updatePositionFromPointer(event.clientX, event.clientY, false);
       }}
       onPointerMove={(event) => {
         if (!clipped || !isDraggingRef.current) return;
@@ -162,9 +188,13 @@ export function ComparisonSurface({
       }}
       onPointerUp={() => {
         isDraggingRef.current = false;
+        autoDragModeRef.current = null;
+        autoDragStartRef.current = null;
       }}
       onLostPointerCapture={() => {
         isDraggingRef.current = false;
+        autoDragModeRef.current = null;
+        autoDragStartRef.current = null;
       }}
     >
       <div className="absolute inset-0">
@@ -254,7 +284,7 @@ function ComparisonDivider({
       {showHandle && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute h-5 w-5 rounded-full border border-brand bg-zinc-950/85 shadow-[0_0_22px_rgba(14,165,233,0.5)]"
+          className="ck-wipe-handle pointer-events-none absolute h-5 w-5"
           style={{
             left: `${handlePoint.x}%`,
             top: `${handlePoint.y}%`,

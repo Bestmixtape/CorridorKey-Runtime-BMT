@@ -7,6 +7,7 @@ import {
   comparisonDividerHandlePoint,
   comparisonPositionFromPoint,
   autoComparisonModeFromPoint,
+  autoComparisonModeFromDrag,
   resolveComparisonState
 } from "@/lib/viewerCompare";
 
@@ -200,4 +201,20 @@ describe("viewer comparison", () => {
     expect(autoComparisonModeFromPoint(82, 82)).toBe("diagonal");
     expect(autoComparisonModeFromPoint(50, 50)).toBe("vertical");
   });
+
+  test("locks auto wipe mode from the first drag movement", () => {
+    expect(autoComparisonModeFromDrag(
+      { xPercent: 50, yPercent: 50 },
+      { xPercent: 50.25, yPercent: 50.25 }
+    )).toBeNull();
+    expect(autoComparisonModeFromDrag(
+      { xPercent: 20, yPercent: 50 },
+      { xPercent: 35, yPercent: 90 }
+    )).toBe("horizontal");
+    expect(autoComparisonModeFromDrag(
+      { xPercent: 50, yPercent: 50 },
+      { xPercent: 82, yPercent: 82 }
+    )).toBe("diagonal");
+  });
+
 });

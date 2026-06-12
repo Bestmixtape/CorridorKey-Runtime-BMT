@@ -55,6 +55,11 @@ export interface ComparisonDividerHandlePoint {
   y: number;
 }
 
+export interface ComparisonPointerPoint {
+  xPercent: number;
+  yPercent: number;
+}
+
 export function resolveComparisonState(
   buffers: ViewerBuffer[],
   activeId: string,
@@ -223,6 +228,29 @@ export function autoComparisonModeFromPoint(
 ): ViewerComparisonWipeMode {
   const xDelta = Math.abs(clampPercent(xPercent) - 50);
   const yDelta = Math.abs(clampPercent(yPercent) - 50);
+
+  return autoComparisonModeFromDelta(xDelta, yDelta);
+}
+
+export function autoComparisonModeFromDrag(
+  start: ComparisonPointerPoint,
+  current: ComparisonPointerPoint
+): ViewerComparisonWipeMode | null {
+  const xDelta = Math.abs(clampPercent(current.xPercent) - clampPercent(start.xPercent));
+  const yDelta = Math.abs(clampPercent(current.yPercent) - clampPercent(start.yPercent));
+  const minimumDragDeltaPercent = 1;
+
+  if (Math.max(xDelta, yDelta) < minimumDragDeltaPercent) {
+    return null;
+  }
+
+  return autoComparisonModeFromDelta(xDelta, yDelta);
+}
+
+function autoComparisonModeFromDelta(
+  xDelta: number,
+  yDelta: number
+): ViewerComparisonWipeMode {
   const directionalThreshold = 1.35;
 
   if (xDelta >= yDelta * directionalThreshold) {

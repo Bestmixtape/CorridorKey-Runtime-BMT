@@ -285,17 +285,6 @@ export function ProcessFlow() {
     setHint(null);
   };
 
-  const handleSelectReplacementMedia = async () => {
-    const selected = await selectSourceAsset("file");
-    if (selected) {
-      setOutputRecipeSetting("replacementMediaPath", selected);
-    }
-  };
-
-  const handleClearReplacementMedia = () => {
-    setOutputRecipeSetting("replacementMediaPath", null);
-  };
-
   const handleSelectOutput = async () => {
     const defaultPath = outputReady
       ? outputPath || undefined
@@ -404,8 +393,6 @@ export function ProcessFlow() {
         onSelectHint={() => void handleSelectHint()}
         onClearHint={handleClearHint}
         onSelectOutput={() => void handleSelectOutput()}
-        onSelectReplacementMedia={() => void handleSelectReplacementMedia()}
-        onClearReplacementMedia={handleClearReplacementMedia}
         onOutputRecipeSetting={setOutputRecipeSetting}
         onSelectedPreset={setSelectedPresetId}
         onSelectedModel={setSelectedModelId}

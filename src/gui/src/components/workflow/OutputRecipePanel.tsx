@@ -1,5 +1,4 @@
 import { FileImage } from "lucide-react";
-import { fileName } from "@/lib/media";
 import {
   type OutputAlphaMode,
   type OutputArtifactOption,
@@ -22,9 +21,7 @@ export function OutputRecipePanel({
   artifactOptions,
   recipeControls,
   isProcessing,
-  onOutputRecipeSetting,
-  onSelectReplacementMedia,
-  onClearReplacementMedia
+  onOutputRecipeSetting
 }: {
   outputRecipe: OutputRecipeSettings;
   artifactOptions: OutputArtifactOption[];
@@ -34,8 +31,6 @@ export function OutputRecipePanel({
     key: Key,
     value: OutputRecipeSettings[Key]
   ) => void;
-  onSelectReplacementMedia: () => void;
-  onClearReplacementMedia: () => void;
 }) {
   const primaryArtifactOptions = primaryOutputArtifactOptions(artifactOptions);
 
@@ -97,37 +92,6 @@ export function OutputRecipePanel({
                 className="h-8 w-12 rounded border border-zinc-800 bg-zinc-950 disabled:opacity-50"
               />
             </label>
-          )}
-
-          {outputRecipe.previewBackground === "replacement_media" && (
-            <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                Replacement media
-              </div>
-              <div className="truncate text-xs font-medium text-zinc-300">
-                {outputRecipe.replacementMediaPath
-                  ? `Replacement media selected: ${fileName(outputRecipe.replacementMediaPath)}`
-                  : "No replacement media selected"}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={onSelectReplacementMedia}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Select replacement media
-                </button>
-                <button
-                  type="button"
-                  disabled={isProcessing || !outputRecipe.replacementMediaPath}
-                  onClick={onClearReplacementMedia}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-300 transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Clear replacement
-                </button>
-              </div>
-            </div>
           )}
 
           <AdvancedSelect

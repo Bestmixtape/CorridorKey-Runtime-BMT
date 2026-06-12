@@ -141,10 +141,11 @@ describe("output recipe", () => {
       enabled: true,
       status: "supported"
     });
-    expect(controls.previewBackgrounds.find((option) => option.value === "replacement_media")).toMatchObject({
-      enabled: true,
-      status: "preview_only"
-    });
+    expect(controls.previewBackgrounds.map((option) => option.value)).toEqual([
+      "checkerboard",
+      "solid",
+      "transparent"
+    ]);
     expect(controls.colorIntents.find((option) => option.value === "linear_srgb")).toMatchObject({
       enabled: true,
       status: "supported"
@@ -200,14 +201,21 @@ describe("output recipe", () => {
     ]);
   });
 
-  test("tracks replacement media as a preview background choice", () => {
+  test("normalizes stale replacement media background choices to checkerboard", () => {
     const recipe = normalizeOutputRecipe({
-      previewBackground: "replacement_media",
+      previewBackground: "replacement_media" as never,
       replacementMediaPath: "C:\\Shots\\clean_plate.mov"
     });
 
+    expect(recipe.previewBackground).toBe("checkerboard");
     expect(recipe.replacementMediaPath).toBe("C:\\Shots\\clean_plate.mov");
-    expect(outputRecipeChips(recipe)).toContain("Preview Replacement clean_plate.mov");
+    expect(outputRecipeChips(recipe)).toContain("Preview Checkerboard");
+  });
+
+  test("hides replacement media background until preview rendering can display it", () => {
+    expect(
+      outputRecipeControlOptions(DEFAULT_OUTPUT_RECIPE).previewBackgrounds.map((option) => option.value)
+    ).toEqual(["checkerboard", "solid", "transparent"]);
   });
 
   test("uses design-system utility classes for preview backgrounds", () => {
@@ -238,10 +246,11 @@ describe("output recipe", () => {
       ["matte_only", false, "awaiting_runtime_contract"],
       ["composited_preview", true, "supported"]
     ]);
-    expect(controls.previewBackgrounds.find((option) => option.value === "replacement_media")).toMatchObject({
-      enabled: true,
-      status: "preview_only"
-    });
+    expect(controls.previewBackgrounds.map((option) => option.value)).toEqual([
+      "checkerboard",
+      "solid",
+      "transparent"
+    ]);
     expect(controls.colorIntents.map((option) => [
       option.value,
       option.enabled,
@@ -278,8 +287,7 @@ describe("output recipe", () => {
     ])).toEqual([
       ["checkerboard", true, "preview_only"],
       ["solid", true, "preview_only"],
-      ["transparent", true, "preview_only"],
-      ["replacement_media", true, "preview_only"]
+      ["transparent", true, "preview_only"]
     ]);
     expect(controls.colorIntents.every((option) => !option.enabled)).toBe(true);
   });

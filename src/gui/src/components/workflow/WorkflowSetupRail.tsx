@@ -42,8 +42,6 @@ export function WorkflowSetupRail({
   onSelectHint,
   onClearHint,
   onSelectOutput,
-  onSelectReplacementMedia,
-  onClearReplacementMedia,
   onOutputRecipeSetting,
   onSelectedPreset,
   onSelectedModel,
@@ -82,8 +80,6 @@ export function WorkflowSetupRail({
   onSelectHint: () => void;
   onClearHint: () => void;
   onSelectOutput: () => void;
-  onSelectReplacementMedia: () => void;
-  onClearReplacementMedia: () => void;
   onOutputRecipeSetting: <Key extends keyof OutputRecipeSettings>(
     key: Key,
     value: OutputRecipeSettings[Key]
@@ -121,8 +117,6 @@ export function WorkflowSetupRail({
         recipeControls={recipeControls}
         isProcessing={isProcessing}
         onOutputRecipeSetting={onOutputRecipeSetting}
-        onSelectReplacementMedia={onSelectReplacementMedia}
-        onClearReplacementMedia={onClearReplacementMedia}
       />
 
       <QualityControlsPanel

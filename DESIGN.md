@@ -155,6 +155,8 @@ of existing tokens rather than a new token value.
 - `ck-preview-checkerboard` is the transparent-preview checkerboard. It derives
   from `card` and `background`.
 - `ck-wipe-divider` is the comparison divider glow. It derives from `brand`.
+- `ck-wipe-handle` is the Auto Compare draggable handle. It derives from
+  `brand`, `background`, `radius.md`, and `shadow.apple`.
 
 ## Layout
 

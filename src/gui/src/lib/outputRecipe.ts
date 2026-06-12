@@ -2,7 +2,7 @@ import { fileExtension, fileName, hasFileExtension } from "@/lib/media";
 
 export type OutputArtifactFamily = "movie" | "exr_sequence" | "png_sequence" | "preview_only";
 export type OutputAlphaMode = "transparent" | "matte_only" | "composited_preview";
-export type PreviewBackgroundMode = "checkerboard" | "solid" | "transparent" | "replacement_media";
+export type PreviewBackgroundMode = "checkerboard" | "solid" | "transparent";
 export type OutputColorIntent = "runtime_default" | "linear_srgb";
 
 export interface OutputRecipeSettings {
@@ -86,8 +86,7 @@ export const OUTPUT_ALPHA_OPTIONS: Array<{ value: OutputAlphaMode; label: string
 export const PREVIEW_BACKGROUND_OPTIONS: Array<{ value: PreviewBackgroundMode; label: string }> = [
   { value: "checkerboard", label: "Checkerboard" },
   { value: "solid", label: "Solid" },
-  { value: "transparent", label: "Transparent" },
-  { value: "replacement_media", label: "Replacement media" }
+  { value: "transparent", label: "Transparent" }
 ];
 
 export const OUTPUT_COLOR_OPTIONS: Array<{ value: OutputColorIntent; label: string }> = [
@@ -350,9 +349,6 @@ function outputSuffix(recipe: OutputRecipeSettings): string {
 }
 
 function previewBackgroundLabel(recipe: OutputRecipeSettings): string {
-  if (recipe.previewBackground === "replacement_media") {
-    return `Replacement ${fileName(recipe.replacementMediaPath) || "not selected"}`;
-  }
   if (recipe.previewBackground === "solid") {
     return `Solid ${recipe.previewSolidColor}`;
   }

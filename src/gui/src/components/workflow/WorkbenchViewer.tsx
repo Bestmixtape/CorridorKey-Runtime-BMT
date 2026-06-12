@@ -183,22 +183,26 @@ export function WorkbenchViewer({
           {availablePairOptions.length > 0 && (
             <>
               <div className="grid grid-cols-1 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1 sm:grid-cols-3">
-                {availablePairOptions.map((pair) => (
-                  <button
-                    key={pair.id}
-                    type="button"
-                    title={pair.label}
-                    onClick={() => setComparisonPairId(pair.id)}
-                    className={cn(
-                      "min-h-8 rounded-md px-2 py-1 text-xs font-bold transition-colors",
-                      comparisonPairId === pair.id
-                        ? "bg-brand text-white"
-                        : "text-zinc-400 hover:text-zinc-100"
-                    )}
-                  >
-                    <span className="block truncate">{pair.label}</span>
-                  </button>
-                ))}
+                {availablePairOptions.map((pair) => {
+                  const PairIcon = comparisonPairIcon(pair.id);
+                  return (
+                    <button
+                      key={pair.id}
+                      type="button"
+                      aria-label={pair.label}
+                      title={pair.label}
+                      onClick={() => setComparisonPairId(pair.id)}
+                      className={cn(
+                        "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+                        comparisonPairId === pair.id
+                          ? "bg-brand text-white"
+                          : "text-zinc-400 hover:text-zinc-100"
+                      )}
+                    >
+                      <PairIcon className="h-4 w-4" />
+                    </button>
+                  );
+                })}
               </div>
 
               <button
@@ -285,4 +289,10 @@ function readinessStatusLabel(status: string): string {
   if (status === "cancelled") return "Cancelled";
   if (status === "running") return "Processing";
   return "Ready";
+}
+
+function comparisonPairIcon(pairId: ViewerComparisonPairId): LucideIcon {
+  if (pairId === "source-hint") return Layers;
+  if (pairId === "hint-result") return Contrast;
+  return ArrowLeftRight;
 }

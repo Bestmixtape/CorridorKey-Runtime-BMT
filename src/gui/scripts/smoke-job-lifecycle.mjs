@@ -668,10 +668,11 @@ async function configureOutputRecipe(page) {
   await page.getByRole("button", { name: /Delivery details/i }).click();
   await waitForBody(page, "Matte only (needs runtime support)");
   await waitForBody(page, "Composite preview");
-  await page.getByLabel("Preview background").selectOption("replacement_media");
-  await waitForBody(page, "No replacement media selected");
-  await page.getByRole("button", { name: /Select replacement media/i }).click();
-  await waitForBody(page, "Replacement media selected");
+  assert.equal(
+    await page.getByLabel("Preview background").locator("option[value='replacement_media']").count(),
+    0,
+    "Replacement media must stay hidden until the preview renderer can display it"
+  );
   await page.getByLabel("Preview background").selectOption("solid");
   await waitForBody(page, "Linear sRGB (needs runtime support)");
   await waitForBody(page, "Preview color");
@@ -829,6 +830,17 @@ async function assertViewerComparisonControls(page) {
   await waitForBody(page, "Source vs Result");
   await waitForBody(page, "Auto compare");
   await waitForBody(page, "Synced playback");
+  const sourceResultPairButton = page.getByRole("button", { name: "Source / Result" });
+  assert.equal(
+    await sourceResultPairButton.locator("svg").count(),
+    1,
+    "comparison pair selector should be an icon button"
+  );
+  assert.equal(
+    (await sourceResultPairButton.innerText()).trim(),
+    "",
+    "comparison pair selector should not render visible text"
+  );
   await page.getByRole("button", { name: "Auto compare" }).click();
   await assertSynchronizedComparisonVideos(page);
 
@@ -842,11 +854,27 @@ async function assertViewerComparisonControls(page) {
   const surface = page.locator(".cursor-crosshair").first();
   const box = await surface.boundingBox();
   assert(box, "comparison surface should be draggable");
-  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5);
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.5);
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.85);
   await page.mouse.up();
   assert.notEqual(await page.getByLabel("Wipe position").inputValue(), "68");
+  const autoDivider = await page.locator(".ck-wipe-divider line").first().evaluate((line) => ({
+    x1: line.getAttribute("x1"),
+    y1: line.getAttribute("y1"),
+    x2: line.getAttribute("x2"),
+    y2: line.getAttribute("y2")
+  }));
+  assert.equal(
+    autoDivider.x1,
+    "0",
+    `Auto Compare should derive horizontal mode from the drag movement: ${JSON.stringify(autoDivider)}`
+  );
+  assert.equal(
+    autoDivider.x2,
+    "100",
+    `Auto Compare should derive horizontal mode from the drag movement: ${JSON.stringify(autoDivider)}`
+  );
 
   await page.getByRole("button", { name: "Vertical wipe" }).click();
   await waitForBody(page, "Vertical wipe");

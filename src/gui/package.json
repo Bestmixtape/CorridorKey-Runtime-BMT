@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:e2e",
+    "test": "pnpm test:design && pnpm test:unit && pnpm build && pnpm test:integration && pnpm test:e2e",
+    "test:design": "node scripts/audit-design-contracts.mjs",
     "test:unit": "vitest run",
     "test:integration": "pnpm smoke:readiness",
     "test:e2e": "pnpm smoke:job",
