@@ -4,9 +4,11 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <corridorkey/version.hpp>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -99,6 +101,48 @@ struct FakeAdobeHandleHost {
     }
 
     static inline FakeAdobeHandleHost* active_host = nullptr;
+};
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(const char* name, std::optional<std::string> value) : m_name(name) {
+#if defined(_WIN32)
+        char* raw = nullptr;
+        std::size_t length = 0;
+        if (_dupenv_s(&raw, &length, m_name.c_str()) == 0 && raw != nullptr) {
+            m_previous = raw;
+            std::free(raw);
+        }
+#else
+        if (const char* current = std::getenv(m_name.c_str()); current != nullptr) {
+            m_previous = std::string(current);
+        }
+#endif
+        set(value);
+    }
+
+    ~ScopedEnvVar() {
+        set(m_previous);
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+private:
+    void set(const std::optional<std::string>& value) const {
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), value.has_value() ? value->c_str() : "");
+#else
+        if (value.has_value()) {
+            setenv(m_name.c_str(), value->c_str(), 1);
+        } else {
+            unsetenv(m_name.c_str());
+        }
+#endif
+    }
+
+    std::string m_name;
+    std::optional<std::string> m_previous;
 };
 
 struct FakeSmartPreRenderHost {
@@ -466,8 +510,11 @@ TEST_CASE("After Effects global setup publishes version and declared capabilitie
     CHECK((output_data.out_flags2 & PF_OutFlag2_SUPPORTS_THREADED_RENDERING) == 0);
 }
 
-TEST_CASE("After Effects packaged render context resolves models beside the plugin module",
+TEST_CASE("After Effects packaged render context resolves models from the suite shared runtime",
           "[unit][adobe][effect][package][regression]") {
+    ScopedEnvVar shared_runtime_root("CORRIDORKEY_SHARED_RUNTIME_ROOT",
+                                     "C:/Program Files/CorridorKey/Runtime");
+    ScopedEnvVar models_dir("CORRIDORKEY_MODELS_DIR", std::nullopt);
     const auto plugin_module_path = std::filesystem::path{
         "C:/Program Files/Adobe/Common/Plug-ins/7.0/MediaCore/CorridorKey/Contents/Win64/"
         "corridorkey_adobe_green.aex"};
@@ -476,8 +523,22 @@ TEST_CASE("After Effects packaged render context resolves models beside the plug
 
     CHECK(models_root ==
           std::filesystem::path{
-              "C:/Program Files/Adobe/Common/Plug-ins/7.0/MediaCore/CorridorKey/Contents/"
-              "Resources/models"});
+              "C:/Program Files/CorridorKey/Runtime/Contents/Resources/models"});
+}
+
+TEST_CASE("After Effects packaged render context falls back beside the plugin module",
+          "[unit][adobe][effect][package][regression]") {
+    ScopedEnvVar shared_runtime_root("CORRIDORKEY_SHARED_RUNTIME_ROOT", std::nullopt);
+    ScopedEnvVar models_dir("CORRIDORKEY_MODELS_DIR", std::nullopt);
+    const auto package_root =
+        std::filesystem::temp_directory_path() / "corridorkey-adobe-effect-fallback-no-config";
+    std::filesystem::remove_all(package_root);
+    const auto plugin_module_path =
+        package_root / "Contents" / "Win64" / "corridorkey_adobe_green.aex";
+
+    const auto models_root = corridorkey::adobe::resolve_adobe_models_root(plugin_module_path);
+
+    CHECK(models_root == package_root / "Contents" / "Resources" / "models");
 }
 
 TEST_CASE("After Effects dispatcher handles lifecycle selectors and rejects invalid render inputs",
