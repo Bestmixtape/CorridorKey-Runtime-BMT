@@ -143,6 +143,13 @@ if(WIN32)
     set_tests_properties(regression_windows_runtime_package_label_guard PROPERTIES LABELS "regression")
 
     add_test(
+        NAME regression_windows_test_runtime_staging_scaffold
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_test_runtime_staging_scaffold.ps1
+    )
+    set_tests_properties(regression_windows_test_runtime_staging_scaffold PROPERTIES LABELS "regression")
+
+    add_test(
         NAME regression_windows_suite_installer_scaffold
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_windows_suite_installer_scaffold.ps1
