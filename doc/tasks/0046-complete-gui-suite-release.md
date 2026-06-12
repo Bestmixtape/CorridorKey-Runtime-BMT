@@ -57,8 +57,8 @@ Verifiable conditions. Each as a checkbox so progress is point-editable.
       previewable result through the direct asset path or generated proxy.
 - [x] Comparison controls appear only when at least two buffers are available,
       use icon buttons with tooltips, and include Auto Compare with a central
-      draggable handle that locks vertical, horizontal, or diagonal behavior at
-      drag start.
+      draggable handle that locks vertical, horizontal, or diagonal behavior
+      from the first drag movement.
 - [x] Unit, integration, and E2E coverage verify the release-critical GUI
       behaviors, including proxy creation, persisted preset selection,
       state-driven control visibility, export option gating, telemetry display,
@@ -396,6 +396,39 @@ options, and readiness/path diagnostics under Runtime diagnostics. Manual model
 override remains hidden unless more than one useful model is available or no
 preset exists. Verification passed with `pnpm build`, `pnpm smoke:job`, and
 `pnpm smoke:readiness` in `src/gui`.
+
+### 2026-06-09
+
+Fresh-context review concern closure TDD slice:
+
+- Standards concern: `win-rtx-draft` used `rtx_8gb_plus`, but the Windows RTX
+  tier resolver emits `rtx_8gb`. RED added a runtime contract test proving
+  Windows presets use validation tiers from their recommended model. GREEN
+  changed the draft preset metadata to `rtx_8gb`.
+- Standards concern: the Auto Compare handle used pill radius and an arbitrary
+  shadow instead of the design system. RED added a design audit requiring a
+  named `.ck-wipe-handle` utility in the component, CSS, and `DESIGN.md`.
+  GREEN moved the handle shape and elevation to `src/gui/src/index.css` using
+  existing tokens and documented the derived utility in `DESIGN.md`.
+- Spec concern: Auto Compare changed wipe orientation during a drag. RED added
+  a viewer comparison contract for first-movement direction and a job smoke
+  assertion that a vertical-dominant drag produces a horizontal divider. GREEN
+  ignores sub-percent pointer jitter and locks the auto wipe mode from the first
+  meaningful pointer movement until pointer release or lost capture.
+- Spec concern: comparison pair selection was a text-button toolbar. RED added
+  smoke coverage requiring the `Source / Result` pair control to be an icon
+  button with the same accessible name. GREEN changed pair controls to
+  icon-only buttons with `aria-label` and tooltips.
+- Spec concern: replacement media was configurable as a preview background even
+  though the preview renderer displayed checkerboard. RED added output recipe
+  coverage proving replacement media stays hidden until the preview renderer can
+  display it. GREEN removed the replacement-media background option and its UI
+  callbacks while keeping the runtime capability field closed.
+
+Verification passed with
+`build\debug\tests\unit\test_unit.exe "[runtime]"`, `pnpm test:design`,
+`pnpm test:unit`, `pnpm build`, `pnpm smoke:job`, `pnpm smoke:readiness`, and
+`git diff --check`.
 
 ## Definition of Done
 
