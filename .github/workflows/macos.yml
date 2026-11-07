@@ -60,20 +60,32 @@ jobs:
           flat="vendor/onnxruntime/include/onnxruntime"
           sess="$flat/core/session"
           cm="$flat/core/providers/coreml"
-          mkdir -p "$sess" "$cm" "$flat/core/providers"
-          cp "$o"/onnxruntime_c_api.h "$o"/onnxruntime_cxx_api.h "$o"/onnxruntime_cxx_inline.h \
-             "$o"/onnxruntime_float16.h "$o"/onnxruntime_env_config_keys.h \
-             "$o"/onnxruntime_session_options_config_keys.h \
-             "$o"/onnxruntime_run_options_config_keys.h "$o"/onnxruntime_ep_c_api.h \
-             "$o"/onnxruntime_ep_device_ep_metadata_keys.h \
-             "$o"/onnxruntime_lite_custom_op.h "$o"/provider_options.h "$sess"/
-          cp "$sess"/*.h "$flat"/
-          cp "$o"/coreml_provider_factory.h "$cm"/
-          # coreml_provider_factory.h includes "onnxruntime_c_api.h" relative
-          # to its own dir — keep that copy beside it.
-          cp "$sess"/onnxruntime_c_api.h "$cm"/
-          cp "$o"/coreml_provider_factory.h "$o"/cpu_provider_factory.h "$flat"/
-          cp "$o"/core/providers/*.h "$flat"/core/providers/
+          mkdir -p "$sess" "$cm"
+          # ORT headers guard with #pragma once, which is path-based: two
+          # physical copies of the same header under different paths both
+          # parse and redefine the enums. Keep exactly ONE copy of every
+          # real header (under $flat, matching the official flat layout)
+          # and add thin forwarders for the alternate include paths this
+          # codebase uses (<onnxruntime/core/session/...> etc).
+          cp "$o"/*.h "$flat"/
+          if [ -d "$o"/core ]; then
+            cp -R "$o"/core "$flat"/core.tmp
+            mkdir -p "$flat"/core/providers
+            cp -R "$flat"/core.tmp/providers/. "$flat"/core/providers/
+            rm -rf "$flat"/core.tmp
+          fi
+          rm -rf "$cm"
+          mkdir -p "$cm"
+          for h in onnxruntime_c_api.h onnxruntime_cxx_api.h onnxruntime_cxx_inline.h \
+                   onnxruntime_float16.h onnxruntime_env_config_keys.h \
+                   onnxruntime_session_options_config_keys.h \
+                   onnxruntime_run_options_config_keys.h onnxruntime_ep_c_api.h \
+                   onnxruntime_ep_device_ep_metadata_keys.h \
+                   onnxruntime_lite_custom_op.h provider_options.h; do
+            printf '#pragma once\n#include "../../%s"\n' "$h" > "$sess/$h"
+          done
+          printf '#pragma once\n#include "../../../coreml_provider_factory.h"\n' \
+            > "$cm/coreml_provider_factory.h"
           ls -l vendor/onnxruntime/lib
           file "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" \
             | grep -q 'Mach-O 64-bit dynamically linked shared library arm64'
