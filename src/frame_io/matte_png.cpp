@@ -43,10 +43,12 @@ struct PngWriteGuard {
 // from write_matte_png_16 so MSVC C4611 (destructor-bearing locals at setjmp,
 // fatal under /WX) cannot fire: every RAII owner lives in the caller.
 // Returns 0 on success, nonzero if libpng longjmp'd.
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4611)  // safe: no destructor-bearing local is constructed
                                  // between setjmp and the guarded writes below; all
                                  // RAII owners live in the caller and outlive this frame.
+#endif
 static int png_write_guarded(png_structp png, png_infop info, std::FILE* handle,
                              png_bytep* rows, unsigned width, unsigned height) {
     if (setjmp(png_jmpbuf(png))) {
@@ -60,7 +62,9 @@ static int png_write_guarded(png_structp png, png_infop info, std::FILE* handle,
     png_write_png(png, info, PNG_TRANSFORM_IDENTITY, nullptr);
     return 0;
 }
+#ifdef _MSC_VER
 #pragma warning(pop)
+#endif
 
 Result<void> write_matte_png_16(const std::filesystem::path& path, int width, int height,
                                 const uint16_t* gray, std::size_t row_stride_values) {
