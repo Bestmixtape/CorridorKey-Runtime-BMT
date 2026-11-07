@@ -43,8 +43,15 @@ jobs:
           ls -l vendor/onnxruntime/lib
           file "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" \
             | grep -q 'Mach-O 64-bit dynamically linked shared library arm64'
-          nm -gU "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" \
-            | grep -qi coreml || { echo 'CoreML EP missing from vendored dylib'; exit 1; }
+          # CoreML EP is statically registered inside the official macOS
+          # build; match either an exported symbol or embedded strings.
+          if nm -gU "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" | grep -qi coreml; then
+            echo 'CoreML EP: exported symbol found'
+          elif strings "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" | grep -qi coreml; then
+            echo 'CoreML EP: statically registered (strings match)'
+          else
+            echo 'CoreML EP missing from vendored dylib'; exit 1
+          fi
 
       - name: Configure
         run: |
