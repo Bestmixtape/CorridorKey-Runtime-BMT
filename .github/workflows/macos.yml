@@ -58,11 +58,23 @@ jobs:
             echo 'CoreML EP missing from vendored dylib'; exit 1
           fi
 
+      - name: Resolve vcpkg root (macos-15 moved it under /opt/homebrew)
+        run: |
+          for p in "$VCPKG_INSTALLATION_ROOT" /opt/homebrew/share/vcpkg /usr/local/share/vcpkg; do
+            if [ -n "$p" ] && [ -f "$p/scripts/vcpkg.sh" ]; then
+              echo "VCPKG_RESOLVED=$p" >> "$GITHUB_ENV"
+              echo "vcpkg root: $p"
+              exit 0
+            fi
+          done
+          echo "::error::vcpkg not found on runner" >&2
+          exit 1
+
       - name: Configure
         run: |
           cmake -B build/macos -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/vcpkg.sh" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_RESOLVED/scripts/vcpkg.sh" \
             -DVCPKG_TARGET_TRIPLET=arm64-osx \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCORRIDORKEY_BUNDLE_MODELS=OFF
