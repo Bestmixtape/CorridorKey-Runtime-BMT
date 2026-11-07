@@ -65,7 +65,7 @@ behind the hue Picker.
   vcpkg (`vcpkg.json`). The vendored Windows ONNX Runtime and TensorRT-RTX
   binaries are not carried in this fork's git tree; re-stage them under
   `vendor/` before configuring.
-- **macOS:** `.github/workflows/macos.yml` (macos-14 runner) stages the
+- **macOS:** `.github/workflows/macos.yml` (macos-15 runner, Apple Silicon) stages the
   official ONNX Runtime osx-arm64 release, builds `corridorkey_ofx`, verifies
   the bundle layout/link contract, ad-hoc signs, smoke-tests CoreML inference
   end-to-end, and uploads the zip + dmg.

@@ -18,9 +18,13 @@ env:
   ONNXRUNTIME_MACOS_VERSION: "1.24.3"
   BMT_VERSION: "0.1"
 
+concurrency:
+  group: macos-bmt-ci
+  cancel-in-progress: true
+
 jobs:
   macos-arm64:
-    runs-on: macos-14
+    runs-on: macos-15  # macos-14 images retired by GitHub 2026-11-02 (actions/runner-images#15226); arm64 like its predecessor
     steps:
       - uses: actions/checkout@v4
 
