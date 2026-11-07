@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace corridorkey::ofx {
@@ -32,6 +33,15 @@ struct SharedCacheKey {
     std::uint64_t inference_hash = 0;
     std::uint64_t model_path_hash = 0;
     int screen_color = 0;
+    // BMT Build: the Custom Picker hue-rotation baked into the stored
+    // foreground's restore pass. Two nodes can share a rotated-domain frame
+    // signature while restoring different hue deltas, so the delta is part
+    // of the key.
+    double key_hue_delta_deg = 0.0;
+    // BMT Build: active precision track ("fp32"/"fp16"). Model Precision
+    // switches load different artifacts for an otherwise identical key
+    // state, so the track participates in cache identity.
+    std::string model_track;
 
     bool operator==(const SharedCacheKey&) const = default;
 };

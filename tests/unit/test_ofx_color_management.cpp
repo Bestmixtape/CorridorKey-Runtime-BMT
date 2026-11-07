@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <corridorkey/engine.hpp>
+#include <algorithm>
 #include <cstdarg>
 #include <cstring>
 #include <memory>
@@ -695,11 +696,32 @@ TEST_CASE("Green descriptor describe_in_context exposes Green and Blue-Green Cha
     REQUIRE(screen_color_props.ints.at(kOfxParamPropDefault).front() == 0);
     REQUIRE(screen_color_props.strings.at(kOfxParamPropChoiceOption) ==
             std::vector<std::string>{"Green", "Blue-Green Channel Swap"});
-    // kOfxParamPropSecret is either absent (default 0) or explicitly 0.
-    const auto secret_it = screen_color_props.ints.find(kOfxParamPropSecret);
-    if (secret_it != screen_color_props.ints.end()) {
-        REQUIRE(secret_it->second.front() == 0);
-    }
+    // BMT Build: the legacy screen_color choice is now secret on every
+    // descriptor — the bmtKeyColourMode choice below is the live switch and
+    // the legacy value only keeps its saved-graph storage shape.
+    REQUIRE(screen_color_props.ints.count(kOfxParamPropSecret) == 1);
+    REQUIRE(screen_color_props.ints.at(kOfxParamPropSecret).front() == 1);
+
+    // BMT Build: the single-entry panel switch. Choice order is contractual
+    // (indices match kBmtKeyColourMode{Blue,Green,Custom} in ofx_constants),
+    // default is Green Screen, and the RGB picker is defined right after so
+    // it renders directly below the chooser.
+    const auto& key_mode_props = descriptor.param_set.params.at(kParamBmtKeyColourMode)->props;
+    REQUIRE(key_mode_props.strings.at(kOfxParamPropChoiceOption) ==
+            std::vector<std::string>{"Blue Screen", "Green Screen",
+                                     "Custom Picker (Experimental)"});
+    REQUIRE(key_mode_props.ints.at(kOfxParamPropDefault).front() == 1);  // Green Screen
+    const auto key_mode_it =
+        std::find(descriptor.param_set.define_order.begin(), descriptor.param_set.define_order.end(),
+                  std::string(kParamBmtKeyColourMode));
+    REQUIRE(key_mode_it != descriptor.param_set.define_order.end());
+    CHECK(*(key_mode_it + 1) == std::string(kParamBmtKeyColour));
+    const auto& key_colour_props = descriptor.param_set.params.at(kParamBmtKeyColour)->props;
+    REQUIRE(key_colour_props.doubles.count(kOfxParamPropDefault) == 1);
+    REQUIRE(key_colour_props.doubles.at(kOfxParamPropDefault).size() == 3);
+    CHECK(key_colour_props.doubles.at(kOfxParamPropDefault)[0] == kDefaultBmtKeyColourR);
+    CHECK(key_colour_props.doubles.at(kOfxParamPropDefault)[1] == kDefaultBmtKeyColourG);
+    CHECK(key_colour_props.doubles.at(kOfxParamPropDefault)[2] == kDefaultBmtKeyColourB);
 }
 
 // in production logs. This regression test catches that class of bug at

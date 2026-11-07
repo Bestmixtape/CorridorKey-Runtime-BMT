@@ -9,6 +9,7 @@ set(APP_COMMON_SOURCES
     host_plugin_runtime_client.cpp
     host_plugin_runtime_protocol.cpp
     runtime_contracts.cpp
+    model_fetch.cpp
     version_check.cpp
 )
 target_sources(corridorkey_common PRIVATE ${APP_COMMON_SOURCES})

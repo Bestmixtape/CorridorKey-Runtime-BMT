@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.bestmixtape.corridorkey-bmt</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>CorridorKey-BMT</string>
+	<key>CFBundlePackageType</key>
+	<string>iBPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@CORRIDORKEY_VERSION_DISPLAY_STRING@</string>
+	<key>CFBundleVersion</key>
+	<string>@CORRIDORKEY_VERSION_DISPLAY_STRING@</string>
+</dict>
+</plist>

@@ -160,6 +160,29 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
     set_parent(param_props, parent);
 }
 
+void define_rgb_param(OfxParamSetHandle param_set, const char* name, const char* label,
+                      double default_r, double default_g, double default_b, const char* hint,
+                      const char* parent = nullptr) {
+    OfxPropertySetHandle param_props = nullptr;
+    OfxStatus status =
+        g_suites.parameter->paramDefine(param_set, kOfxParamTypeRGB, name, &param_props);
+    if (status != kOfxStatOK) {
+        log_param_define_failure("define_rgb_param", name, kOfxParamTypeRGB, status);
+        return;
+    }
+
+    g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
+    // kOfxParamPropDefault on multi-value params takes one index per value
+    // (ofxParam.h: RGB unpacks r/g/b at indices 0/1/2).
+    g_suites.property->propSetDouble(param_props, kOfxParamPropDefault, 0, default_r);
+    g_suites.property->propSetDouble(param_props, kOfxParamPropDefault, 1, default_g);
+    g_suites.property->propSetDouble(param_props, kOfxParamPropDefault, 2, default_b);
+    if (hint != nullptr) {
+        g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    set_parent(param_props, parent);
+}
+
 void define_runtime_status_param(OfxParamSetHandle param_set, const char* name, const char* label,
                                  const char* default_value, const char* hint,
                                  const char* parent = nullptr, bool secret = false) {
@@ -380,8 +403,12 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     }
 
     // --- Group 1: Status (runtime diagnostics and current version at the top) ---
+    // BMT Build: the display version is pinned to the community release line
+    // (see CORRIDORKEY_DISPLAY_VERSION_LABEL at configure time); the label
+    // suffix identifies the community packaging without polluting the semver
+    // token the GitHub-releases comparator parses.
     std::string runtime_group_label =
-        std::string("CorridorKey v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
+        std::string("CorridorKey 2.0 BMT Build v") + CORRIDORKEY_DISPLAY_VERSION_STRING;
     define_group_param(param_set, "runtime_group", runtime_group_label.c_str(), true);
 
     // "Open Log Folder" is the rich-telemetry escape hatch documented in
@@ -546,6 +573,41 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // --- Group 3: Key Setup (the two choices that determine the AI result) ---
     define_group_param(param_set, "setup_group", "Key Setup", true);
 
+    // BMT Build: "Key Colour" is the single in-panel switch that replaced the
+    // retired dedicated Blue descriptor (one effects-list entry now carries
+    // both weight families). The derived mode selects the green/blue model
+    // family at render time (ofx_render.cpp); Custom Picker additionally
+    // hue-rotates the model input so an arbitrary saturated background lands
+    // on the nearest trained hue (see post_process/hue_rotate.hpp). Defined
+    // immediately after the group so it renders at the top of Key Setup,
+    // with the picker swatch directly below it (hosts render params in
+    // definition order; no conditional hiding — the hints carry the gating).
+    define_choice_param(param_set, kParamBmtKeyColourMode, "Key Colour",
+                        kDefaultBmtKeyColourMode,
+                        {"Blue Screen", "Green Screen", "Custom Picker (Experimental)"},
+                        "Blue Screen and Green Screen feed the plate to the matching trained "
+                        "model family with no colour preprocessing. Custom Picker "
+                        "(Experimental) hue-rotates an arbitrary background colour to the "
+                        "nearest trained colour — experimental.",
+                        "setup_group");
+    define_rgb_param(param_set, kParamBmtKeyColour, "Custom Key Colour", kDefaultBmtKeyColourR,
+                     kDefaultBmtKeyColourG, kDefaultBmtKeyColourB,
+                     "The background colour to key out. Only used when Key Colour is set to "
+                     "Custom Picker: the engine hue-rotates the plate so this colour lands on "
+                     "the nearest trained colour (green or blue weights).",
+                     "setup_group");
+    // BMT Build: precision track switch. FP32 is the default first-run track
+    // (blue ships a dedicated FP32 artifact; a staged green
+    // corridorkey_torchtrt_fp32_<res>.ts wins over the fp16 ladder — see
+    // ofx_model_selection.hpp). The CORRIDORKEY_MODEL_TRACK env var overrides
+    // this choice for CLI/sidecar runs (app/model_track.hpp).
+    define_choice_param(param_set, kParamBmtModelPrecision, "Model Precision",
+                        kDefaultBmtModelPrecision,
+                        {"FP32 (Recommended)", "FP16 (Experimental)"},
+                        "FP16 models are smaller/faster but experimental on GTX/RTX-30-series "
+                        "(Ampere) cards; FP32 is the supported default.",
+                        "setup_group");
+
     // Per-descriptor screen-color contract (spec 0002 FR-8):
     //
     // - Blue descriptor hides the chooser entirely (secret=true) and
@@ -577,7 +639,14 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                              "dedicated Blue model, use the CorridorKey Blue node.";
     define_choice_param(param_set, kParamScreenColor, "Screen Color", screen_color_default,
                         screen_color_options, screen_color_hint, "setup_group",
-                        /*enabled=*/true, /*secret=*/is_blue_descriptor);
+                        /*enabled=*/true,
+                        // BMT Build: secret on every descriptor. The raw
+                        // screen_color value is superseded at render time by
+                        // the bmtKeyColourMode choice above; the param stays
+                        // defined (hidden) so saved graphs keep their
+                        // storage shape and the legacy value never fights
+                        // the new panel switch.
+                        /*secret=*/true);
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,
         {quality_mode_ui_label(kQualityAuto), quality_mode_ui_label(kQualityPreview),
@@ -658,6 +727,22 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "FG+Matte: explicit linear foreground+matte alias of Processed for "
                         "manual compositing workflows and backward compatibility.",
                         "output_group");
+
+    // BMT Build: one-click matte export. The button arms a one-shot capture
+    // (instance_changed, main thread); the PNG write happens inside the next
+    // host-driven Render of the current frame because OFX image getters are
+    // host-locked — see ofx_matte_export.cpp for the full rationale. The
+    // status row underneath mirrors the model-pack progress pattern.
+    define_push_button_param(param_set, kParamBmtExportMatte, "Export Matte (PNG sequence)",
+                             "Write the current frame's AI matte as a 16-bit grayscale PNG under "
+                             "Documents\\CorridorKey2.0-BMT\\matte\\<clip-name>-frame<N>.png. "
+                             "The result (including the output folder) appears in the row below "
+                             "after the next render of this frame.",
+                             "output_group");
+    define_runtime_status_param(param_set, kParamBmtMatteStatus, "Matte Export",
+                                "Idle — click Export Matte to write the current frame's matte.",
+                                "Status of the last Export Matte request; successful exports "
+                                "show the written file path.", "output_group");
 
     // --- Group 8: Performance ---
     define_group_param(param_set, "performance_group", "Performance", false);
@@ -764,6 +849,43 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "When enabled, the update banner surfaces pre-release builds in addition to stable "
         "releases. Re-evaluates against the cached release list on the next panel refresh.",
         "advanced_runtime_group");
+
+    // --- Group 10: BMT Build — About (footer, defined last so it renders at
+    // the bottom of the host panel). Static credit lines + a Check for Update
+    // button that reuses the standard update-check pipeline: on notification
+    // (ofx_instance.cpp) it forces kickoff_global_update_check(true) against
+    // the Bestmixtape/CorridorKey-2.0-BMT-Build releases, and the normal
+    // kParamUpdateStatus / kParamOpenUpdatePage banner in runtime_group
+    // surfaces the result. ---
+    define_group_param(param_set, kParamBmtAboutGroup, "BMT Build — About", false);
+
+    define_info_param(param_set, kParamBmtBuildLine, "Build",
+                      "BMT Build v0.1 (community packaging of CorridorKey Runtime 0.9.1)",
+                      "This is a community build packaged by bestmixtape.", kParamBmtAboutGroup);
+    define_info_param(
+        param_set, kParamBmtCommunityLine, "Community",
+        "bestmixtape community build — updates & source: "
+        "https://github.com/Bestmixtape/CorridorKey-2.0-BMT-Build",
+        "Open the community package page on GitHub for downloads and source.",
+        kParamBmtAboutGroup);
+    define_info_param(
+        param_set, kParamBmtUpstreamLine, "Upstream",
+        "CorridorKey (c) Corridor Digital LLC — https://corridorkey.com · "
+        "https://github.com/nikopueringer/CorridorKey2.0",
+        "The keying engine and plug-in belong to Corridor Digital LLC.", kParamBmtAboutGroup);
+    // Model pack row: BMT packaging ships the bundle without the ~2.4 GB
+    // model pack, so this row tracks the first-run Hugging Face download
+    // into the per-user models dir (see app/model_fetch.cpp and the fetch
+    // kickoff in ofx_instance.cpp).
+    define_runtime_status_param(
+        param_set, kParamBmtModelStatus, "Model Pack", "Initializing...",
+        "First-run download progress for the 13 runtime model files (~2.4 GB) fetched "
+        "from Hugging Face into the user-local CorridorKey models folder.",
+        kParamBmtAboutGroup);
+    define_push_button_param(param_set, kParamBmtCheckUpdate, "Check for Update",
+                             "Check GitHub for a newer BMT Build release; results appear in the "
+                             "update banner at the top of the panel.",
+                             kParamBmtAboutGroup);
 
     log_message("describe_in_context", "Describe in context completed.");
     return kOfxStatOK;

@@ -19,12 +19,14 @@
 #include "../app/host_plugin_runtime_service.hpp"
 #include "../app/job_orchestrator.hpp"
 #include "../app/model_compiler.hpp"
+#include "../app/model_fetch.hpp"
 #include "../app/runtime_contracts.hpp"
 #include "../app/version_check.hpp"
 #include "../common/json_utils.hpp"
 #include "../common/local_ipc.hpp"
 #include "../common/runtime_paths.hpp"
 #include "../core/windows_rtx_probe.hpp"
+#include "../frame_io/matte_png.hpp"
 #include "../frame_io/video_io.hpp"
 #include "device_selection.hpp"
 #include "process_paths.hpp"
@@ -638,7 +640,7 @@ int main(int argc, char* argv[]) {
 
     options.add_options()(
         "command",
-        "Sub-command to run (info, process, download, doctor, benchmark, models, presets, "
+        "Sub-command to run (info, process, download, doctor, fetch-models, matte-test, benchmark, models, presets, "
         "compile-context, host-plugin-runtime-server)",
         cxxopts::value<std::string>())("args", "Positional arguments",
                                        cxxopts::value<std::vector<std::string>>())(
@@ -675,6 +677,13 @@ int main(int argc, char* argv[]) {
         "json", "Output results in JSON format")("check-updates",
                                                  "Check for a newer CorridorKey release on GitHub")(
         "include-prereleases", "Include pre-releases when running --check-updates")(
+        "fetch-only", "fetch-models: download only this single model pack file",
+        cxxopts::value<std::string>())(
+        "dest", "fetch-models: destination models dir (default: resolved models root)",
+        cxxopts::value<std::string>())(
+        "track", "fetch-models: precision artifact track (fp32|fp16; default fp32, "
+                 "CORRIDORKEY_MODEL_TRACK env var wins)",
+        cxxopts::value<std::string>())(
         "v,version", "Print version")("h,help", "Print detailed help");
 
     options.parse_positional({"command", "args"});
@@ -804,6 +813,81 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+            return 0;
+        }
+
+        if (cmd == "fetch-models") {
+            // Default destination follows the plugin's model-root resolution;
+            // when no complete pack exists there (the download-on-first-run
+            // layout), the per-user writable pack dir is the fetch target.
+            std::filesystem::path dest;
+            if (result.count("dest")) {
+                dest = std::filesystem::path(result["dest"].as<std::string>());
+            } else {
+                const auto resolved = default_models_dir();
+                dest = app::model_pack_present(resolved) ? resolved
+                                                         : common::user_models_root();
+            }
+            std::string only =
+                result.count("fetch-only") ? result["fetch-only"].as<std::string>() : "";
+            std::optional<app::ModelTrack> track;
+            if (result.count("track")) {
+                const std::string track_arg = result["track"].as<std::string>();
+                if (track_arg == "fp32") {
+                    track = app::ModelTrack::Fp32;
+                } else if (track_arg == "fp16") {
+                    track = app::ModelTrack::Fp16;
+                } else {
+                    std::cout << "Error: --track expects fp32 or fp16\n";
+                    return 1;
+                }
+            }
+            std::cout << "--- CorridorKey Model Pack Fetch ---\n"
+                      << "Destination: " << dest.string() << "\n"
+                      << "Track: " << app::model_track_name(track.value_or(app::resolve_model_track()))
+                      << "\n";
+            if (!only.empty()) {
+                std::cout << "Only: " << only << "\n";
+            }
+            const auto fetch = app::ensure_model_pack(dest, only, track);
+            std::cout << "Present: " << fetch.present_files << " Downloaded: "
+                      << fetch.downloaded_files << " Failed: " << fetch.failed_files << "\n";
+            if (!fetch.error.empty()) {
+                std::cout << "Error: " << fetch.error << "\n";
+            }
+            if (!fetch.failed_url.empty()) {
+                std::cout << "Manual retry URL: " << fetch.failed_url << "\n";
+            }
+            std::cout << (fetch.ok ? "Result: OK\n" : "Result: FAILED\n");
+            return fetch.ok ? 0 : 1;
+        }
+
+        if (cmd == "matte-test") {
+            // Hostless smoke test for the OFX matte-export writer
+            // (frame_io/matte_png.cpp, the same write_matte_png_16 helper the
+            // plugin's Render tap calls). Writes a synthetic 64x64 16-bit
+            // grayscale x-gradient PNG; no model pack or OFX host needed.
+            std::filesystem::path out =
+                result.count("output")
+                    ? std::filesystem::path(result["output"].as<std::string>())
+                    : std::filesystem::path("corridorkey-matte-gradient.png");
+            constexpr int kMatteTestSize = 64;
+            std::vector<uint16_t> gray(static_cast<std::size_t>(kMatteTestSize) *
+                                       static_cast<std::size_t>(kMatteTestSize));
+            for (int y = 0; y < kMatteTestSize; ++y) {
+                for (int x = 0; x < kMatteTestSize; ++x) {
+                    gray[static_cast<std::size_t>(y) * static_cast<std::size_t>(kMatteTestSize) +
+                         static_cast<std::size_t>(x)] = static_cast<uint16_t>(x * 1024);
+                }
+            }
+            if (auto written = write_matte_png_16(out, kMatteTestSize, kMatteTestSize, gray.data(),
+                                                  static_cast<std::size_t>(kMatteTestSize));
+                !written.has_value()) {
+                std::cout << "Error: matte-test write failed: " << written.error().message << "\n";
+                return 1;
+            }
+            std::cout << "matte-test: wrote 64x64 16-bit grayscale gradient PNG: " << out.string()
+                      << "\n";
             return 0;
         }
 

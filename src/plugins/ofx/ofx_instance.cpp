@@ -8,6 +8,8 @@
 #include <iomanip>
 #include <mutex>
 #include <new>
+#include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -15,6 +17,7 @@
 #include <vector>
 
 #include "app/host_plugin_runtime_client.hpp"
+#include "app/model_fetch.hpp"
 #include "app/runtime_contracts.hpp"
 #include "app/version_check.hpp"
 #include "common/host_plugin_runtime_defaults.hpp"
@@ -23,6 +26,7 @@
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
+#include "ofx_matte_export.hpp"
 #include "ofx_model_selection.hpp"
 #include "ofx_shared.hpp"
 
@@ -69,8 +73,11 @@ constexpr int kMillisecondsPerSecondI = 1000;
 constexpr const char* kRepoHelpBaseUrl =
     "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/blob/"
     "main/help/";
+// BMT Build fallback release URL: points at the community repo whose releases
+// the update check polls (matches VersionCheckOptions::repository). kRepoHelpBaseUrl
+// stays on the upstream runtime repo because the help/ guides live there.
 constexpr const char* kReleasesIndexUrl =
-    "https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases/latest";
+    "https://github.com/Bestmixtape/CorridorKey-2.0-BMT-Build/releases/latest";
 
 std::string help_doc_url(const char* filename) {
     return std::string(kRepoHelpBaseUrl) + filename;
@@ -738,6 +745,7 @@ void clear_instance_render_caches(InstanceData* data, bool clear_timings) {
     data->cached_model_path.clear();
     data->cached_render_stage_timings.clear();
     data->cached_screen_color = kDefaultScreenColor;
+    data->cached_key_hue_delta_deg = 0.0;
     data->cached_alpha_black_point = 0.0;
     data->cached_alpha_white_point = 1.0;
     data->cached_alpha_erode = 0.0;
@@ -846,6 +854,21 @@ bool get_bool_param_value(OfxParamHandle param, bool default_value = false) {
         return default_value;
     }
     return value != 0;
+}
+
+// BMT Build: current Model Precision choice for the track-aware Model Pack
+// row. The choice param is constant over time; paramGetValue matches the
+// getter style used by the other non-animatable reads in this file.
+int get_model_precision_choice(const InstanceData* data) {
+    if (g_suites.parameter == nullptr || data->bmt_model_precision_param == nullptr) {
+        return kDefaultBmtModelPrecision;
+    }
+    int value = kDefaultBmtModelPrecision;
+    if (g_suites.parameter->paramGetValue(data->bmt_model_precision_param, &value) !=
+        kOfxStatOK) {
+        return kDefaultBmtModelPrecision;
+    }
+    return value;
 }
 
 void append_status_note(std::string& status, const std::string& note) {
@@ -974,6 +997,31 @@ void update_runtime_panel_values(InstanceData* data) {
     } else {
         set_string_param_value(data->update_status_param, "");
     }
+    // BMT "Model Pack" row (bmt_about_group): first-run model pack download
+    // progress. Reads the fetcher's atomic monitor, so calling it from the
+    // deferred flush path (update_runtime_panel) is safe from the fetch
+    // thread's side; the paramSetValue itself still happens on the host
+    // thread like every other row here.
+    set_string_param_value(
+        data->bmt_model_status_param,
+        app::model_pack_status_label(
+            data->models_root,
+            get_model_precision_choice(data) == kBmtModelPrecisionFp16 ? "fp16" : "fp32"));
+    // BMT Build: surface the last Export Matte result (queued / written
+    // path / failure) on the Output group's status row. matte_status_line is
+    // written from the render thread under matte_export_mutex; the
+    // paramSetValue here runs on the host thread like every other row.
+    if (data->bmt_matte_status_param != nullptr) {
+        std::string matte_line;
+        {
+            std::lock_guard<std::mutex> lock(data->matte_export_mutex);
+            matte_line = data->matte_status_line;
+        }
+        if (matte_line.empty()) {
+            matte_line = "Idle — click Export Matte to write the current frame's matte.";
+        }
+        set_string_param_value(data->bmt_matte_status_param, matte_line);
+    }
     log_message("update_runtime_panel_values",
                 std::string("exit ok banner=") + (show_banner ? "1" : "0"));
 }
@@ -1044,9 +1092,75 @@ std::filesystem::path resolve_models_root() {
         }
     }
 
-    auto fallback = common::default_models_root();
-    log_message("resolve_models_root", std::string("Using fallback: ") + fallback.string());
-    return fallback;
+    // BMT download-on-first-run layout: when the bundle ships without
+    // Contents/Resources/models, use the per-user writable model pack dir
+    // (common::user_models_root(), populated by kickoff_model_pack_fetch
+    // below). Returned even when it does not exist yet so the fetcher's
+    // destination and the artifact resolver's root always agree.
+    auto user_root = common::user_models_root();
+    log_message("resolve_models_root",
+                std::string("Using user model pack dir: ") + user_root.string());
+    return user_root;
+}
+
+// First-run model pack fetch state (process-global, mirrors the
+// UpdateCheckState pattern above). The OFX bundle no longer ships the 2.4 GB
+// windows-rtx model pack; the first createInstance spawns one detached thread
+// that streams missing files (cpr, Range-resumable .part files, verified by
+// the exact-size table in app/model_fetch.cpp) into the instance's resolved
+// models root. The OFX "Model Pack" row renders progress through
+// app::model_pack_status_label(); inference re-probes naturally because the
+// render path calls ensure_engine_for_quality on every render, which starts
+// succeeding once the pack is complete. A failed fetch un-arms the started
+// latch so adding another plugin instance retries the download.
+struct ModelPackFetchState {
+    // BMT Build: the started latch is per precision track so switching the
+    // Model Precision dropdown on a live instance re-arms a fetch for the
+    // newly selected artifact set (shared files already on disk are skipped
+    // by the size-verified downloader anyway).
+    std::mutex mutex;
+    std::set<std::string> started_tracks;
+};
+
+ModelPackFetchState& model_pack_fetch_state() {
+    static ModelPackFetchState state;
+    return state;
+}
+
+void kickoff_model_pack_fetch(const std::filesystem::path& models_root,
+                              std::optional<app::ModelTrack> track = std::nullopt) {
+    if (models_root.empty()) {
+        return;
+    }
+    const app::ModelTrack active_track = track.value_or(app::resolve_model_track());
+    if (app::model_pack_present(models_root, active_track)) {
+        log_message("model_pack_fetch",
+                    "Model pack already present: " + models_root.string());
+        return;
+    }
+    auto& state = model_pack_fetch_state();
+    const std::string track_name = app::model_track_name(active_track);
+    {
+        const std::scoped_lock lock(state.mutex);
+        if (state.started_tracks.count(track_name) != 0) {
+            return;
+        }
+        state.started_tracks.insert(track_name);
+    }
+    log_message("model_pack_fetch", "Starting first-run model pack download [" + track_name +
+                                        "] into " + models_root.string());
+    std::thread([&state, models_root, active_track, track_name] {
+        const auto result = app::ensure_model_pack(models_root, {}, active_track);
+        log_message("model_pack_fetch",
+                    std::string("Fetch finished ok=") + (result.ok ? "1" : "0") +
+                        " downloaded=" + std::to_string(result.downloaded_files) +
+                        " failed=" + std::to_string(result.failed_files) +
+                        (result.error.empty() ? "" : " error=" + result.error));
+        if (!result.ok) {
+            const std::scoped_lock lock(state.mutex);
+            state.started_tracks.erase(track_name);
+        }
+    }).detach();
 }
 
 app::HostPluginRuntimePrepareSessionRequest build_prepare_request(
@@ -1296,6 +1410,16 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
                                        &data->input_color_space_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamScreenColor, &data->screen_color_param,
                                        nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBmtKeyColourMode,
+                                       &data->bmt_key_colour_mode_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBmtKeyColour, &data->bmt_key_colour_param,
+                                       nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBmtModelPrecision,
+                                       &data->bmt_model_precision_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBmtExportMatte,
+                                       &data->bmt_export_matte_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBmtMatteStatus,
+                                       &data->bmt_matte_status_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamTemporalSmoothing,
                                        &data->temporal_smoothing_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamDespillStrength, &data->despill_param,
@@ -1359,6 +1483,8 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
                                        nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamOpenUpdatePage,
                                        &data->open_update_page_param, nullptr);
+    g_suites.parameter->paramGetHandle(param_set, kParamBmtModelStatus,
+                                       &data->bmt_model_status_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamIncludePreReleases,
                                        &data->include_pre_releases_param, nullptr);
 
@@ -1381,6 +1507,12 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
     // spawning a subprocess from this action triggers host-side stalls and
     // crashes on stricter hosts (Foundry Nuke 17).
     data->models_root = resolve_models_root();
+    // BMT packaging omits the model pack from the bundle; start (once per
+    // process) the first-run Hugging Face download into the resolved models
+    // root. This mirrors kickoff_global_update_check above: detached thread,
+    // process-global latch, no OFX suite calls off the host thread — the
+    // progress is only read back by update_runtime_panel_values later.
+    kickoff_model_pack_fetch(data->models_root);
     // Device detection and capability probes call into windows_rtx_probe /
     // mlx_probe / linux_cuda_probe, which transitively reference ONNX Runtime
     // symbols. Importing onnxruntime.dll into the .ofx address space conflicts
@@ -1468,7 +1600,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
 bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_width,
                                int input_height, QualityFallbackMode fallback_mode,
                                int coarse_resolution_override, RefinementMode refinement_mode,
-                               std::string_view screen_color) {
+                               std::string_view screen_color, std::string_view model_track) {
     const auto quality_switch_start = std::chrono::steady_clock::now();
     const auto log_quality_total = [&](std::string_view outcome, std::string_view detail = {}) {
         std::string message = "event=quality_switch_total total_ms=" +
@@ -1540,7 +1672,7 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
     auto selections = quality_artifact_candidates(
         data->models_root, requested_device.backend, requested_quality_mode, input_width,
         input_height, requested_device.available_memory_mb, fallback_mode,
-        coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
+        coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color, model_track);
     const auto original_selections = selections;
     if (!manual_override_warning.empty()) {
         log_message("ensure_engine_for_quality", manual_override_warning);
@@ -1549,11 +1681,21 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
         const auto expected_artifacts = expected_quality_artifact_paths(
             data->models_root, requested_device.backend, requested_quality_mode, input_width,
             input_height, requested_device.available_memory_mb, fallback_mode,
-            coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
+            coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color,
+            model_track);
         data->last_error = missing_quality_artifact_message(
             data->models_root, requested_device.backend, requested_quality_mode, input_width,
             input_height, requested_device.available_memory_mb, fallback_mode,
-            coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color);
+            coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color,
+            model_track);
+        // BMT Build: switching the Model Precision dropdown on a live
+        // instance lands here when the newly selected track's artifacts are
+        // not staged yet — re-arm the fetcher for that track (per-track
+        // latch) so the Model Pack panel row shows first-run-style progress
+        // for the new track instead of a dead "missing artifact" state.
+        kickoff_model_pack_fetch(data->models_root,
+                                 model_track == "fp16" ? app::ModelTrack::Fp16
+                                                       : app::ModelTrack::Fp32);
         if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
             expected_artifact.has_value()) {
             set_runtime_panel_state_for_failed_quality_request(
@@ -2053,9 +2195,21 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
                 }
                 return kOfxStatOK;
             }
-            if (changed_param == kParamCheckUpdates) {
+            if (changed_param == kParamCheckUpdates ||
+                changed_param == kParamBmtCheckUpdate) {
+                // BMT footer button mirrors the Help & Docs "Check for Updates"
+                // button: force a fresh GitHub check and dirty the panel so the
+                // update banner (kParamUpdateStatus) refreshes on next sync.
                 kickoff_global_update_check(true);
                 data->runtime_panel_dirty = true;
+                return kOfxStatOK;
+            }
+            if (changed_param == kParamBmtExportMatte) {
+                // BMT Build: one-click matte export. The handler runs on the
+                // main thread (instance_changed), so it only captures the
+                // clip name + arms the one-shot request; the PNG write rides
+                // the next Render (see ofx_matte_export.cpp).
+                handle_matte_export_request(data);
                 return kOfxStatOK;
             }
             if (changed_param == kParamOpenLogFolder) {

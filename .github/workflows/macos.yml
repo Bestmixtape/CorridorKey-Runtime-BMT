@@ -1,0 +1,123 @@
+name: macOS BMT OFX (Apple Silicon)
+
+# BMT Build: builds + verifies the arm64 macOS OFX bundle. The vendored macOS
+# ONNX Runtime (official GH release, CoreML EP = Metal inference) is staged
+# into vendor/onnxruntime at job start because upstream only ships a stale
+# .dSYM there. The artifact is the same CorridorKey-BMT.ofx.bundle the
+# Windows build produces, Contents/MacOS layout.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [macos-bmt]
+
+permissions:
+  contents: read
+
+env:
+  ONNXRUNTIME_MACOS_VERSION: "1.24.3"
+
+jobs:
+  macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: /Users/runner/.cache/vcpkg
+          key: vcpkg-arm64-osx-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}-v1
+
+      - name: Install build tools
+        run: brew install cmake ninja
+
+      - name: Stage vendored ONNX Runtime (osx-arm64, CoreML EP)
+        run: |
+          set -euo pipefail
+          v="$ONNXRUNTIME_MACOS_VERSION"
+          curl -fsSL -o ort.tgz \
+            "https://github.com/microsoft/onnxruntime/releases/download/v${v}/onnxruntime-osx-arm64-${v}.tgz"
+          tar -xzf ort.tgz
+          cp "onnxruntime-osx-arm64-${v}"/lib/*.dylib vendor/onnxruntime/lib/
+          ls -l vendor/onnxruntime/lib
+          file "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" \
+            | grep -q 'Mach-O 64-bit dynamically linked shared library arm64'
+          nm -gU "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" \
+            | grep -qi coreml || { echo 'CoreML EP missing from vendored dylib'; exit 1; }
+
+      - name: Configure
+        run: |
+          cmake -B build/macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/vcpkg.sh" \
+            -DVCPKG_TARGET_TRIPLET=arm64-osx \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCORRIDORKEY_BUNDLE_MODELS=OFF
+
+      - name: Build corridorkey_ofx
+        run: cmake --build build/macos --target corridorkey_ofx
+
+      - name: Verify bundle layout + link contracts
+        run: |
+          set -euo pipefail
+          B=build/macos/CorridorKey-BMT.ofx.bundle
+          test -f "$B/Contents/Info.plist"
+          test -f "$B/Contents/MacOS/CorridorKey-BMT.ofx"
+          test -f "$B/Contents/MacOS/corridorkey"
+          test -f "$B/Contents/MacOS/libonnxruntime.${ONNXRUNTIME_MACOS_VERSION}.dylib"
+          # Same import contract as the Windows dumpbin rule: the .ofx must
+          # not link ONNX Runtime; inference goes through the CLI server.
+          if otool -L "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -q onnxruntime; then
+            echo 'CONTRACT VIOLATION: .ofx imports onnxruntime'; exit 1
+          fi
+          otool -l "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -q '@loader_path'
+          plutil -lint "$B/Contents/Info.plist"
+
+      - name: Ad-hoc sign bundle
+        run: |
+          set -euo pipefail
+          B=build/macos/CorridorKey-BMT.ofx.bundle/Contents/MacOS
+          for f in "$B"/*.dylib "$B"/corridorkey "$B"/CorridorKey-BMT.ofx; do
+            codesign --force -s - "$f"
+          done
+          codesign --verify --verbose=2 "$B/CorridorKey-BMT.ofx"
+
+      - name: Smoke test (CoreML inference via bundle CLI)
+        run: |
+          set -uo pipefail
+          B="$PWD/build/macos/CorridorKey-BMT.ofx.bundle/Contents/MacOS"
+          "$B/corridorkey" doctor --json | tee doctor.json
+          grep -qi coreml doctor.json
+          "$B/corridorkey" fetch-models
+          "$B/corridorkey" matte-test --output /tmp/corridorkey-matte.png
+          python3 - <<'PY'
+          # Two synthetic 64x64 green-screen frames (stdlib-only PNG writer).
+          import zlib, struct, os
+          os.makedirs('/tmp/ck-frames', exist_ok=True)
+          def chunk(t, d):
+              return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+          def write_png(path, w, h, px):
+              raw = b''.join(b'\x00' + b''.join(bytes(px(x, y)) for x in range(w)) for y in range(h))
+              data = (b'\x89PNG\r\n\x1a\n'
+                      + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+                      + chunk(b'IDAT', zlib.compress(raw))
+                      + chunk(b'IEND', b''))
+              open(path, 'wb').write(data)
+          def px(x, y):
+              return (220, 120, 90) if 16 <= x < 48 and 16 <= y < 48 else (30, 200, 40)
+          for i in range(2):
+              write_png(f'/tmp/ck-frames/f{i:04d}.png', 64, 64, px)
+          PY
+          "$B/corridorkey" process -i /tmp/ck-frames -o /tmp/ck-keyed
+          ls -l /tmp/ck-keyed
+
+      - name: Package artifact
+        run: |
+          cd build/macos
+          zip -qr "$GITHUB_WORKSPACE/CorridorKey-BMT-macOS-Silicon.zip" CorridorKey-BMT.ofx.bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CorridorKey-BMT-macOS-Silicon
+          path: CorridorKey-BMT-macOS-Silicon.zip

@@ -2,9 +2,11 @@
 
 #include <corridorkey/types.hpp>
 #include <corridorkey/version.hpp>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -57,10 +59,23 @@ constexpr const char* kClipCompositeOutput = "Composite Output";
 constexpr const char* kParamQualityMode = "quality_mode";
 constexpr const char* kParamQualityFallbackMode = "quality_fallback_mode";
 constexpr const char* kParamOutputMode = "output_mode";
+// BMT Build: one-click matte export (push button + readback status row,
+// both parented to the Output group right after Output Mode).
+constexpr const char* kParamBmtExportMatte = "bmtExportMatte";
+constexpr const char* kParamBmtMatteStatus = "bmtMatteStatus";
 constexpr const char* kParamRefinementMode = "refinement_mode";
 constexpr const char* kParamCoarseResolutionOverride = "coarse_resolution_override";
 constexpr const char* kParamInputColorSpace = "input_color_space";
 constexpr const char* kParamScreenColor = "screen_color";
+// BMT Build: in-panel Key Colour controls replacing the second (Blue)
+// descriptor. bmtKeyColourMode is the source of truth for the green/blue
+// weights switch at render time; bmtKeyColour feeds the arbitrary-colour
+// hue-rotation path when Custom Picker is selected.
+constexpr const char* kParamBmtKeyColourMode = "bmtKeyColourMode";
+constexpr const char* kParamBmtKeyColour = "bmtKeyColour";
+// BMT Build: Model Precision dropdown — selects the active fp32/fp16 model
+// track (see app/model_track.hpp for the env-override precedence chain).
+constexpr const char* kParamBmtModelPrecision = "bmtModelPrecision";
 constexpr const char* kParamTemporalSmoothing = "temporal_smoothing";
 constexpr const char* kParamDespillStrength = "despill_strength";
 constexpr const char* kParamSpillMethod = "spill_method";
@@ -102,6 +117,15 @@ constexpr const char* kParamHelpGroup = "help_group";
 constexpr const char* kParamUpdateStatus = "update_status";
 constexpr const char* kParamOpenUpdatePage = "open_update_page";
 constexpr const char* kParamCheckUpdates = "check_updates";
+// BMT Build footer group (about/credit + update trigger) rendered at the bottom
+// of the panel. Param names are new in this community build; upstream ids above
+// stay untouched for saved-graph compatibility.
+constexpr const char* kParamBmtAboutGroup = "bmt_about_group";
+constexpr const char* kParamBmtBuildLine = "bmt_build_line";
+constexpr const char* kParamBmtCommunityLine = "bmt_community_line";
+constexpr const char* kParamBmtUpstreamLine = "bmt_upstream_line";
+constexpr const char* kParamBmtModelStatus = "bmt_model_status";
+constexpr const char* kParamBmtCheckUpdate = "bmtCheckUpdate";
 constexpr const char* kParamIncludePreReleases = "include_pre_releases";
 constexpr const char* kParamOpenLogFolder = "open_log_folder";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
@@ -171,6 +195,11 @@ struct InstanceData {
     OfxParamHandle coarse_resolution_override_param = nullptr;
     OfxParamHandle input_color_space_param = nullptr;
     OfxParamHandle screen_color_param = nullptr;
+    OfxParamHandle bmt_key_colour_mode_param = nullptr;
+    OfxParamHandle bmt_key_colour_param = nullptr;
+    OfxParamHandle bmt_model_precision_param = nullptr;
+    OfxParamHandle bmt_export_matte_param = nullptr;
+    OfxParamHandle bmt_matte_status_param = nullptr;
     OfxParamHandle temporal_smoothing_param = nullptr;
     OfxParamHandle despill_param = nullptr;
     OfxParamHandle spill_method_param = nullptr;
@@ -203,6 +232,7 @@ struct InstanceData {
     OfxParamHandle prepare_timeout_param = nullptr;
     OfxParamHandle update_status_param = nullptr;
     OfxParamHandle open_update_page_param = nullptr;
+    OfxParamHandle bmt_model_status_param = nullptr;
     OfxParamHandle include_pre_releases_param = nullptr;
     // No in-class = nullptr initializer for the unique_ptr below: clang/libc++
     // instantiates ~unique_ptr<T>() at the NSDMI site, which then requires
@@ -247,6 +277,20 @@ struct InstanceData {
     bool in_render_sequence = false;
     bool runtime_panel_dirty = false;
 
+    // BMT Build: one-shot matte export armed by the "Export Matte (PNG
+    // sequence)" push button. The button handler (main thread) only records
+    // the request; the actual alpha capture + PNG write happens inside the
+    // next host-driven Render action (see ofx_matte_export.cpp) because OFX
+    // clip/image getters are host-locked and must not be called from a
+    // plugin-spawned thread. State machine: 0 = idle, 1 = request queued
+    // (render will consume), 2 = completed (result in matte_status_line).
+    std::atomic<int> matte_export_state{0};
+    // Guards matte_clip_name / matte_status_line: written from the render
+    // thread, surfaced from the main-thread panel refresh.
+    std::mutex matte_export_mutex;
+    std::string matte_clip_name;   // sanitized source clip name (button press)
+    std::string matte_status_line; // last export result for the panel row
+
     // Last (severity, body) pushed to the OFX message suite via
     // setPersistentMessage. setPersistentMessage replaces the alert bound to
     // the message_id every call, but Nuke 17's Error Console *appends* a
@@ -269,6 +313,9 @@ struct InstanceData {
     std::filesystem::path cached_model_path = {};
     std::vector<StageTiming> cached_render_stage_timings;
     int cached_screen_color = kDefaultScreenColor;
+    // BMT Build: the Custom Picker hue rotation used for the cached
+    // foreground restore; a cache hit must see the same rotation delta.
+    double cached_key_hue_delta_deg = 0.0;
     double cached_alpha_black_point = 0.0;
     double cached_alpha_white_point = 1.0;
     double cached_alpha_erode = 0.0;
@@ -403,7 +450,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
                                int coarse_resolution_override = 0,
                                RefinementMode refinement_mode = RefinementMode::Auto,
-                               std::string_view screen_color = "green");
+                               std::string_view screen_color = "green",
+                               std::string_view model_track = "fp32");
 bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
                                                     const DeviceInfo& requested_device);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,

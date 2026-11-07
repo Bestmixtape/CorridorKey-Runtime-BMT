@@ -14,6 +14,8 @@ if(WIN32)
         ofx_image_utils.cpp
         ofx_instance.cpp
         ofx_logging.cpp
+        ofx_matte_export.cpp
+        ofx_matte_export.hpp
         ofx_plugin.cpp
         ofx_plugin_descriptors.cpp
         ofx_plugin_descriptors.hpp
@@ -30,6 +32,8 @@ else()
         ofx_image_utils.cpp
         ofx_instance.cpp
         ofx_logging.cpp
+        ofx_matte_export.cpp
+        ofx_matte_export.hpp
         ofx_plugin.cpp
         ofx_plugin_descriptors.cpp
         ofx_plugin_descriptors.hpp
@@ -62,7 +66,9 @@ endif()
 
 set_target_properties(corridorkey_ofx PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "CorridorKey"
+    # BMT Build: file name carries the community branding; the OFX bundle dir
+    # below is renamed to match (folder/file pair must stay identical).
+    OUTPUT_NAME "CorridorKey-BMT"
     SUFFIX ".ofx"
 )
 
@@ -80,10 +86,17 @@ if(WIN32)
     corridorkey_apply_windows_x64_link_dirs(corridorkey_ofx)
 endif()
 
+# BMT packaging switch: ON (default, dev workflow) copies the models/ pack
+# into the OFX bundle at post-build. Release packaging configures
+# -DCORRIDORKEY_BUNDLE_MODELS=OFF so the ~2.4 GB pack stays out of the
+# bundle; the plugin then downloads it on first run into
+# %LOCALAPPDATA%\CorridorKey\models (see src/app/model_fetch.cpp).
+option(CORRIDORKEY_BUNDLE_MODELS "Copy the models/ pack into the OFX bundle" ON)
+
 if(WIN32)
     add_dependencies(corridorkey_ofx corridorkey_cli corridorkey_host_plugin_runtime_server)
-    # Package the OFX bundle
-    set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle")
+    # Package the OFX bundle (BMT Build: bundle dir name pairs with OUTPUT_NAME)
+    set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey-BMT.ofx.bundle")
     file(GLOB _corridorkey_host_plugin_runtime_dlls
         "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
 
@@ -123,6 +136,12 @@ if(WIN32)
     endif()
 
     if(_corridorkey_host_plugin_runtime_dlls)
+        if(CORRIDORKEY_BUNDLE_MODELS)
+            set(_corridorkey_bundle_models_command
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models")
+        else()
+            set(_corridorkey_bundle_models_command COMMAND ${CMAKE_COMMAND} -E true)
+        endif()
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${_corridorkey_host_plugin_runtime_dlls}
@@ -131,7 +150,6 @@ if(WIN32)
                 "$<TARGET_FILE_DIR:corridorkey_ofx>"
             # Create bundle directories
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin"
             COMMAND ${CMAKE_COMMAND} -E rm -f
                 "${_ofx_bundle_dir}/Contents/Win64/corridorkey_ofx_runtime_server.exe"
@@ -159,17 +177,22 @@ if(WIN32)
                 $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
                 "${_ofx_bundle_dir}/Contents/Win64/"
 
-            # Copy models
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
+            # Copy models (skipped when CORRIDORKEY_BUNDLE_MODELS=OFF)
+            ${_corridorkey_bundle_models_command}
 
             COMMAND_EXPAND_LISTS
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
         )
     else()
+        if(CORRIDORKEY_BUNDLE_MODELS)
+            set(_corridorkey_bundle_models_command
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models")
+        else()
+            set(_corridorkey_bundle_models_command COMMAND ${CMAKE_COMMAND} -E true)
+        endif()
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             # Create bundle directories
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Win64"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/torchtrt-runtime/bin"
             COMMAND ${CMAKE_COMMAND} -E rm -f
                 "${_ofx_bundle_dir}/Contents/Win64/corridorkey_ofx_runtime_server.exe"
@@ -191,11 +214,57 @@ if(WIN32)
                 $<TARGET_RUNTIME_DLLS:corridorkey_ofx>
                 "${_ofx_bundle_dir}/Contents/Win64/"
 
-            # Copy models
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
+            # Copy models (skipped when CORRIDORKEY_BUNDLE_MODELS=OFF)
+            ${_corridorkey_bundle_models_command}
 
             COMMAND_EXPAND_LISTS
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
+        )
+    endif()
+elseif(APPLE)
+    # BMT macOS (Apple Silicon) OFX bundle per the OpenFX portable bundle
+    # spec: Contents/MacOS/ carries the .ofx module, the corridorkey CLI
+    # (which doubles as the host-plugin-runtime-server via subcommand, see
+    # src/app/host_plugin_runtime_client.cpp) and the vendored
+    # libonnxruntime dylib providing GPU inference through the CoreML
+    # Execution Provider (Metal). Same import contract as Windows: the
+    # .ofx itself never links ONNX Runtime.
+    set_target_properties(corridorkey_ofx PROPERTIES
+        INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH ON
+    )
+
+    set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey-BMT.ofx.bundle")
+    set(_ofx_bundle_contents_dir "${_ofx_bundle_dir}/Contents/MacOS")
+
+    if(CORRIDORKEY_BUNDLE_MODELS)
+        set(_corridorkey_bundle_models_command
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models")
+    else()
+        set(_corridorkey_bundle_models_command COMMAND ${CMAKE_COMMAND} -E true)
+    endif()
+
+    # macOS hosts (Resolve among them) expect a bundle Info.plist at
+    # Contents/Info.plist even though OFX discovery keys off the directory
+    # name + Mach-O modules.
+    configure_file("${_corridorkey_ofx_root}/macos/Info.plist.in"
+        "${_ofx_bundle_dir}/Contents/Info.plist" @ONLY)
+
+    add_custom_command(TARGET corridorkey_ofx POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_contents_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_contents_dir}/"
+        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_contents_dir}/"
+        COMMAND ${CMAKE_COMMAND} -E copy "${ONNXRUNTIME_DYLIB}" "${_ofx_bundle_contents_dir}/"
+        ${_corridorkey_bundle_models_command}
+        COMMENT "Packaging macOS OFX bundle into ${_ofx_bundle_dir}..."
+    )
+
+    get_target_property(_corridorkey_core_type corridorkey_core TYPE)
+    if(_corridorkey_core_type STREQUAL "SHARED_LIBRARY")
+        add_custom_command(TARGET corridorkey_ofx POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_core>" "${_ofx_bundle_contents_dir}/"
+            COMMENT "Copying libcorridorkey_core dylib into the macOS bundle..."
         )
     endif()
 elseif(UNIX AND NOT APPLE)
@@ -222,17 +291,29 @@ elseif(UNIX AND NOT APPLE)
     # onnxruntime-linux-cuda drop already contains libonnxruntime.so plus the
     # CUDA runtime .so files; packaging scripts copy the remainder of that
     # lib directory alongside the plugin.
+    if(CORRIDORKEY_BUNDLE_MODELS)
+        set(_corridorkey_bundle_models_command
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models")
+    else()
+        set(_corridorkey_bundle_models_command COMMAND ${CMAKE_COMMAND} -E true)
+    endif()
     add_custom_command(TARGET corridorkey_ofx POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_contents_dir}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_ofx>" "${_ofx_bundle_contents_dir}/"
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_contents_dir}/"
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_core>" "${_ofx_bundle_contents_dir}/"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models"
+        ${_corridorkey_bundle_models_command}
         COMMENT "Staging Linux OFX bundle skeleton at ${_ofx_bundle_dir}..."
     )
 
     if(CORRIDORKEY_ORT_RUNTIME_DIR AND EXISTS "${CORRIDORKEY_ORT_RUNTIME_DIR}")
+        if(CORRIDORKEY_BUNDLE_MODELS)
+            set(_corridorkey_bundle_models_command
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models")
+        else()
+            set(_corridorkey_bundle_models_command COMMAND ${CMAKE_COMMAND} -E true)
+        endif()
         add_custom_command(TARGET corridorkey_ofx POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${CORRIDORKEY_ORT_RUNTIME_DIR}" "${_ofx_bundle_contents_dir}/"
             COMMENT "Copying curated ONNX Runtime libraries into the Linux bundle..."
@@ -249,7 +330,13 @@ elseif(UNIX AND NOT APPLE)
             "${_ofx_vcpkg_lib_dir}/libav*.so*"
             "${_ofx_vcpkg_lib_dir}/libsw*.so*")
         if(_ofx_vcpkg_shared_objs)
-            add_custom_command(TARGET corridorkey_ofx POST_BUILD
+            if(CORRIDORKEY_BUNDLE_MODELS)
+            set(_corridorkey_bundle_models_command
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/models" "${_ofx_bundle_dir}/Contents/Resources/models")
+        else()
+            set(_corridorkey_bundle_models_command COMMAND ${CMAKE_COMMAND} -E true)
+        endif()
+        add_custom_command(TARGET corridorkey_ofx POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy ${_ofx_vcpkg_shared_objs} "${_ofx_bundle_contents_dir}/"
                 COMMENT "Copying ffmpeg shared libraries into the Linux bundle..."
             )

@@ -6,6 +6,7 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_image_utils.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_instance.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_logging.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_matte_export.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
@@ -33,6 +34,7 @@ add_executable(test_unit
     test_ofx_descriptor_split.cpp
     test_ofx_frame_cache.cpp
     test_ofx_help_routing.cpp
+    test_hue_rotate.cpp
     test_ofx_host_detection.cpp
     test_ofx_image_utils.cpp
     test_ofx_backend_matching.cpp

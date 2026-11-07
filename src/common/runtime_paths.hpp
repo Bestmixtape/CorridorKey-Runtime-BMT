@@ -268,6 +268,39 @@ inline std::optional<std::filesystem::path> current_executable_path() {
     return std::nullopt;
 }
 
+// Per-user writable model pack root. BMT packaging ships the OFX bundle
+// without the ~2.4 GB model pack; the plugin downloads it on first run
+// into this directory (see src/app/model_fetch.cpp). Unlike the bundle's
+// Contents/Resources/models (under Program Files, admin-owned), this dir
+// is user-writable, so it doubles as the fallback model root whenever no
+// bundled model dir exists next to the executable.
+inline std::filesystem::path user_models_root() {
+#if defined(_WIN32)
+    if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
+        local_app_data.has_value()) {
+        // BMT Build: dedicated user-data folder so this build never mixes
+        // model packs / caches with an upstream CorridorKey install.
+        return std::filesystem::path(*local_app_data) / "CorridorKey2.0-BMT" / "models";
+    }
+#elif defined(__APPLE__)
+    if (auto home = environment_variable_copy("HOME"); home.has_value()) {
+        // BMT Build: dedicated user-data folder (mirrors the Windows branding)
+        // so this build never mixes model packs / caches with an upstream
+        // CorridorKey install.
+        return std::filesystem::path(*home) / "Library" / "Application Support" /
+               "CorridorKey2.0-BMT" / "models";
+    }
+#else
+    if (auto xdg_data = environment_variable_copy("XDG_DATA_HOME"); xdg_data.has_value()) {
+        return std::filesystem::path(*xdg_data) / "corridorkey" / "models";
+    }
+    if (auto home = environment_variable_copy("HOME"); home.has_value()) {
+        return std::filesystem::path(*home) / ".local" / "share" / "corridorkey" / "models";
+    }
+#endif
+    return std::filesystem::temp_directory_path() / "corridorkey-models";
+}
+
 inline std::filesystem::path default_models_root() {
     if (auto override_path = environment_variable_copy("CORRIDORKEY_MODELS_DIR");
         override_path.has_value()) {
@@ -296,6 +329,15 @@ inline std::filesystem::path default_models_root() {
         auto sibling_candidate = executable_dir / "models";
         if (std::filesystem::exists(sibling_candidate, error) && !error) {
             return sibling_candidate;
+        }
+
+        // Download-on-first-run layout: no bundled model pack was found, so
+        // use the per-user model pack dir that model_fetch.cpp populates.
+        // Probed last so a dev-tree or bundled pack always wins over it.
+        auto user_candidate = user_models_root();
+        error.clear();
+        if (std::filesystem::exists(user_candidate, error) && !error) {
+            return user_candidate;
         }
     }
 
@@ -405,12 +447,13 @@ inline std::filesystem::path configured_cache_root() {
 
 #if defined(__APPLE__)
     if (auto home = environment_variable_copy("HOME"); home.has_value()) {
-        return std::filesystem::path(*home) / "Library" / "Caches" / "CorridorKey";
+        return std::filesystem::path(*home) / "Library" / "Caches" / "CorridorKey2.0-BMT";
     }
 #elif defined(_WIN32)
     if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
         local_app_data.has_value()) {
-        return std::filesystem::path(*local_app_data) / "CorridorKey" / "Cache";
+        // BMT Build: dedicated user-data root (see user_models_root).
+        return std::filesystem::path(*local_app_data) / "CorridorKey2.0-BMT" / "Cache";
     }
 #endif
     return std::filesystem::temp_directory_path() / "corridorkey-cache";
@@ -423,12 +466,13 @@ inline std::filesystem::path fallback_cache_root() {
 inline std::filesystem::path default_logs_root() {
 #if defined(__APPLE__)
     if (auto home = environment_variable_copy("HOME"); home.has_value()) {
-        return std::filesystem::path(*home) / "Library" / "Logs" / "CorridorKey";
+        return std::filesystem::path(*home) / "Library" / "Logs" / "CorridorKey2.0-BMT";
     }
 #elif defined(_WIN32)
     if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
         local_app_data.has_value()) {
-        return std::filesystem::path(*local_app_data) / "CorridorKey" / "Logs";
+        // BMT Build: dedicated user-data root (see user_models_root).
+        return std::filesystem::path(*local_app_data) / "CorridorKey2.0-BMT" / "Logs";
     }
 #endif
     return std::filesystem::temp_directory_path() / "corridorkey-logs";
@@ -443,13 +487,15 @@ inline std::vector<std::filesystem::path> cache_root_candidates() {
 #if defined(__APPLE__)
     if (auto home = environment_variable_copy("HOME"); home.has_value()) {
         detail::append_unique_path(
-            candidates, std::filesystem::path(*home) / "Library" / "Caches" / "CorridorKey");
+            candidates, std::filesystem::path(*home) / "Library" / "Caches" / "CorridorKey2.0-BMT");
     }
 #elif defined(_WIN32)
     if (auto local_app_data = environment_variable_copy("LOCALAPPDATA");
         local_app_data.has_value()) {
+        // BMT Build: dedicated user-data root (see user_models_root).
         detail::append_unique_path(
-            candidates, std::filesystem::path(*local_app_data) / "CorridorKey" / "Cache");
+            candidates,
+            std::filesystem::path(*local_app_data) / "CorridorKey2.0-BMT" / "Cache");
     }
 #endif
     detail::append_unique_path(candidates, fallback_cache_root());

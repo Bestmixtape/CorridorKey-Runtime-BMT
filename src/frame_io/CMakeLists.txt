@@ -5,5 +5,6 @@ target_sources(corridorkey_common PRIVATE
     frame_io.cpp
     exr_io.cpp
     png_io.cpp
+    matte_png.cpp
     video_io.cpp
 )

@@ -51,6 +51,20 @@ if(WIN32)
     if(CORRIDORKEY_HAS_TORCHTRT)
         corridorkey_apply_torchtrt_delayload(corridorkey_cli)
     endif()
+elseif(APPLE)
+    # BMT macOS: the OFX bundle stage (src/plugins/ofx/CMakeLists.txt APPLE
+    # branch) copies the CLI next to the .ofx inside Contents/MacOS/, where
+    # it also serves as the host-plugin-runtime-server subcommand host.
+    # @loader_path rpath lets both resolve libcorridorkey_core / vendored
+    # libonnxruntime siblings inside the bundle. Added here because the cli
+    # target is created after src/ in the top-level CMakeLists.
+    if(TARGET corridorkey_ofx)
+        add_dependencies(corridorkey_ofx corridorkey_cli)
+    endif()
+    set_target_properties(corridorkey_cli PROPERTIES
+        INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH ON
+    )
 elseif(UNIX AND NOT APPLE)
     # Make the OFX plugin wait on the CLI so the Linux bundle's POST_BUILD
     # stage (in src/plugins/ofx/CMakeLists.txt) can copy corridorkey next to

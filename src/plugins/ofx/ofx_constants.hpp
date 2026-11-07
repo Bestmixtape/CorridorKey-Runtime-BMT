@@ -225,6 +225,25 @@ constexpr int kMaxEdgeBlur = 100;
 constexpr int kDefaultInputColorSpace = kInputColorAutoHostManaged;
 constexpr double kResolutionScaleBaselineLongEdge = 1920.0;
 constexpr int kDefaultScreenColor = kScreenColorGreen;
+
+// BMT Build: in-panel Key Colour controls (replaces the retired dedicated
+// Blue descriptor's effects-list entry). Choice indices must stay aligned
+// with the option array order in describe_in_context:
+// 0 = "Blue Screen", 1 = "Green Screen", 2 = "Custom Picker (Experimental)".
+constexpr int kBmtKeyColourModeBlue = 0;
+constexpr int kBmtKeyColourModeGreen = 1;
+constexpr int kBmtKeyColourModeCustom = 2;
+constexpr int kDefaultBmtKeyColourMode = kBmtKeyColourModeGreen;
+// Default Custom Picker swatch: classic chroma-green screen (linear-ish
+// green used by studio chroma keyers in 0..1 float range).
+constexpr double kDefaultBmtKeyColourR = 0.0;
+constexpr double kDefaultBmtKeyColourG = 0.56;
+constexpr double kDefaultBmtKeyColourB = 0.0;
+
+// BMT Build: Model Precision dropdown (bmtModelPrecision) choice indices.
+constexpr int kBmtModelPrecisionFp32 = 0;
+constexpr int kBmtModelPrecisionFp16 = 1;
+constexpr int kDefaultBmtModelPrecision = kBmtModelPrecisionFp32;
 constexpr double kDefaultTemporalSmoothing = 0.0;
 
 // Spill replacement method

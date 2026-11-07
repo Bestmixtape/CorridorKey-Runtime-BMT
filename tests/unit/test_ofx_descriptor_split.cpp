@@ -83,8 +83,11 @@ class ScopedEnvVar {
 
 }  // namespace
 
-TEST_CASE("OFX bundle exposes two descriptors", "[unit][ofx][descriptor]") {
-    REQUIRE(descriptor_count() == 2);
+TEST_CASE("OFX bundle exposes a single merged descriptor (BMT build)", "[unit][ofx][descriptor]") {
+    REQUIRE(descriptor_count() == 1);
+    OfxPlugin* green = descriptor_at(0);
+    REQUIRE(green != nullptr);
+    REQUIRE(std::string(green->pluginIdentifier) == "com.corridorkey.resolve");
 }
 
 TEST_CASE("Green descriptor preserves the legacy reverse-DNS identifier",
@@ -95,20 +98,12 @@ TEST_CASE("Green descriptor preserves the legacy reverse-DNS identifier",
     REQUIRE(std::string(green->pluginIdentifier) == kPluginIdentifierGreen);
 }
 
-TEST_CASE("Blue descriptor uses the dedicated-screen identifier locked by ADR-0006",
+TEST_CASE("Retired Blue descriptor is no longer exposed through OfxGetPlugin",
           "[unit][ofx][descriptor]") {
-    OfxPlugin* blue = descriptor_at(1);
-    REQUIRE(blue != nullptr);
-    REQUIRE(std::string(blue->pluginIdentifier) == "com.corridorkey.resolve.blue");
-    REQUIRE(std::string(blue->pluginIdentifier) == kPluginIdentifierBlue);
-}
-
-TEST_CASE("Green and Blue descriptor identifiers are distinct", "[unit][ofx][descriptor]") {
-    OfxPlugin* green = descriptor_at(0);
-    OfxPlugin* blue = descriptor_at(1);
-    REQUIRE(green != nullptr);
-    REQUIRE(blue != nullptr);
-    REQUIRE(std::string(green->pluginIdentifier) != std::string(blue->pluginIdentifier));
+    // BMT Build: blue weights are selected in-panel via bmtKeyColourMode; the
+    // dedicated Blue effects-list entry is gone (ADR-0006 identifier itself
+    // remains valid for legacy-node guards inside the single descriptor).
+    REQUIRE(descriptor_at(1) == nullptr);
 }
 
 TEST_CASE("Green and Blue descriptor labels are distinct", "[unit][ofx][descriptor]") {
@@ -126,7 +121,7 @@ TEST_CASE("label_for_identifier defaults unknown or null identifiers to the Gree
 
 TEST_CASE("Out-of-range descriptor indices return nullptr", "[unit][ofx][descriptor]") {
     REQUIRE(descriptor_at(-1) == nullptr);
-    REQUIRE(descriptor_at(2) == nullptr);
+    REQUIRE(descriptor_at(1) == nullptr);
     REQUIRE(descriptor_at(100) == nullptr);
     REQUIRE(descriptor_at(std::numeric_limits<int>::max()) == nullptr);
     REQUIRE(descriptor_at(std::numeric_limits<int>::min()) == nullptr);

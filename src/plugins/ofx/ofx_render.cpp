@@ -16,11 +16,13 @@
 #include "ofx_frame_cache.hpp"
 #include "ofx_image_utils.hpp"
 #include "ofx_logging.hpp"
+#include "ofx_matte_export.hpp"
 #include "ofx_model_selection.hpp"
 #include "ofx_screen_color.hpp"
 #include "ofx_shared.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
+#include "post_process/hue_rotate.hpp"
 
 namespace corridorkey::ofx {
 
@@ -438,8 +440,8 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                                           const SharedCacheKey& shared_key, const Image& rgb_view,
                                           const Image& hint_view, const InferenceParams& params,
                                           const ScreenColorTransform& screen_color_transform,
-                                          int width, int height, const SrgbLut& lut,
-                                          void* source_data, void* output_data,
+                                          double key_hue_delta_deg, int width, int height,
+                                          const SrgbLut& lut, void* source_data, void* output_data,
                                           int source_row_bytes, int output_row_bytes,
                                           const std::string& source_depth) {
     ImageBuffer alpha_buf;
@@ -539,6 +541,10 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
     if (!params.output_alpha_only) {
         Image fg_srgb_view = result->foreground.view();
         restore_from_green_domain(fg_srgb_view, screen_color_transform);
+        // BMT Build: undo the Custom Picker hue rotation on the model
+        // foreground so composite colours match the original plate (alpha
+        // itself is hue-agnostic and needs no restore).
+        rotate_image_hue(fg_srgb_view, -key_hue_delta_deg);
 
         fg_linear_buf = ImageBuffer(width, height, 3);
         Image fg_linear_local = fg_linear_buf.view();
@@ -785,30 +791,73 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
     if (data->screen_color_param) {
         g_suites.parameter->paramGetValueAtTime(data->screen_color_param, time, &screen_color);
     }
-    // Spec 0002 FR-8 / task 0009: translate the raw OFX choice index into a
-    // semantic ScreenColorMode based on the descriptor's identity. The
-    // descriptor identity is the authoritative signal; the OFX-index
-    // mapping varies per descriptor (Blue has a 1-option locked list,
-    // Green has a 2-option {direct, BG-swap} list).
+    // Spec 0002 FR-8 / task 0009 (superseded for the panel switch by BMT):
+    // the raw screen_color choice used to be mapped by descriptor identity
+    // because the plugin shipped dedicated Green and Blue descriptors. The
+    // Blue descriptor is retired from the effects list, so the bmtKeyColourMode
+    // choice below is the single source of truth for the model-family
+    // switch. The legacy param stays defined (secret) purely for saved-graph
+    // storage shape; its value no longer drives anything.
+    int key_colour_mode = kDefaultBmtKeyColourMode;
+    if (data->bmt_key_colour_mode_param) {
+        g_suites.parameter->paramGetValueAtTime(data->bmt_key_colour_mode_param, time,
+                                                &key_colour_mode);
+    }
+    double key_colour_r = kDefaultBmtKeyColourR;
+    double key_colour_g = kDefaultBmtKeyColourG;
+    double key_colour_b = kDefaultBmtKeyColourB;
+    if (data->bmt_key_colour_param) {
+        // kOfxParamTypeRGB unpacks one double per channel through the
+        // variadic param getter (ofxParam.h multi-value convention).
+        g_suites.parameter->paramGetValueAtTime(data->bmt_key_colour_param, time, &key_colour_r,
+                                                &key_colour_g, &key_colour_b);
+    }
+    bool key_colour_custom = false;
+    double picked_hue_deg = kGreenTrainedHueDeg;
     if (is_blue_node_identifier(data->plugin_identifier)) {
-        // Blue descriptor: any param value resolves to the dedicated Blue
-        // model path. Guards against corrupted projects, programmer
-        // errors, or a saved-graph migration that crossed identities.
+        // Legacy blue-identifier nodes (descriptor no longer exposed) stay
+        // locked to the dedicated Blue weights. Guards against corrupted
+        // projects or saved-graph migrations that crossed identities.
         screen_color = kScreenColorBlue;
+    } else if (key_colour_mode == kBmtKeyColourModeBlue) {
+        screen_color = kScreenColorBlue;
+    } else if (key_colour_mode == kBmtKeyColourModeCustom) {
+        key_colour_custom = true;
+        const std::optional<double> picker_hue =
+            screen_hue_degrees(key_colour_r, key_colour_g, key_colour_b);
+        if (picker_hue.has_value()) {
+            picked_hue_deg = *picker_hue;
+            screen_color = (nearest_trained_hue_degrees(picked_hue_deg) == kBlueTrainedHueDeg)
+                               ? kScreenColorBlue
+                               : kScreenColorGreen;
+        } else {
+            // Achromatic picker colour: no hue axis to align on, so keep the
+            // optimized green weights and skip the rotation.
+            screen_color = kScreenColorGreen;
+        }
     } else {
-        // Green descriptor: the new 2-option chooser maps index 0 → Green
-        // direct and index 1 → Blue-Green Channel Swap. Saved projects
-        // that had the legacy 3-option layout (with standalone "Blue" at
-        // index 1) land on index 1 too — render them as Blue-Green
-        // Channel Swap, the closest deterministic equivalent using the
-        // Green model. Out-of-range values (legacy index 2 from before
-        // the chooser shrank) also resolve to Blue-Green Channel Swap.
-        screen_color = (screen_color <= 0) ? kScreenColorGreen : kScreenColorBlueGreen;
+        // "Green Screen": deterministic green-model path (the legacy
+        // Blue-Green Channel Swap mode is retired — dedicated blue weights
+        // are reachable from the panel now, so the swap fallback would only
+        // mask a staging problem; out-of-range mode values land here too).
+        screen_color = kScreenColorGreen;
     }
     if (data->temporal_smoothing_param) {
         g_suites.parameter->paramGetValueAtTime(data->temporal_smoothing_param, time,
                                                 &temporal_smoothing);
     }
+    // BMT Build: Model Precision dropdown -> active artifact track. The
+    // CORRIDORKEY_MODEL_TRACK env var wins over the panel choice at the
+    // downloader/CLI layer (app/model_track.hpp); inside the panel the
+    // choice selects which manifest track's artifacts get probed and
+    // auto-fetched.
+    int model_precision_choice = kDefaultBmtModelPrecision;
+    if (data->bmt_model_precision_param) {
+        g_suites.parameter->paramGetValueAtTime(data->bmt_model_precision_param, time,
+                                                &model_precision_choice);
+    }
+    const std::string_view model_track_label =
+        (model_precision_choice == kBmtModelPrecisionFp16) ? "fp16" : "fp32";
 
     std::string source_colourspace;
     bool has_source_colourspace =
@@ -873,7 +922,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
             data, quality_mode, width, height,
             quality_fallback_mode_from_choice(quality_fallback_mode),
             coarse_resolution_override_from_choice(coarse_resolution_override),
-            refinement_mode_from_choice(refinement_mode), screen_color_label)) {
+            refinement_mode_from_choice(refinement_mode), screen_color_label, model_track_label)) {
         const std::string quality_error =
             data->last_error.empty() ? "Failed to switch quality mode." : data->last_error;
         if (is_fixed_quality_mode(quality_mode)) {
@@ -910,6 +959,22 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         screen_color_transform.is_identity = true;
     }
     canonicalize_to_green_domain(rgb_view, screen_color_transform);
+
+    // BMT Build (Custom Picker): the weight family above was picked by
+    // nearest hue; rotate the model input so the picked background hue lands
+    // on that family's trained hue (green weights ~= 120 deg, blue weights
+    // ~= 240 deg). Hue-only rotation preserves S/V, so lighting and screen
+    // spill texture survive. The two deterministic modes keep delta 0 and
+    // the call is a no-op. Target follows the family that actually got
+    // loaded, so a blue request falling back to green weights (missing
+    // artifact) still rotates to the green domain.
+    double key_hue_delta_deg = 0.0;
+    if (key_colour_custom) {
+        const double trained_hue_deg =
+            loaded_model_is_blue ? kBlueTrainedHueDeg : kGreenTrainedHueDeg;
+        key_hue_delta_deg = normalize_hue_delta_degrees(trained_hue_deg - picked_hue_deg);
+    }
+    rotate_image_hue(rgb_view, key_hue_delta_deg);
 
     if (data->output_mode_param) {
         g_suites.parameter->paramGetValueAtTime(data->output_mode_param, time, &output_mode);
@@ -1060,6 +1125,9 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                 std::string("event=postprocess_params screen_color=") +
                     std::string(screen_color_mode_label) +
                     " loaded_model_is_blue=" + (loaded_model_is_blue ? "1" : "0") +
+                    " key_colour_mode=" + std::to_string(key_colour_mode) +
+                    " key_hue_delta_deg=" + std::to_string(key_hue_delta_deg) +
+                    " model_precision=" + std::string(model_track_label) +
                     " requested_source_passthrough=" + (source_passthrough_requested ? "1" : "0") +
                     " effective_source_passthrough=" + (params.source_passthrough ? "1" : "0") +
                     " despill_screen_channel=" + std::to_string(params.despill_screen_channel) +
@@ -1079,6 +1147,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
                            data->cached_model_path == data->model_path &&
                            inference_params_equal(data->cached_params, params) &&
                            data->cached_screen_color == screen_color &&
+                           std::abs(data->cached_key_hue_delta_deg - key_hue_delta_deg) < 1e-6 &&
                            std::abs(data->cached_alpha_black_point - alpha_black_point) < 1e-6 &&
                            std::abs(data->cached_alpha_white_point - alpha_white_point) < 1e-6 &&
                            std::abs(data->cached_alpha_erode - alpha_erode) < 1e-6 &&
@@ -1099,11 +1168,13 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         data->last_render_stage_timings = data->cached_render_stage_timings;
     } else {
         const SharedCacheKey shared_key{signature, inference_params_hash(params),
-                                        path_hash(data->model_path), screen_color};
+                                        path_hash(data->model_path), screen_color,
+                                        key_hue_delta_deg, std::string{model_track_label}};
 
         auto inference = resolve_inference_buffers(data, instance, shared_key, rgb_view, hint_view,
-                                                   params, screen_color_transform, width, height,
-                                                   lut, source_data, output_data, source_row_bytes,
+                                                   params, screen_color_transform,
+                                                   key_hue_delta_deg, width, height, lut,
+                                                   source_data, output_data, source_row_bytes,
                                                    output_row_bytes, source_depth);
 
         if (inference.outcome == InferenceOutcome::kBypass) {
@@ -1197,6 +1268,7 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         data->cached_model_path = data->model_path;
         data->cached_render_stage_timings = inference.stage_timings;
         data->cached_screen_color = screen_color;
+        data->cached_key_hue_delta_deg = key_hue_delta_deg;
         data->cached_alpha_black_point = alpha_black_point;
         data->cached_alpha_white_point = alpha_white_point;
         data->cached_alpha_erode = alpha_erode;
@@ -1210,7 +1282,18 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         fg_linear = data->cached_result.foreground.view();
     }
 
+    // BMT Build: one-shot Export Matte capture. If the Output group's
+    // "Export Matte (PNG sequence)" button armed a request, tap the final
+    // alpha plane here and write the 16-bit PNG (see ofx_matte_export.cpp
+    // for why the write is tied to Render instead of a spawned worker).
+    // No-op (single atomic load) when no export is queued.
+    maybe_export_matte_png(data, alpha_view, time, source_props);
+
     restore_from_green_domain(rgb_view, screen_color_transform);
+    // BMT Build: undo the Custom Picker hue rotation on the plate before the
+    // source-based outputs (Source+Matte) so visible colours are untouched;
+    // no-op for the deterministic modes (delta 0).
+    rotate_image_hue(rgb_view, -key_hue_delta_deg);
 
     const bool apply_srgb =
         should_apply_srgb_to_output(output_mode, host_managed_color, input_is_linear);

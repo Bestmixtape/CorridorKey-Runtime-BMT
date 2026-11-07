@@ -278,13 +278,14 @@ std::filesystem::path resolve_host_plugin_runtime_server_binary(
     }
     auto win64_dir = plugin_module_path.parent_path();
     return win64_dir / "corridorkey_host_plugin_runtime_server.exe";
-#elif defined(__linux__)
-    // Linux host plugin bundle layout places the plugin binary and the CLI
-    // side by side under the platform bundle content directory. The CLI exposes
-    // a `host-plugin-runtime-server` subcommand so we do not ship a separate
+#elif defined(__linux__) || defined(__APPLE__)
+    // Linux/macOS (BMT) host plugin bundle layout places the plugin binary and
+    // the CLI side by side under the platform bundle content directory
+    // (Contents/Linux-x86_64/ or Contents/MacOS/). The CLI exposes a
+    // `host-plugin-runtime-server` subcommand so we do not ship a separate
     // server binary.
-    auto linux_dir = plugin_module_path.parent_path();
-    return linux_dir / "corridorkey";
+    auto bundle_content_dir = plugin_module_path.parent_path();
+    return bundle_content_dir / "corridorkey";
 #else
     auto bundle_root = plugin_module_path.parent_path().parent_path();
     return bundle_root / "Resources" / "bin" / "corridorkey";

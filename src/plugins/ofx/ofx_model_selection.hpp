@@ -46,6 +46,22 @@ constexpr int kBytesPerMib = 1024;
 constexpr int kCeilToMib = kBytesPerMib - 1;
 
 constexpr std::string_view kDynamicBlueModelFilename = "corridorkey_dynamic_blue_fp16.ts";
+// BMT Build: dedicated blue artifact for the FP32 precision track
+// (torchtrt/fp32-blue/ on HF; blue FP16 NaNs at 1536+ frames).
+constexpr std::string_view kBlueFp32ModelFilename = "corridorkey_blue_torchtrt_fp32_1536.ts";
+
+// Blue artifact name per precision track.
+inline std::string_view blue_artifact_filename(std::string_view model_track) {
+    return model_track == "fp32" ? kBlueFp32ModelFilename : kDynamicBlueModelFilename;
+}
+
+// Green FP32 TorchTRT artifact name for a resolution rung. Upstream publishes
+// no green fp32 files; this name is the staged-file convention (3090 fp32
+// hack) the resolution code probes for before falling back to the published
+// fp16 green weights.
+inline std::string green_fp32_artifact_filename(int resolution) {
+    return "corridorkey_torchtrt_fp32_" + std::to_string(resolution) + ".ts";
+}
 
 // build_bootstrap_candidates extraction limit on per-candidate-builder nesting.
 // (Used only as a documentation anchor — no runtime constant required.)
@@ -372,13 +388,14 @@ inline std::filesystem::path mlx_pack_path(const std::filesystem::path& models_r
 
 inline std::filesystem::path artifact_path_for_backend(const std::filesystem::path& models_root,
                                                        Backend backend, int resolution,
-                                                       std::string_view screen_color = "green") {
+                                                       std::string_view screen_color = "green",
+                                                       std::string_view model_track = "fp32") {
     if (backend == Backend::MLX) {
         return models_root / ("corridorkey_mlx_bridge_" + std::to_string(resolution) + ".mlxfn");
     }
     if (screen_color == "blue") {
         (void)resolution;
-        return models_root / selection_detail::kDynamicBlueModelFilename;
+        return models_root / selection_detail::blue_artifact_filename(model_track);
     }
     return models_root / ("corridorkey_fp16_" + std::to_string(resolution) + ".onnx");
 }
@@ -412,11 +429,12 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
-    std::string_view screen_color = "green") {
+    std::string_view screen_color = "green", std::string_view model_track = "fp32") {
     const int requested_resolution =
         resolve_target_resolution(quality_mode, input_width, input_height);
     if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
-        return {artifact_path_for_backend(models_root, backend, requested_resolution, "blue")};
+        return {artifact_path_for_backend(models_root, backend, requested_resolution, "blue",
+                                          model_track)};
     }
 
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -433,6 +451,14 @@ inline std::vector<std::filesystem::path> expected_quality_artifact_paths(
         return {};
     }
 
+    // FP32 track: the green FP32 TorchTRT artifact leads the expected list so
+    // missing-artifact guidance names the precision the user selected, even
+    // when only the fp16 fallback is staged.
+    if (model_track == "fp32") {
+        expected->insert(expected->begin(),
+                         models_root / selection_detail::green_fp32_artifact_filename(
+                                           requested_resolution));
+    }
     return *expected;
 }
 
@@ -458,15 +484,27 @@ inline std::string missing_quality_artifact_message(
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
-    std::string_view screen_color = "green") {
+    std::string_view screen_color = "green", std::string_view model_track = "fp32") {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
     if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
+        auto blue_path =
+            artifact_path_for_backend(models_root, backend, requested_resolution, "blue",
+                                      model_track);
+        std::error_code blue_exists_ec;
+        if (!std::filesystem::exists(blue_path, blue_exists_ec) || blue_exists_ec) {
+            // The track's dedicated artifact is not staged; name whichever
+            // blue artifact exists, else keep the track artifact as the ask.
+            const auto staged = models_root / selection_detail::kDynamicBlueModelFilename;
+            std::error_code staged_ec;
+            if (std::filesystem::exists(staged, staged_ec) && !staged_ec) {
+                blue_path = staged;
+            }
+        }
         return missing_artifact_message(
             "Requested quality " + std::string(quality_mode_label(quality_mode)) +
                 " is missing the required dedicated blue model artifact",
-            models_root,
-            {artifact_path_for_backend(models_root, backend, requested_resolution, "blue")});
+            models_root, {blue_path});
     }
 
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -480,6 +518,11 @@ inline std::string missing_quality_artifact_message(
         coarse_resolution_override, allow_unrestricted_quality_attempt);
     if (!expected) {
         return expected.error().message;
+    }
+    if (model_track == "fp32") {
+        expected->insert(expected->begin(),
+                         models_root / selection_detail::green_fp32_artifact_filename(
+                                           requested_resolution));
     }
 
     return missing_artifact_message("Requested quality " +
@@ -565,7 +608,7 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
-    std::string_view screen_color = "green") {
+    std::string_view screen_color = "green", std::string_view model_track = "fp32") {
     const int requested_resolution = normalize_target_resolution_for_backend(
         backend, quality_mode, resolve_target_resolution(quality_mode, input_width, input_height));
 
@@ -574,10 +617,19 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
     // Blue is deterministic: use the dedicated dynamic artifact only. The
     // explicit Blue-Green UI mode is the green-model fallback path.
     if (screen_color == "blue" && backend_supports_dynamic_blue(backend)) {
-        const auto blue_path =
-            artifact_path_for_backend(models_root, backend, requested_resolution, "blue");
+        auto blue_path =
+            artifact_path_for_backend(models_root, backend, requested_resolution, "blue",
+                                      model_track);
         std::error_code blue_ec;
-        if (std::filesystem::exists(blue_path, blue_ec)) {
+        bool blue_present = std::filesystem::exists(blue_path, blue_ec);
+        if (!blue_present && model_track == "fp32") {
+            // FP32 blue not staged yet: keep keying alive on the fp16 blue
+            // artifact (the missing-artifact panel row still names the FP32
+            // file as the fetch target).
+            blue_path = models_root / selection_detail::kDynamicBlueModelFilename;
+            blue_present = std::filesystem::exists(blue_path, blue_ec);
+        }
+        if (blue_present && !blue_ec) {
             QualityArtifactSelection blue_selection{};
             blue_selection.executable_model_path = blue_path;
             blue_selection.requested_resolution = requested_resolution;
@@ -587,6 +639,24 @@ inline std::vector<QualityArtifactSelection> quality_artifact_candidates(
             selections.push_back(std::move(blue_selection));
         }
         return selections;
+    }
+
+    // FP32 track: a staged green FP32 TorchTRT artifact wins over the
+    // published fp16 ladder (upstream ships no green fp32; staging one is
+    // the supported Ampere "fp32 hack" path).
+    if (screen_color == "green" && model_track == "fp32") {
+        const auto fp32_path = models_root /
+                               selection_detail::green_fp32_artifact_filename(requested_resolution);
+        std::error_code fp32_ec;
+        if (std::filesystem::exists(fp32_path, fp32_ec) && !fp32_ec) {
+            QualityArtifactSelection fp32_selection{};
+            fp32_selection.executable_model_path = fp32_path;
+            fp32_selection.requested_resolution = requested_resolution;
+            fp32_selection.effective_resolution = requested_resolution;
+            fp32_selection.used_fallback = false;
+            fp32_selection.coarse_to_fine = false;
+            selections.push_back(std::move(fp32_selection));
+        }
     }
 
     const bool allow_lower_resolution_fallback = !is_fixed_quality_mode(quality_mode);
@@ -611,7 +681,7 @@ inline std::optional<QualityArtifactSelection> select_quality_artifact(
     int input_height, std::int64_t available_memory_mb = 0,
     QualityFallbackMode fallback_mode = QualityFallbackMode::Auto,
     int coarse_resolution_override = 0, bool allow_unrestricted_quality_attempt = false,
-    std::string_view screen_color = "green");
+    std::string_view screen_color = "green", std::string_view model_track = "fp32");
 
 namespace selection_detail {
 
@@ -746,11 +816,11 @@ inline std::optional<QualityArtifactSelection> select_quality_artifact(
     const std::filesystem::path& models_root, Backend backend, int quality_mode, int input_width,
     int input_height, std::int64_t available_memory_mb, QualityFallbackMode fallback_mode,
     int coarse_resolution_override, bool allow_unrestricted_quality_attempt,
-    std::string_view screen_color) {
+    std::string_view screen_color, std::string_view model_track) {
     auto candidates =
         quality_artifact_candidates(models_root, backend, quality_mode, input_width, input_height,
                                     available_memory_mb, fallback_mode, coarse_resolution_override,
-                                    allow_unrestricted_quality_attempt, screen_color);
+                                    allow_unrestricted_quality_attempt, screen_color, model_track);
     if (!candidates.empty()) {
         return candidates.front();
     }

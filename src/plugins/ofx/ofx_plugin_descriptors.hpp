@@ -13,13 +13,17 @@ namespace corridorkey::ofx {
 // is paired with kPluginLabelBlue so the two dedicated nodes read symmetrically
 // ("CorridorKey Green" + "CorridorKey Blue") instead of "CorridorKey" alone.
 constexpr const char* kPluginIdentifierGreen = "com.corridorkey.resolve";
-constexpr const char* kPluginLabelGreen = "CorridorKey Green";
+// BMT Build: labels are user-visible only (identifiers above stay immutable for
+// saved Resolve projects), so the community build suffix is safe here.
+// Effects-list wording is exactly "CorridorKey 2.0 BMT Build" (no
+// parentheses) — the single entry shared by both key-colour modes.
+constexpr const char* kPluginLabelGreen = "CorridorKey 2.0 BMT Build";
 
 // Blue: dedicated-screen identifier locked at acceptance of ADR-0006. Once a
 // release ships with this string, saved Resolve projects depend on it; treat
 // it as immutable without a superseding ADR.
 constexpr const char* kPluginIdentifierBlue = "com.corridorkey.resolve.blue";
-constexpr const char* kPluginLabelBlue = "CorridorKey Blue";
+constexpr const char* kPluginLabelBlue = "CorridorKey 2.0 Blue (BMT Build)";
 
 constexpr const char* kPluginGroup = "Keying";
 
