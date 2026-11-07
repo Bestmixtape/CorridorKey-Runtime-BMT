@@ -58,17 +58,16 @@ jobs:
             echo 'CoreML EP missing from vendored dylib'; exit 1
           fi
 
-      - name: Resolve vcpkg root (macos-15 moved it under /opt/homebrew)
+      - name: Bootstrap vcpkg (no longer preinstalled on runner images)
         run: |
-          for p in "$VCPKG_INSTALLATION_ROOT" /opt/homebrew/share/vcpkg /usr/local/share/vcpkg; do
-            if [ -n "$p" ] && [ -f "$p/scripts/vcpkg.sh" ]; then
-              echo "VCPKG_RESOLVED=$p" >> "$GITHUB_ENV"
-              echo "vcpkg root: $p"
-              exit 0
-            fi
-          done
-          echo "::error::vcpkg not found on runner" >&2
-          exit 1
+          if [ -n "$VCPKG_INSTALLATION_ROOT" ] && [ -f "$VCPKG_INSTALLATION_ROOT/scripts/vcpkg.sh" ]; then
+            echo "VCPKG_RESOLVED=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+          else
+            git clone --filter=blob:none --depth=1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+            "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableSuggestions
+            echo "VCPKG_RESOLVED=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          fi
+          echo "vcpkg root: $VCPKG_RESOLVED"
 
       - name: Configure
         run: |
