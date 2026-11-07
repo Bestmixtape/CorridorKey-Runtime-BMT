@@ -60,7 +60,7 @@ jobs:
 
       - name: Bootstrap vcpkg (no longer preinstalled on runner images)
         run: |
-          if [ -n "$VCPKG_INSTALLATION_ROOT" ] && [ -f "$VCPKG_INSTALLATION_ROOT/scripts/vcpkg.sh" ]; then
+          if [ -n "$VCPKG_INSTALLATION_ROOT" ] && [ -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
             echo "VCPKG_RESOLVED=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           else
             git clone --filter=blob:none --depth=1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
@@ -73,7 +73,7 @@ jobs:
         run: |
           cmake -B build/macos -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_RESOLVED/scripts/vcpkg.sh" \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_RESOLVED/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=arm64-osx \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCORRIDORKEY_BUNDLE_MODELS=OFF

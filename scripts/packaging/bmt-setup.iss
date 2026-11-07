@@ -25,10 +25,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-SetupIconFile=
 UninstallDisplayName={#MyAppName} (OFX plugin)
-VersionProductVersion={#MyAppVersion}
-VersionVersion={#MyAppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
