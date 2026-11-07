@@ -366,8 +366,9 @@ const char* describe_task_role(task_role_t role) {
             return "default-app";
         case TASK_DARWINBG_APPLICATION:
             return "darwinbg";
-        case TASK_USER_INIT_APPLICATION:
-            return "user-init-app";
+        // TASK_USER_INIT_APPLICATION does not exist in the macOS 15 SDK enum
+        // (upstream built against a newer/older header); falling through to
+        // "unknown" is correct for any role the SDK doesn't name.
         default:
             return "unknown";
     }

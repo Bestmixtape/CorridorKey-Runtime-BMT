@@ -48,6 +48,32 @@ jobs:
             "https://github.com/microsoft/onnxruntime/releases/download/v${v}/onnxruntime-osx-arm64-${v}.tgz"
           tar -xzf ort.tgz
           cp "onnxruntime-osx-arm64-${v}"/lib/*.dylib vendor/onnxruntime/lib/
+          # Replace stale vendored headers: official 1.24.x macOS packages ship
+          # headers flat under include/, while this codebase includes them via
+          # the Windows-style <onnxruntime/core/session/...> layout. The old
+          # vendor tree carried two different-guard copies of the same headers
+          # (clang: redefinition of ONNXTensorElementDataType). Rebuild the
+          # layout from ONE set of official files so every path resolves to
+          # identical content with identical include guards.
+          o="onnxruntime-osx-arm64-${v}/include"
+          rm -rf vendor/onnxruntime/include
+          flat="vendor/onnxruntime/include/onnxruntime"
+          sess="$flat/core/session"
+          cm="$flat/core/providers/coreml"
+          mkdir -p "$sess" "$cm" "$flat/core/providers"
+          cp "$o"/onnxruntime_c_api.h "$o"/onnxruntime_cxx_api.h "$o"/onnxruntime_cxx_inline.h \
+             "$o"/onnxruntime_float16.h "$o"/onnxruntime_env_config_keys.h \
+             "$o"/onnxruntime_session_options_config_keys.h \
+             "$o"/onnxruntime_run_options_config_keys.h "$o"/onnxruntime_ep_c_api.h \
+             "$o"/onnxruntime_ep_device_ep_metadata_keys.h \
+             "$o"/onnxruntime_lite_custom_op.h "$o"/provider_options.h "$sess"/
+          cp "$sess"/*.h "$flat"/
+          cp "$o"/coreml_provider_factory.h "$cm"/
+          # coreml_provider_factory.h includes "onnxruntime_c_api.h" relative
+          # to its own dir — keep that copy beside it.
+          cp "$sess"/onnxruntime_c_api.h "$cm"/
+          cp "$o"/coreml_provider_factory.h "$o"/cpu_provider_factory.h "$flat"/
+          cp "$o"/core/providers/*.h "$flat"/core/providers/
           ls -l vendor/onnxruntime/lib
           file "vendor/onnxruntime/lib/libonnxruntime.${v}.dylib" \
             | grep -q 'Mach-O 64-bit dynamically linked shared library arm64'

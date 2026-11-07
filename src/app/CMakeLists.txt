@@ -52,7 +52,8 @@ if(WIN32)
         if(APPLE)
             # macOS port: platform-specific helpers are unused on Apple builds
             target_compile_options(corridorkey_host_plugin_runtime_server PRIVATE
-                -Wno-unused-function -Wno-unused-const-variable -Wno-unused-variable)
+                -Wno-unused-function -Wno-unused-const-variable -Wno-unused-variable
+            -Wno-missing-field-initializers)
         endif()
     endif()
 
