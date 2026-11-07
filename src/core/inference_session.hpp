@@ -125,8 +125,15 @@ class InferenceSession {
    private:
     struct BoundIoState;
     struct PostProcessProgress {
-        bool source_passthrough_applied = false;
-        bool despill_applied = false;
+        // Clang rejects NSDMIs here: this struct is brace-initialized by the
+        // `PostProcessProgress post_process = {}` default argument of
+        // apply_post_process below, which is still inside the enclosing class
+        // definition. A user-provided default ctor is complete-name context,
+        // so it compiles on clang/MSVC alike. Same semantics.
+        bool source_passthrough_applied;
+        bool despill_applied;
+        constexpr PostProcessProgress() noexcept
+            : source_passthrough_applied(false), despill_applied(false) {}
     };
     struct RawFrameResult {
         FrameResult frame;
