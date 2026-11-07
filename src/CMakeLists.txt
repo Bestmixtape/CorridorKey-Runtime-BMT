@@ -31,6 +31,21 @@ endif()
 
 corridorkey_apply_windows_common_compile_defs(corridorkey_core)
 
+if(APPLE)
+    # BMT macOS port: corridorkey_core is a dylib here (STATIC on Windows),
+    # and the global -fvisibility=hidden strips every unannotated symbol
+    # from its export table, so the CLI and host-runtime-server fail to
+    # link app-level symbols (JobOrchestrator, auto_detect,
+    # runtime_capabilities, ...). Windows never hits this because static
+    # libs carry every object through. Widen exports for the Apple dylib
+    # only; the .ofx still never imports ONNX Runtime directly — those
+    # symbols live inside the core dylib either way.
+    set_target_properties(corridorkey_core PROPERTIES
+        C_VISIBILITY_PRESET default
+        CXX_VISIBILITY_PRESET default
+        VISIBILITY_INLINES_HIDDEN OFF)
+endif()
+
 # Private includes for internal implementation headers
 if(APPLE)
     target_include_directories(corridorkey_core PRIVATE
