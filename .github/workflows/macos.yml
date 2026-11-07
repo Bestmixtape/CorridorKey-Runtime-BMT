@@ -64,7 +64,7 @@ jobs:
             echo "VCPKG_RESOLVED=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           else
             git clone --filter=blob:none --depth=1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
-            "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableSuggestions
+            "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh"
             echo "VCPKG_RESOLVED=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
           fi
           echo "vcpkg root: $VCPKG_RESOLVED"
