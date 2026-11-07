@@ -1,237 +1,86 @@
-# CorridorKey-Runtime
+# CorridorKey 2.0 — BMT Build (OpenFX)
 
-![CorridorKey OFX Plugin](./assets/ofx_example.gif)
+An OpenFX chroma-keying plugin for DaVinci Resolve wrapping the
+[CorridorKey](https://github.com/alexalvaro/CorridorKey) 2.0 engine, with an
+on-demand model downloader, a hue-picker keying mode, an FP32/FP16 precision
+dropdown, and an alpha-matte exporter. This is a **BMT Build**: a community
+repackaging of the upstream [CorridorKey-Runtime](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime)
+by Bestmixtape. Free — not for sale.
 
-Native AI keying runtime and OFX plugin for **DaVinci Resolve and Foundry Nuke**, built in collaboration with **Corridor Digital**.
+- Effect name in hosts: `Open FX > Keying > CorridorKey 2.0 BMT Build`
+- Plugin build version: **0.1** (the "2.0" names the engine inside)
+- macOS port: CUDA replaced by **Metal** via the ONNX Runtime **CoreML** backend
 
-CorridorKey-Runtime provides three product surfaces:
+## Platforms & GPU backends
 
-- **OFX plugin** for interactive keying inside DaVinci Resolve and Foundry Nuke
-- **CLI** (`corridorkey`) for local processing, diagnostics, and automation
-- **GUI** (Tauri-based desktop app) for users who prefer a graphical workflow over the CLI
+| Platform | Inference backend | Notes |
+|---|---|---|
+| Windows 10/11 x64 | CUDA + TensorRT-RTX / ONNX Runtime | RTX GPU; FP32 default, FP16 experimental |
+| macOS 14+ Apple Silicon | Metal via ONNX Runtime CoreML EP | arm64 only; no CUDA/TensorRT |
 
-The Windows suite installer installs the CLI/runtime core as the fixed base. The OFX plugin, Adobe plugins, GUI, Green model pack, and Blue model/runtime pack are optional suite components. Standalone OFX support packages may still place `corridorkey.exe` next to `CorridorKey.ofx`, but the CLI no longer depends on installing an OFX host surface. The GUI is distributed either as an optional suite component that points at the shared runtime root or as a portable Runtime bundle that carries the GUI and local runtime package together.
+## Installers (v0.1)
 
-Adobe After Effects and Premiere plugins are packaged implementation targets,
-but they are not supported public surfaces until host validation passes.
+| File | What it is |
+|---|---|
+| `CorridorKey-BMT-Win64-v0.1.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins` |
+| `CorridorKey-BMT-Win64-v0.1-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
+| `CorridorKey-BMT-Win64-v0.1.msi` | MSI for managed deployment (same uninstall entry) |
+| `CorridorKey-BMT-macOS-Silicon-v0.1.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
+| `CorridorKey-BMT-macOS-Silicon-v0.1.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script |
 
-Current public builds support:
+> MSIX is deliberately not offered: MSIX packages install into a per-app
+> container that Resolve's OFX plugin scan does not read.
 
-- **Windows (NVIDIA RTX)**
-- **macOS (Apple Silicon)**
+After installing, restart Resolve and (if needed) tick the plugin under
+**Preferences → System → Video Plugins**.
 
-## Quick Start
+## First run
 
-- **Download the latest release:** [Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases/latest)
-- **Check supported platforms:** [Support Matrix](./help/SUPPORT_MATRIX.md)
-- **Troubleshooting and setup help:** [User Help](./help/)
-- **Watch a community tutorial:** [Tutorial by Heiko (@hethfilms)](https://youtu.be/VMcIk2jnQfg?si=IuitekQanKyDR4S-)
+Model weights download from Hugging Face
+([alexandrealvaro/CorridorKey](https://huggingface.co/alexandrealvaro/CorridorKey))
+on first use — about 1.2 GB on Windows (FP32 ladder) and ~715 MB on macOS
+(FP16 ONNX). Locations:
 
-## What this project focuses on
+- Windows: `%LOCALAPPDATA%\CorridorKey2.0-BMT\`
+- macOS: `~/Library/Application Support/CorridorKey2.0-BMT` (+ Caches/Logs)
 
-- Native local execution
-- Practical deployment in real editing workflows
-- Support for **NVIDIA RTX** and **Apple Silicon**
-- Stable surfaces for **DaVinci Resolve and Foundry Nuke users**, **CLI/integration workflows**, and **desktop GUI operators**
+You can pre-fetch with the bundled CLI (`corridorkey fetch-models`).
 
-## Supported Surfaces
+## Panel features
 
-### OFX plugin for DaVinci Resolve and Foundry Nuke
+- **Background:** Blue, Green, or **Picker** (experimental eyedropper for any chroma hue)
+- **Model precision:** FP32 (default) / FP16 (experimental) — Windows; on macOS the FP16 ONNX models run FP16 on the Metal GPU
+- **Export Matte (PNG sequence):** writes the alpha key alongside your render
 
-Use CorridorKey directly inside DaVinci Resolve or Foundry Nuke through the OFX plugin. The plugin is host-agnostic and registers itself at the standard OpenFX bundle path, so any OFX 1.4-compliant host that scans that path picks it up.
+### macOS caveat
 
-### CLI (`corridorkey`)
+Upstream publishes the dedicated *blue* model only as a Windows
+TensorRT-RTX artifact. On macOS, blue plates key through the green model
+behind the hue Picker.
 
-The Windows suite installs the `corridorkey` CLI as part of the fixed runtime/CLI core and registers its directory on `PATH`. The portable Runtime bundle also carries the CLI for minimal or support installs. Use it for:
+## Building from source
 
-- environment diagnostics
-- scripted processing
-- machine-readable JSON output
-- automation and integration workflows
-
-### GUI (Tauri desktop app)
-
-A Tauri-based desktop application is available for users who prefer a graphical workflow over the CLI. It can be installed from the suite installer or launched from the portable Runtime bundle, so it does not require the OFX bundle to be installed.
-
-## Documentation
-
-### User Help
-
-- [OFX Panel Guide](./help/OFX_PANEL_GUIDE.md)
-- [DaVinci Resolve Tutorials](./help/OFX_RESOLVE_TUTORIALS.md)
-- [Support Matrix](./help/SUPPORT_MATRIX.md)
-- [Troubleshooting](./help/TROUBLESHOOTING.md)
-
-### Development Docs
-
-- [Architecture](./ARCHITECTURE.md)
-- [Frontend](./docs/FRONTEND.md)
-- [Guidelines](./docs/GUIDELINES.md)
-- [Release Guidelines](./docs/RELEASE_GUIDELINES.md)
-- [Spec](./docs/SPEC.md)
-- [Contributing](./CONTRIBUTING.md)
-
-## Installation
-
-Pre-packaged releases are available on the
-[Releases](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime/releases)
-page. Download the package that matches your platform and product track.
-
-For supported hardware configurations and explicit support status per platform,
-see [Support Matrix](./help/SUPPORT_MATRIX.md).
-
-### OFX Plugin - macOS (Apple Silicon)
-
-1. Download the `.pkg` Apple Silicon installer.
-2. Run the installer with DaVinci Resolve closed.
-3. Open DaVinci Resolve 20, go to the Color or Fusion page, and search for
-   "CorridorKey" in the OpenFX Library.
-4. Drag the node onto your clip. The plugin uses the MLX-accelerated path
-   automatically on M-series chips.
-
-### OFX Plugin - Windows
-
-1. Download the `.exe` installer for your hardware path:
-   - **Windows RTX** - official Windows RTX installer for NVIDIA RTX 30 series
-     and newer. This track ships the public FP16 quality ladder:
-     **Draft (512)**, **High (1024)**, **Ultra (1536)**, and
-     **Maximum (2048)**. `Auto` respects the safe VRAM ceiling for the active
-     GPU tier, while manual fixed quality may attempt a higher packaged rung
-     with explicit runtime fallback if it fails.
-   - **DirectML package** - experimental Windows track for DirectX 12 GPUs
-     outside the official RTX path. This track is not broadly validated across
-     AMD, Intel, or RTX 20 series hardware and should only appear in releases
-     when it is published intentionally.
-2. Run the installer as Administrator with DaVinci Resolve closed.
-3. Open DaVinci Resolve 20, go to the Color or Fusion page, and search for
-   "CorridorKey" in the OpenFX Library.
-4. Drag the node onto your clip. TensorRT RTX compilation on the first frame
-   may take 10-30 seconds.
-
-For plugin discovery issues, version mismatches, or unsupported hardware
-behavior, see [Troubleshooting](./help/TROUBLESHOOTING.md).
-
-### CLI
-
-Download the portable runtime release for your platform.
-
-- On macOS bundles and source builds, use `corridorkey`
-- In the Windows portable runtime bundle, use `ck-engine.exe`
-
-## CLI Usage
-
-The examples below use the macOS and source-build command name `corridorkey`.
-In the Windows portable runtime bundle, replace it with `ck-engine.exe`.
-
-**Check hardware capability:**
-
-```bash
-corridorkey doctor
-````
-
-**Process a video with hardware-aware defaults:**
-
-```bash
-corridorkey process input.mp4 output.mp4
-```
-
-**Process with a specific preset:**
-
-```bash
-corridorkey process input.mp4 output.mp4 --preset max
-```
-
-**Process with an external Alpha Hint:**
-
-```bash
-corridorkey process input.mp4 output.mp4 --alpha-hint hint.mp4
-```
-
-Append `--json` to any command to receive NDJSON event streams for pipeline
-integration.
-
-## Community Tutorials
-
-- **Tutorial by Heiko (@hethfilms):** practical walkthrough of the CorridorKey Resolve OFX plugin, including installation and real professional workflow usage. [Watch here](https://youtu.be/VMcIk2jnQfg?si=IuitekQanKyDR4S-)
-- **Tutorial by Heiko (@hethfilms):** CORRIDORKEY - How to key difficult shots. [Watch here](https://www.youtube.com/watch?v=dAfeHmHFP9k)
-## Building from Source
-
-### Prerequisites
-
-* C++20 compiler: Visual Studio 2022 (v17.4+), Apple Clang 15+, or GCC 12+
-* CMake 3.28+
-* Ninja
-* vcpkg with `VCPKG_ROOT` set
-
-### Build
-
-```bash
-git clone https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime.git
-cd CorridorKey-Runtime
-export VCPKG_ROOT="$HOME/vcpkg"
-cmake --preset release
-cmake --build --preset release
-```
-
-On Windows, use `.\scripts\windows.ps1 -Task build -Preset release` for local
-builds. Use `.\scripts\windows.ps1 -Task package-runtime -Preset release
--FfmpegPath C:\path\to\ffmpeg.exe` for the portable Runtime/GUI ZIP, or set
-`CORRIDORKEY_FFMPEG_PATH` before running the command. Use
-`.\scripts\windows.ps1 -Task package-suite` for the top-level online suite
-installer once the runtime, OFX, and Adobe payload roots have been staged. The
-suite installer keeps the CLI/runtime core fixed and lets the user select GUI,
-host plugins, Green, and Blue components. Use
-`.\scripts\windows.ps1 -Task release -Version X.Y.Z -Flavor online` for the
-current automated release track packaging.
-
-Lower-level Windows scripts exist only as internal delegates for debugging the
-wrapper itself. If you invoke CMake directly, activate the MSVC developer
-environment first. Windows distribution artifacts include
-`model_inventory.json` and `bundle_validation.json` when packaging succeeds
-with a partial model set, so missing packaged models are explicit and do not
-silently change runtime behavior.
-
-For local Windows workflow, the canonical wrapper exposes three different
-levels of operation:
-
-* `.\scripts\windows.ps1 -Task build -Preset release`
-
-  * build only
-* `.\scripts\windows.ps1 -Task package-ofx -Version X.Y.Z -Track rtx`
-
-  * package the `Windows RTX` installer from an already certified Windows RTX
-    model set
-* `.\scripts\windows.ps1 -Task certify-rtx-artifacts -Version X.Y.Z`
-
-  * certify an already existing Windows RTX model set and write the artifact
-    manifest without regenerating the `.onnx` files from the checkpoint
-* `.\scripts\windows.ps1 -Task regen-rtx-release -Version X.Y.Z`
-
-  * regenerate ONNX artifacts from the checkpoint, certify the RTX ladder,
-    write the artifact manifest, and then package the `Windows RTX`
-    installer
-
-`package-ofx` for Windows RTX is intentionally strict. It no longer accepts a
-raw `models\` folder by itself. The command requires a certified
-`artifact_manifest.json` that matches the packaged RTX model and `*_ctx.onnx`
-files exactly. If you only have stale or manually copied models, use
-`certify-rtx-artifacts` or `regen-rtx-release` first.
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and PR process.
+- **Windows:** Visual Studio 2022 Build Tools, CMake ≥ 3.28, Ninja, CUDA 12.9,
+  vcpkg (`vcpkg.json`). The vendored Windows ONNX Runtime and TensorRT-RTX
+  binaries are not carried in this fork's git tree; re-stage them under
+  `vendor/` before configuring.
+- **macOS:** `.github/workflows/macos.yml` (macos-14 runner) stages the
+  official ONNX Runtime osx-arm64 release, builds `corridorkey_ofx`, verifies
+  the bundle layout/link contract, ad-hoc signs, smoke-tests CoreML inference
+  end-to-end, and uploads the zip + dmg.
 
 ## License
 
-[CC BY-NC-SA 4.0](./LICENSE)
+[CC BY-NC-SA 4.0](./LICENSE) (upstream license, unchanged):
 
-You may use this software to process commercial video. You may not repackage
-or sell the software itself or offer it as a paid service.
+> You may use this software to process commercial video. You may not
+> repackage or sell the software itself or offer it as a paid service.
 
 ## Acknowledgements
 
-* **Original CorridorKey:** [github.com/nikopueringer/CorridorKey](https://github.com/nikopueringer/CorridorKey)
-* **EZ-CorridorKey:** [github.com/edenaion/EZ-CorridorKey](https://github.com/edenaion/EZ-CorridorKey)
-* **CorridorKey-Engine:** [github.com/99oblivius/CorridorKey-Engine](https://github.com/99oblivius/CorridorKey-Engine)
-* **ONNX Runtime** by Microsoft
-* **OpenEXR** by Academy Software Foundation
+- **CorridorKey engine/runtime/models:** [alexandremendoncaalvaro/CorridorKey-Runtime](https://github.com/alexandremendoncaalvaro/CorridorKey-Runtime)
+- **Original CorridorKey:** [github.com/nikopueringer/CorridorKey](https://github.com/nikopueringer/CorridorKey)
+- **EZ-CorridorKey:** [github.com/edenaion/EZ-CorridorKey](https://github.com/edenaion/EZ-CorridorKey)
+- **CorridorKey-Engine:** [github.com/99oblivius/CorridorKey-Engine](https://github.com/99oblivius/CorridorKey-Engine)
+- **ONNX Runtime** by Microsoft, **OpenEXR** by the Academy Software Foundation
+- **BMT Build:** branding, installers, and the CUDA→Metal/CoreML macOS port (this repo)
