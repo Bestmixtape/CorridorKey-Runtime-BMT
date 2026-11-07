@@ -1,7 +1,9 @@
 CorridorKey 2.0 BMT Build — macOS (Apple Silicon) v0.1
 =======================================================
 
-Requires: Apple Silicon Mac, macOS 14 or newer, DaVinci Resolve 19/20/21.
+Requires: **Apple Silicon Mac (M1/M2/M3/M4) — NOT Intel Macs**, macOS 14 or
+newer, DaVinci Resolve 19/20/21. This is a Silicon-only build; the installer
+detects an Intel Mac and stops.
 Inference runs on Metal through the ONNX Runtime CoreML backend — no CUDA.
 
 INSTALL

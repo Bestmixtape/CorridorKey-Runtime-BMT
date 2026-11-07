@@ -136,6 +136,12 @@ jobs:
           cat > "$stage/Install CorridorKey BMT.command" <<'SH'
           #!/bin/bash
           set -euo pipefail
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "This build is Apple Silicon (M-series) only."
+            echo "Intel Macs are not supported — exiting without installing."
+            read -n 1 -s -r -p "Press any key to close. "
+            exit 1
+          fi
           cd "$(dirname "$0")"
           echo "CorridorKey 2.0 BMT Build — installing into /Library/OFX/Plugins (sudo required)."
           sudo mkdir -p /Library/OFX/Plugins

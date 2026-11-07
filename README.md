@@ -10,13 +10,14 @@ by Bestmixtape. Free — not for sale.
 - Effect name in hosts: `Open FX > Keying > CorridorKey 2.0 BMT Build`
 - Plugin build version: **0.1** (the "2.0" names the engine inside)
 - macOS port: CUDA replaced by **Metal** via the ONNX Runtime **CoreML** backend
+- macOS builds are **Apple Silicon (M-series) only — they will not run on Intel Macs**
 
 ## Platforms & GPU backends
 
 | Platform | Inference backend | Notes |
 |---|---|---|
 | Windows 10/11 x64 | CUDA + TensorRT-RTX / ONNX Runtime | RTX GPU; FP32 default, FP16 experimental |
-| macOS 14+ Apple Silicon | Metal via ONNX Runtime CoreML EP | arm64 only; no CUDA/TensorRT |
+| macOS 14+ **Apple Silicon only** (M1/M2/M3/M4 — not Intel) | Metal via ONNX Runtime CoreML EP | arm64 binaries; no CUDA/TensorRT |
 
 ## Installers (v0.1)
 
@@ -26,7 +27,7 @@ by Bestmixtape. Free — not for sale.
 | `CorridorKey-BMT-Win64-v0.1-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
 | `CorridorKey-BMT-Win64-v0.1.msi` | MSI for managed deployment (same uninstall entry) |
 | `CorridorKey-BMT-macOS-Silicon-v0.1.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
-| `CorridorKey-BMT-macOS-Silicon-v0.1.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script |
+| `CorridorKey-BMT-macOS-Silicon-v0.1.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script. **Refuses to install on Intel Macs** |
 
 > MSIX is deliberately not offered: MSIX packages install into a per-app
 > container that Resolve's OFX plugin scan does not read.
