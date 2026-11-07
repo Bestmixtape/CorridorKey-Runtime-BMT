@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Vendor OpenFX SDK (not committed to this repo)
+        run: git clone --depth=1 https://github.com/AcademySoftwareFoundation/OpenFX vendor/openfx
+
       - name: Cache vcpkg binary cache
         uses: actions/cache@v4
         with:
