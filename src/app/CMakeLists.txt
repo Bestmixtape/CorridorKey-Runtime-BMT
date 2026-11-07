@@ -49,6 +49,11 @@ if(WIN32)
     else()
         target_compile_options(corridorkey_host_plugin_runtime_server PRIVATE
             -Wall -Wextra -Wpedantic -Werror)
+        if(APPLE)
+            # macOS port: platform-specific helpers are unused on Apple builds
+            target_compile_options(corridorkey_host_plugin_runtime_server PRIVATE
+                -Wno-unused-function -Wno-unused-const-variable -Wno-unused-variable)
+        endif()
     endif()
 
     set_target_properties(corridorkey_host_plugin_runtime_server PROPERTIES

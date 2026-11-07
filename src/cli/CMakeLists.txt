@@ -19,6 +19,11 @@ if(MSVC)
     target_compile_options(corridorkey_cli PRIVATE /W4 /WX /permissive-)
 else()
     target_compile_options(corridorkey_cli PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    if(APPLE)
+        # macOS port: platform-specific helpers are unused on Apple builds
+        target_compile_options(corridorkey_cli PRIVATE
+            -Wno-unused-function -Wno-unused-const-variable -Wno-unused-variable)
+    endif()
 endif()
 
 if(WIN32)
