@@ -277,37 +277,12 @@ elseif(APPLE)
         )
     endif()
 
-    # Belt for the observed runner quirk where the configure-time install_name_tool
-    # -id on the ORT build-tree copy exited 0 without rewriting LC_ID, leaving core
-    # (and possibly the CLI) with a load command for @rpath/libonnxruntime.<v>.dylib,
-    # which the bundle never carries. The root CMakeLists self-checks the id after
-    # normalization; when it reports stale, rewrite any stale references in the
-    # staged binaries to the shipped unversioned name and re-sign. || true keeps it
-    # harmless for binaries that never referenced ORT (the .ofx, per contract).
-    # Always run the repair loop: covers both a stale LC_ID surviving
-    # configure-time normalization AND any other path by which core/CLI end
-    # up with a versioned ORT load command. install_name_tool failure is
-    # tolerated (no-op when references are already clean or the binary never
-    # referenced ORT). Kept as a generated script file: the inline one-liner
-    # broke ninja's lexer through CMake's Ninja escaping.
-    set(_ort_repair_script "${CMAKE_BINARY_DIR}/bmt_ort_repair.sh")
-    file(WRITE "${_ort_repair_script}"
-"#!/bin/sh
-DIR='${_ofx_bundle_contents_dir}'
-OLD='${ONNXRUNTIME_VERSIONED_ID}'
-NEW='@rpath/libonnxruntime.dylib'
-for f in libcorridorkey_core.dylib corridorkey; do
-    p=\"$DIR/$f\"
-    [ -f \"$p\" ] || continue
-    install_name_tool -change \"$OLD\" \"$NEW\" \"$p\" 2>/dev/null || true
-    codesign --force --sign - \"$p\"
-done
-exit 0
-")
-    add_custom_command(TARGET corridorkey_ofx POST_BUILD
-        COMMAND /bin/sh "${_ort_repair_script}"
-        COMMENT "Repairing stale ORT load-name references in staged binaries..."
-    )
+    # ORT contract: the vendored dylib carries LC_ID_DYLIB
+    # @rpath/libonnxruntime.<v>.dylib and (chained fixups) cannot be renamed
+    # on the runner, so the bundle ships that exact filename (copy below from
+    # ${ONNXRUNTIME_DYLIB}) and core/CLI record the same versioned name.
+    # dyld matches name + LC_ID under the @loader_path rpath — nothing to
+    # repair, nothing to normalize.
 
     # BMT: libmlx.dylib (Apple Silicon MLX inference backend) rides along
     # when the root CMakeLists resolved the MLX package (portable bottle or

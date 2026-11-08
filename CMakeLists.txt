@@ -129,59 +129,26 @@ if(APPLE)
     set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime")
     set(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_ROOT}/lib")
 
-    if(EXISTS "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
+    # Prefer the VERSIONED dylib. ORT 1.24.x macOS binaries use dyld chained
+    # fixups, which bake the install name into the Mach-O structure: on recent
+    # runners `install_name_tool -id` exits 0 but refuses the rewrite (stderr
+    # warning only), so LC_ID_DYLIB (@rpath/libonnxruntime.<v>.dylib) is
+    # effectively immutable. Ship the exact filename the dylib declares and
+    # let the linker record its LC_ID verbatim — dyld then resolves it under
+    # the bundle's @loader_path rpath by name. runtime_diagnostics and
+    # package_mac.sh both glob the libonnxruntime* prefix, so the versioned
+    # file is found the same way at runtime.
+    file(GLOB ONNXRUNTIME_DYLIB_CANDIDATES "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.*.dylib")
+    list(FILTER ONNXRUNTIME_DYLIB_CANDIDATES EXCLUDE REGEX "\\.dSYM")
+    if(ONNXRUNTIME_DYLIB_CANDIDATES)
+        list(SORT ONNXRUNTIME_DYLIB_CANDIDATES)
+        list(GET ONNXRUNTIME_DYLIB_CANDIDATES -1 ONNXRUNTIME_DYLIB)
+    elseif(EXISTS "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
         set(ONNXRUNTIME_DYLIB "${ONNXRUNTIME_LIB_DIR}/libonnxruntime.dylib")
     else()
-        file(GLOB ONNXRUNTIME_DYLIB_CANDIDATES "${ONNXRUNTIME_LIB_DIR}/libonnxruntime*.dylib")
-        list(FILTER ONNXRUNTIME_DYLIB_CANDIDATES EXCLUDE REGEX "\\.dSYM")
-        if(NOT ONNXRUNTIME_DYLIB_CANDIDATES)
-            message(FATAL_ERROR "Unable to locate vendored ONNX Runtime dylib in ${ONNXRUNTIME_LIB_DIR}")
-        endif()
-        list(GET ONNXRUNTIME_DYLIB_CANDIDATES 0 ONNXRUNTIME_DYLIB)
+        message(FATAL_ERROR "Unable to locate vendored ONNX Runtime dylib in ${ONNXRUNTIME_LIB_DIR}")
     endif()
-
-    # Mach-O fixup: the release tarball's unversioned libonnxruntime.dylib is
-    # a copy of the versioned file and carries the VERSIONED name as its
-    # LC_ID_DYLIB (@rpath/libonnxruntime.<v>.dylib). Linking it verbatim bakes
-    # a load command for a filename we never ship (bundle carries the
-    # unversioned copy) — historically masked on CI because the leaked
-    # build-tree rpath pointed back at the vendor dir. Normalize a build-tree
-    # copy (ad-hoc re-signed) so linked name == staged name, always.
-    set(_corridorkey_ort_normalized "${CMAKE_BINARY_DIR}/onnxruntime/libonnxruntime.dylib")
-    # Remember the versioned install-name the linker may bake if any input
-    # still carries it; the bundle staging below repairs such references.
-    execute_process(
-        COMMAND otool -D "${ONNXRUNTIME_DYLIB}"
-        OUTPUT_VARIABLE ONNXRUNTIME_VERSIONED_ID
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/onnxruntime"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ONNXRUNTIME_DYLIB}" "${_corridorkey_ort_normalized}"
-        COMMAND install_name_tool -id "@rpath/libonnxruntime.dylib" "${_corridorkey_ort_normalized}"
-        COMMAND codesign --force --sign - "${_corridorkey_ort_normalized}"
-        RESULT_VARIABLE _corridorkey_ort_norm_rc
-        ERROR_VARIABLE _corridorkey_ort_norm_err
-    )
-    if(NOT _corridorkey_ort_norm_rc EQUAL 0)
-        message(FATAL_ERROR "ORT install-name normalization failed: ${_corridorkey_ort_norm_err}")
-    endif()
-    # Self-verify: on at least one runner install_name_tool exited 0 while
-    # leaving LC_ID_DYLIB untouched, silently poisoning every link against
-    # the 'normalized' copy. Fail loudly instead of shipping core with a
-    # load command for a filename the bundle never carries.
-    execute_process(
-        COMMAND otool -D "${_corridorkey_ort_normalized}"
-        OUTPUT_VARIABLE _corridorkey_ort_norm_id
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    message(STATUS "Normalized ORT id now: ${_corridorkey_ort_norm_id}")
-    if(NOT _corridorkey_ort_norm_id MATCHES "@rpath/libonnxruntime\\.dylib$")
-        message(WARNING
-            "ORT id normalization did not stick (otool -D reports ${_corridorkey_ort_norm_id}); "
-            "bundle staging will rewrite stale references, but investigate the runner's install_name_tool.")
-    endif()
-    set(ONNXRUNTIME_DYLIB "${_corridorkey_ort_normalized}")
+    message(STATUS "Vendored ONNX Runtime dylib (LC_ID shipped as-is): ${ONNXRUNTIME_DYLIB}")
 
     # Create the imported target manually since we are skipping find_package config
     add_library(onnxruntime::onnxruntime SHARED IMPORTED)

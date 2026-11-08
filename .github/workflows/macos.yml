@@ -160,11 +160,6 @@ jobs:
         run: |
           set -euxo pipefail
           B=build/macos/CorridorKey-BMT.ofx.bundle
-          # The exact link command CMake/ninja used for core + where every
-          # ORT copy's Mach-O id actually points.
-          ninja -C build/macos -t commands src/libcorridorkey_core.dylib | tail -1 | tr ' ' '\n' | grep -i onnxruntime || echo "NO onnxruntime arg in core link line"
-          echo "-- build-tree ORT id:"; otool -L build/macos/onnxruntime/libonnxruntime.dylib | sed -n '2p'
-          echo "-- vendor ORT id:"; otool -L vendor/onnxruntime/lib/libonnxruntime.dylib | sed -n '2p'
           test -f "$B/Contents/Info.plist"
           test -f "$B/Contents/MacOS/CorridorKey-BMT.ofx"
           test -f "$B/Contents/MacOS/corridorkey"
@@ -176,11 +171,12 @@ jobs:
           for db in libcorridorkey_core.dylib corridorkey CorridorKey-BMT.ofx; do
             echo "== $db"; otool -l "$B/Contents/MacOS/$db" | grep -A2 LC_RPATH || true
           done
-          # CMake normalizes the vendored dylib's Mach-O id to
-          # @rpath/libonnxruntime.dylib (configure-time), so the bundle ships
-          # the unversioned name and core's load command matches it.
-          test -f "$B/Contents/MacOS/libonnxruntime.dylib"
-          otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib" | grep -q '@rpath/libonnxruntime.dylib'
+          # ORT ships as the exact versioned filename its LC_ID declares
+          # (chained fixups make -id rewrites impossible on recent runners);
+          # assert the staged file and core's load command agree on it.
+          ORT_NAME="$(ls "$B/Contents/MacOS/"libonnxruntime*.dylib | head -1 | xargs basename)"
+          test -n "$ORT_NAME"
+          otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib" | grep -q "@rpath/$ORT_NAME"
           # MLX backend must be compiled in and staged (root CMakeLists
           # resolves the MLX package from the venv created in Install MLX).
           test -f "$B/Contents/MacOS/libmlx.dylib"
