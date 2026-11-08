@@ -11,7 +11,7 @@ BUNDLE_NAME = os.path.basename(BUNDLE)
 
 UPGRADE_CODE = "B621DD00-3899-4543-894E-95466CC310D0"
 PRODUCT_NAME = "CorridorKey 2.0 BMT Build"
-VERSION = "0.1.0"
+VERSION = sys.argv[3] if len(sys.argv) > 3 else "0.1.0"
 MANUFACTURER = "Bestmixtape"
 # License page for the installer wizard; license.rtf is generated from
 # LICENSE.txt in this folder (CC BY-NC-SA 4.0 summary).

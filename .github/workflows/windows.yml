@@ -166,7 +166,7 @@ jobs:
           grep -n "OutputDir=" scripts/packaging/bmt-setup.ci.iss
           "$ISCC_PATH" /Qp scripts/packaging/bmt-setup.ci.iss
           ls -l dist
-          "$PY" scripts/packaging/gen_wxs.py "$B" dist/bmt-package.wxs
+          "$PY" scripts/packaging/gen_wxs.py "$B" dist/bmt-package.wxs "${BMT_VERSION}.0"
           "$HOME/.dotnet/tools/wix.exe" build dist/bmt-package.wxs -ext WixToolset.UI.wixext -o "dist/CorridorKey2.0-BMT-Win64-v${BMT_VERSION}.msi"
           ls -l dist
 
