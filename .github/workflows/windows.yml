@@ -59,9 +59,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PY="$(command -v python3 || command -v python)"
           curl -fsSL -o vendor-pack.zip \
             "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT/releases/download/${VENDOR_PACK_TAG}/vendor-windows-rtx-v1.zip"
-          tar -xf vendor-pack.zip -C vendor/
+          "$PY" -m zipfile -e vendor-pack.zip vendor/
           rm vendor-pack.zip
           # Fail fast with a clear line if the pack is malformed.
           test -f vendor/onnxruntime-windows-rtx/include/onnxruntime/core/session/onnxruntime_cxx_api.h
@@ -122,7 +123,7 @@ jobs:
           set -euo pipefail
           choco install innosetup --no-progress -y > /dev/null
           dotnet tool install --global wix
-          "$USERPROFILE/.dotnet/tools/wix.exe" extension add -g WixToolset.UI.wixext
+          "$HOME/.dotnet/tools/wix.exe" extension add -g WixToolset.UI.wixext
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           test -f "$ISCC" && echo "ISCC: $ISCC"
           # ISCC is not on PATH under bash — expose the exact path for later steps.
@@ -133,9 +134,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          PY="$(command -v python3 || command -v python)"
           B="build/release/CorridorKey-BMT.ofx.bundle"
           # True deflate ZIP (never tar-as-zip: Windows Explorer must open it).
-          python3 - <<'PY'
+          "$PY" - <<'PY'
           import os, zipfile
           b = "build/release/CorridorKey-BMT.ofx.bundle"
           out = os.path.join("dist", "CorridorKey2.0-BMT-Win64-v%s.zip" % os.environ["BMT_VERSION"])
@@ -156,8 +158,8 @@ jobs:
           grep -n "OutputDir=" scripts/packaging/bmt-setup.ci.iss
           "$ISCC_PATH" /Qp scripts/packaging/bmt-setup.ci.iss
           ls -l dist
-          python3 scripts/packaging/gen_wxs.py "$B" dist/bmt-package.wxs
-          "$USERPROFILE/.dotnet/tools/wix.exe" build dist/bmt-package.wxs -ext WixToolset.UI.wixext -o "dist/CorridorKey2.0-BMT-Win64-v${BMT_VERSION}.msi"
+          "$PY" scripts/packaging/gen_wxs.py "$B" dist/bmt-package.wxs
+          "$HOME/.dotnet/tools/wix.exe" build dist/bmt-package.wxs -ext WixToolset.UI.wixext -o "dist/CorridorKey2.0-BMT-Win64-v${BMT_VERSION}.msi"
           ls -l dist
 
       - uses: actions/upload-artifact@v4
