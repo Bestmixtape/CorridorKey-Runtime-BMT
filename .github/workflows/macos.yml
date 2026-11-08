@@ -285,7 +285,7 @@ jobs:
       - name: Package zip artifact
         run: |
           cd build/macos
-          zip -qr "$GITHUB_WORKSPACE/CorridorKey-BMT-macOS-Silicon-v${BMT_VERSION}.zip" CorridorKey-BMT.ofx.bundle
+          zip -qr "$GITHUB_WORKSPACE/CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.zip" CorridorKey-BMT.ofx.bundle
 
       - name: Build DMG installer
         run: |
@@ -329,16 +329,16 @@ jobs:
           chmod +x "$stage"/*.command
           hdiutil create -volname CorridorKey-BMT \
             -srcfolder "$stage" -ov -format UDZO \
-            "CorridorKey-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
-          codesign --force -s - "CorridorKey-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
-          hdiutil verify "CorridorKey-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
+            "CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
+          codesign --force -s - "CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
+          hdiutil verify "CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CorridorKey-BMT-macOS-Silicon-zip
-          path: CorridorKey-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.zip
+          name: CorridorKey2.0-BMT-macOS-Silicon-zip
+          path: CorridorKey2.0-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CorridorKey-BMT-macOS-Silicon-dmg
-          path: CorridorKey-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.dmg
+          name: CorridorKey2.0-BMT-macOS-Silicon-dmg
+          path: CorridorKey2.0-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.dmg
