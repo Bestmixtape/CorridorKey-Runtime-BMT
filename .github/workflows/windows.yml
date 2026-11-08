@@ -44,7 +44,7 @@ jobs:
     env:
       VCPKG_BINARY_SOURCES: 'clear;files,C:/vcpkg-bcache,readwrite'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Vendor OpenFX SDK (not committed to this repo)
         run: git clone --depth=1 https://github.com/AcademySoftwareFoundation/OpenFX vendor/openfx
