@@ -158,11 +158,19 @@ jobs:
 
       - name: Verify bundle layout + link contracts
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           B=build/macos/CorridorKey-BMT.ofx.bundle
           test -f "$B/Contents/Info.plist"
           test -f "$B/Contents/MacOS/CorridorKey-BMT.ofx"
           test -f "$B/Contents/MacOS/corridorkey"
+          # Diagnostics first: if any contract grep below dies, the actual
+          # load commands are already in the log above it.
+          echo "---- otool -L core ----"; otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib"
+          echo "---- otool -L cli ----"; otool -L "$B/Contents/MacOS/corridorkey" | head -25
+          echo "---- rpaths ----"
+          for db in libcorridorkey_core.dylib corridorkey CorridorKey-BMT.ofx; do
+            echo "== $db"; otool -l "$B/Contents/MacOS/$db" | grep -A2 LC_RPATH || true
+          done
           # CMake normalizes the vendored dylib's Mach-O id to
           # @rpath/libonnxruntime.dylib (configure-time), so the bundle ships
           # the unversioned name and core's load command matches it.
