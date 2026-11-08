@@ -242,22 +242,25 @@ const std::vector<ModelPackFile>& model_pack_files() {
          14347062ULL, "shared"},
         {"mobilesam_prompt_decoder_fp16.onnx", "hint/mobilesam_prompt_decoder_fp16.onnx",
          8224865ULL, "shared"},
-        // BMT macOS: MLX weights + fixed-resolution callable bridges from the
-        // upstream mlx/ tree (HF api listing 2026-11). Track tag "mlx":
-        // fetched on Apple platforms only, outside the precision tracks
-        // (see model_pack_files_for_track).
+        // BMT macOS: MLX weights + fixed-resolution callable bridges. The
+        // bridge set was regenerated ("mlx-repack" CI) with mlx==0.32.4 to
+        // match the runtime pin — MLX's export format is version-fragile and
+        // the original 0.31-era HF files fail import in 0.32.x. Sizes below
+        // must equal the republished mlx/*_bridge_*.mlxfn bytes exactly.
+        // Track tag "mlx": fetched on Apple platforms only, outside the
+        // precision tracks (see model_pack_files_for_track).
         {"corridorkey_mlx.safetensors", "mlx/corridorkey_mlx.safetensors",
          398849072ULL, "mlx"},
         {"corridorkey_mlx_bridge_512.mlxfn", "mlx/corridorkey_mlx_bridge_512.mlxfn",
-         288931878ULL, "mlx"},
+         288923661ULL, "mlx"},
         {"corridorkey_mlx_bridge_768.mlxfn", "mlx/corridorkey_mlx_bridge_768.mlxfn",
-         298106918ULL, "mlx"},
+         298098701ULL, "mlx"},
         {"corridorkey_mlx_bridge_1024.mlxfn", "mlx/corridorkey_mlx_bridge_1024.mlxfn",
-         310951974ULL, "mlx"},
+         310943757ULL, "mlx"},
         {"corridorkey_mlx_bridge_1536.mlxfn", "mlx/corridorkey_mlx_bridge_1536.mlxfn",
-         347652134ULL, "mlx"},
+         347643917ULL, "mlx"},
         {"corridorkey_mlx_bridge_2048.mlxfn", "mlx/corridorkey_mlx_bridge_2048.mlxfn",
-         399032358ULL, "mlx"},
+         399024141ULL, "mlx"},
     };
     return files;
 }
