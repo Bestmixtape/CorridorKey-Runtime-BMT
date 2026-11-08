@@ -82,6 +82,12 @@ jobs:
             echo "VCPKG_RESOLVED=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
           fi
           echo "vcpkg root: $VCPKG_RESOLVED"
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg-bcache
+          key: vcpkg-bmt-win-v1
+
 
       - name: Configure + build corridorkey_ofx (MSVC x64)
         shell: cmd
@@ -102,11 +108,11 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
-          set B=build\release\CorridorKey-BMT.ofx.bundle\Contents\x86_64
+          set B=build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64
           dir /b %B%
           for %%f in (CorridorKey-BMT.ofx corridorkey.exe) do if not exist "%B%\%%f" (echo MISSING %%f & exit /b 1)
-          # Same contract as the macos.yml rule: the .ofx must not link ONNX
-          # Runtime directly; inference runs through the core dll / CLI server.
+          rem Same contract as the macos.yml rule: the .ofx must not link ONNX
+          rem runtime directly; inference runs through the core dll / CLI server.
           dumpbin /dependents "%B%\CorridorKey-BMT.ofx" > ofx-deps.txt
           type ofx-deps.txt
           findstr /I "onnxruntime" ofx-deps.txt >nul && (echo CONTRACT VIOLATION: .ofx links onnxruntime & exit /b 1)
