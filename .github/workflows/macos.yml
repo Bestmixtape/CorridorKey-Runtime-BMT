@@ -160,6 +160,11 @@ jobs:
         run: |
           set -euxo pipefail
           B=build/macos/CorridorKey-BMT.ofx.bundle
+          # The exact link command CMake/ninja used for core + where every
+          # ORT copy's Mach-O id actually points.
+          ninja -C build/macos -t commands src/libcorridorkey_core.dylib | tail -1 | tr ' ' '\n' | grep -i onnxruntime || echo "NO onnxruntime arg in core link line"
+          echo "-- build-tree ORT id:"; otool -L build/macos/onnxruntime/libonnxruntime.dylib | sed -n '2p'
+          echo "-- vendor ORT id:"; otool -L vendor/onnxruntime/lib/libonnxruntime.dylib | sed -n '2p'
           test -f "$B/Contents/Info.plist"
           test -f "$B/Contents/MacOS/CorridorKey-BMT.ofx"
           test -f "$B/Contents/MacOS/corridorkey"
