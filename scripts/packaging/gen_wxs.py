@@ -13,6 +13,9 @@ UPGRADE_CODE = "B621DD00-3899-4543-894E-95466CC310D0"
 PRODUCT_NAME = "CorridorKey 2.0 BMT Build"
 VERSION = "0.1.0"
 MANUFACTURER = "Bestmixtape"
+# License page for the installer wizard; license.rtf is generated from
+# LICENSE.txt in this folder (CC BY-NC-SA 4.0 summary).
+LICENSE_RTF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "license.rtf")
 
 esc = lambda s: (s.replace("&", "&amp;").replace("<", "&lt;")
                    .replace(">", "&gt;").replace('"', "&quot;"))
@@ -55,14 +58,24 @@ def emit_dir(d, depth):
 emit_dir(BUNDLE, 5)
 refs = "\n".join(f'      <ComponentRef Id="{c}" />' for c in comp_ids)
 
-wxs = f"""<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+wxs = f"""<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="{esc(PRODUCT_NAME)}" Language="1033" Version="{VERSION}"
            Manufacturer="{esc(MANUFACTURER)}" UpgradeCode="{UPGRADE_CODE}"
-           Scope="perMachine" InstallerVersion="500">
+           Scope="perMachine" InstallerVersion="500" Codepage="65001">
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of {esc(PRODUCT_NAME)} is already installed."
                   AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
+
+    <!-- Real installer wizard (license agreement -> progress -> finish) via
+         the globally installed WixToolset.UI.wixext extension
+         (wix extension add -g WixToolset.UI.wixext). WixUI_Minimal by
+         design: OFX plugins are only scanned by hosts from the standard
+         ProgramFiles location, so no custom-directory page to shoot
+         ourselves in the foot with. -->
+    <WixVariable Id="WixUILicenseRtf" Value="{esc(LICENSE_RTF)}" />
+    <ui:WixUI Id="WixUI_Minimal" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="CommonFilesDir" Name="Common Files">
