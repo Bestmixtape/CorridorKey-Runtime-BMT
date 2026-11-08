@@ -8,7 +8,7 @@ repackaging of the upstream [CorridorKey-Runtime](https://github.com/alexandreme
 by Bestmixtape. Free — not for sale.
 
 - Effect name in hosts: `Open FX > Keying > CorridorKey 2.0 BMT Build`
-- Plugin build version: **0.1** (the "2.0" names the engine inside)
+- Plugin build version: **0.2** (the "2.0" names the engine inside)
 - macOS port: CUDA replaced by **Metal** via Apple's **MLX** inference backend
 - macOS builds are **Apple Silicon (M-series) only — they will not run on Intel Macs**
 
@@ -19,15 +19,37 @@ by Bestmixtape. Free — not for sale.
 | Windows 10/11 x64 | CUDA + TensorRT-RTX / ONNX Runtime | RTX GPU; FP32 default, FP16 experimental |
 | macOS 14+ **Apple Silicon only** (M1/M2/M3/M4 — not Intel) | Metal via MLX (main model) + CoreML EP (hint models) | arm64 binaries; no CUDA/TensorRT |
 
-## Installers (v0.1)
+## Installers (v0.2)
+
+Grab any of these from the
+[Releases page](https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT/releases).
+
+### What's new in 0.2
+
+- **First-run download is now visible:** while the model pack is missing or
+  downloading, the plugin stamps a status card into the preview (you see it in
+  Resolve's viewer) — the source image passes through until the models land.
+- **Live progress:** percent plus *bytes downloaded of total pack size* and
+  the current file, in the card and in the panel's Model Pack row. Progress
+  covers the whole pack across all files and survives resuming a partial
+  download.
+- **Controls lock during download:** keying controls grey out until the pack
+  is complete, so settings can't be changed against a half-installed pack.
+  The Model Precision dropdown stays live so you can switch FP32/FP16 tracks.
+- **Failure is not a dead end:** if a download fails, the controls unlock
+  again and the card explains what happened and where the files go.
+- Once the pack is complete the card disappears and the effect works exactly
+  as before.
+
+### Files
 
 | File | What it is |
 |---|---|
-| `CorridorKey-BMT-Win64-v0.1.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins` |
-| `CorridorKey-BMT-Win64-v0.1-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
-| `CorridorKey-BMT-Win64-v0.1.msi` | MSI for managed deployment (same uninstall entry) |
-| `CorridorKey-BMT-macOS-Silicon-v0.1.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
-| `CorridorKey-BMT-macOS-Silicon-v0.1.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script. **Refuses to install on Intel Macs** |
+| `CorridorKey2.0-BMT-Win64-v0.2.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins` |
+| `CorridorKey2.0-BMT-Win64-v0.2-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
+| `CorridorKey2.0-BMT-Win64-v0.2.msi` | MSI for managed deployment (same uninstall entry) |
+| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
+| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script. **Refuses to install on Intel Macs** |
 
 > MSIX is deliberately not offered: MSIX packages install into a per-app
 > container that Resolve's OFX plugin scan does not read.

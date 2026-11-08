@@ -1,0 +1,35 @@
+Fonts bundled for the OFX preview overlay (DejaVuSans.ttf, DejaVuSans-Bold.ttf)
+are distributed under the Bitstream Vera license:
+
+---------------------------------------------------------------------------
+Bitstream Vera Fonts Copyright
+
+The fonts have a generous copyright, allowing derivative use and
+redistribution. The fonts may be used, freely and without payment, for both
+personal and commercial purposes, and may be embedded (such as in software,
+which is the case here) subject to the following conditions:
+
+1. The copyright notice below, and this license, are to be included in all
+   copies of the fonts and any derivatives.
+2. The font(s) may not be sold by themselves or as part of any product,
+   software or other work that has as its primary purpose the distribution
+   of fonts; they may, however, be included in software products (as is the
+   case here) where the fonts are used solely to display content, provided
+   the fonts are not the primary object of the sale.
+3. Derivative fonts may not use the "Vera" or "Bitstream" names; this
+   build uses the DejaVu derivative family under its own name.
+   (See https://dejavu-fonts.github.io/License.html.)
+
+Original copyright:
+
+Copyright (c) 2003-2024 DejaVu Types GmbH (DejaVu fonts are a derivative
+work of Bitstream Vera fonts):
+Copyright (c) 2003-2013 by Bitstream, Inc. All Rights Reserved. Bitstream
+Vera is a trademark of Bitstream, Inc.
+
+Permission is hereby granted, without written agreement and without license
+or royalty fees, to use, copy, modify, and distribute the fonts and their
+derivative fonts for any purpose, including the inclusion in software,
+subject to the following conditions, as published at
+https://dejavu-fonts.github.io/License.html.
+---------------------------------------------------------------------------

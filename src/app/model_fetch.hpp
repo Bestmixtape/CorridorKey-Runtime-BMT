@@ -88,6 +88,12 @@ struct ModelPackProgress {
     int percent = 0;
     std::string detail;     // error text while Failed
     std::string retry_url;  // manual retry URL while Failed
+    // BMT v0.2 first-run overlay: whole-pack byte accounting. bytes_total
+    // is the full size of the active track's pack (sum of table
+    // size_bytes); bytes_done accumulates across the multi-file resume
+    // sequence rather than tracking only the file in flight.
+    std::uint64_t bytes_done = 0;
+    std::uint64_t bytes_total = 0;
 };
 
 CORRIDORKEY_API ModelPackProgress model_pack_progress();

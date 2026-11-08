@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "app/host_plugin_runtime_client.hpp"
+#include "app/model_fetch.hpp"
 #include "common/accelerate_utils.hpp"
 #include "common/parallel_for.hpp"
 #include "common/srgb_lut.hpp"
@@ -20,6 +21,7 @@
 #include "ofx_model_selection.hpp"
 #include "ofx_screen_color.hpp"
 #include "ofx_shared.hpp"
+#include "ofx_status_overlay.hpp"
 #include "post_process/alpha_edge.hpp"
 #include "post_process/color_utils.hpp"
 #include "post_process/hue_rotate.hpp"
@@ -744,6 +746,42 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         set_runtime_error(data, "Invalid source bounds.", instance);
         return kOfxStatFailed;
     }
+
+    // ---- BMT v0.2 first-run model gate --------------------------------------
+    // When the selected Model Precision track's pack is not on disk yet the
+    // source is copied straight through and a status card (message + byte
+    // progress) is stamped into the output pixels: every OFX viewer displays
+    // the output surface, so no host overlay-interact support is required.
+    // The OFX controls stay greyed-out (want_panel_lock, applied on the host
+    // thread) until the pack is complete; a Failed fetch releases the grey-
+    // out so the host is never soft-locked, while the card keeps explaining.
+    if (!data->model_pack_ready.load(std::memory_order_relaxed) ||
+        std::chrono::steady_clock::now() >= data->model_pack_next_check) {
+        data->model_pack_next_check =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
+        int gate_precision = kDefaultBmtModelPrecision;
+        if (data->bmt_model_precision_param != nullptr) {
+            g_suites.parameter->paramGetValueAtTime(
+                data->bmt_model_precision_param, time, &gate_precision);
+        }
+        const app::ModelTrack gate_track = gate_precision == kBmtModelPrecisionFp16
+                                               ? app::ModelTrack::Fp16
+                                               : app::ModelTrack::Fp32;
+        data->model_pack_ready.store(
+            app::model_pack_present(data->models_root, gate_track));
+    }
+    if (!data->model_pack_ready.load(std::memory_order_relaxed)) {
+        bypass_with_source(source_data, output_data, width, height, source_row_bytes,
+                           output_row_bytes, source_depth);
+        const app::ModelPackProgress pack = app::model_pack_progress();
+        data->want_panel_lock.store(pack.phase != app::ModelPackPhase::Failed);
+        draw_model_pack_overlay(output_data, output_row_bytes, width, height,
+                                source_depth, pack, data->models_root,
+                                data->bundle_resources_fonts_dir);
+        return kOfxStatOK;
+    }
+    data->want_panel_lock.store(false);
+    // ------------------------------------------------------------------------
 
     int quality_mode = kQualityPreview;
     int quality_fallback_mode = kQualityFallbackAuto;

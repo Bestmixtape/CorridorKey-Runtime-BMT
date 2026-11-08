@@ -50,6 +50,13 @@ namespace corridorkey::ofx {
 
 void set_param_secret(OfxParamHandle param, bool secret);
 
+// BMT v0.2: host-thread only. Greys out every user-editable control while
+// the first-run model pack downloads. kOfxParamPropEnabled is advisory in
+// the OpenFX spec but Resolve honors it. bmt_model_precision is
+// deliberately left live: with a half-downloaded alternate-precision pack
+// the user must be able to switch tracks instead of being stuck.
+void set_panel_locked(InstanceData* data, bool locked);
+
 namespace {
 
 // ShellExecuteW returns an HINSTANCE convertible to intptr_t. Per
@@ -1000,6 +1007,10 @@ void update_runtime_panel_values(InstanceData* data) {
     } else {
         set_string_param_value(data->update_status_param, "");
     }
+    // BMT v0.2 first-run gate: apply the render thread's panel lock request
+    // here, on the host thread, together with the rest of the panel writes.
+    set_panel_locked(data, data->want_panel_lock.load(std::memory_order_relaxed));
+
     // BMT "Model Pack" row (bmt_about_group): first-run model pack download
     // progress. Reads the fetcher's atomic monitor, so calling it from the
     // deferred flush path (update_runtime_panel) is safe from the fetch
@@ -1516,6 +1527,16 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
     // process-global latch, no OFX suite calls off the host thread — the
     // progress is only read back by update_runtime_panel_values later.
     kickoff_model_pack_fetch(data->models_root);
+
+    // BMT v0.2: seed the first-run gate so a fresh install starts locked;
+    // render re-probes presence and clears model_pack_ready once the pack
+    // lands. bundle_resources_fonts_dir feeds the status card its fonts.
+    data->model_pack_ready.store(app::model_pack_present(data->models_root));
+    data->want_panel_lock.store(!data->model_pack_ready.load());
+    if (const auto module = plugin_module_path(); module.has_value()) {
+        data->bundle_resources_fonts_dir =
+            module->parent_path().parent_path() / "Resources" / "fonts";
+    }
     // Device detection and capability probes call into windows_rtx_probe /
     // mlx_probe / linux_cuda_probe, which transitively reference ONNX Runtime
     // symbols. Importing onnxruntime.dll into the .ofx address space conflicts
@@ -2137,6 +2158,43 @@ void set_param_enabled(OfxParamHandle param, bool enabled) {
     OfxPropertySetHandle props = nullptr;
     if (g_suites.parameter->paramGetPropertySet(param, &props) == kOfxStatOK) {
         g_suites.property->propSetInt(props, kOfxParamPropEnabled, 0, enabled ? 1 : 0);
+    }
+}
+
+void set_panel_locked(InstanceData* data, bool locked) {
+    if (data == nullptr || data->panel_locked.exchange(locked) == locked) {
+        return;
+    }
+    const OfxParamHandle gated_params[] = {
+        data->quality_mode_param,
+        data->quality_fallback_mode_param,
+        data->output_mode_param,
+        data->refinement_mode_param,
+        data->coarse_resolution_override_param,
+        data->input_color_space_param,
+        data->screen_color_param,
+        data->bmt_key_colour_mode_param,
+        data->bmt_key_colour_param,
+        data->bmt_export_matte_param,
+        data->temporal_smoothing_param,
+        data->despill_param,
+        data->spill_method_param,
+        data->despeckle_param,
+        data->despeckle_size_param,
+        data->alpha_black_point_param,
+        data->alpha_white_point_param,
+        data->alpha_erode_param,
+        data->alpha_softness_param,
+        data->alpha_gamma_param,
+        data->upscale_method_param,
+        data->enable_tiling_param,
+        data->tile_overlap_param,
+        data->source_passthrough_param,
+        data->edge_erode_param,
+        data->edge_blur_param,
+    };
+    for (OfxParamHandle param : gated_params) {
+        set_param_enabled(param, !locked);
     }
 }
 

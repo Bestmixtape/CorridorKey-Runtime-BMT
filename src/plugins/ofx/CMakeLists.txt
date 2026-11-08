@@ -21,6 +21,8 @@ if(WIN32)
         ofx_plugin_descriptors.hpp
         ofx_render.cpp
         ofx_image_utils.hpp
+        ofx_status_overlay.cpp
+        ofx_status_overlay.hpp
         ofx_logging.hpp
         ofx_shared.hpp
     )
@@ -39,6 +41,8 @@ else()
         ofx_plugin_descriptors.hpp
         ofx_render.cpp
         ofx_image_utils.hpp
+        ofx_status_overlay.cpp
+        ofx_status_overlay.hpp
         ofx_logging.hpp
         ofx_shared.hpp
     )
@@ -47,6 +51,7 @@ endif()
 target_include_directories(corridorkey_ofx PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${_corridorkey_ofx_sdk_root}/include
+    ${CMAKE_SOURCE_DIR}/third_party/stb
 )
 
 # The .ofx links exclusively against corridorkey_common (no ONNX Runtime).
@@ -230,6 +235,17 @@ if(WIN32)
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
         )
     endif()
+
+    # BMT v0.2: DejaVu TTFs for the first-run model-download status card
+    # (draw_model_pack_overlay via stb_truetype). Plain files; the Inno and
+    # WiX packagers walk the bundle recursively, so they ship automatically.
+    add_custom_command(TARGET corridorkey_ofx POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/fonts"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/third_party/fonts"
+            "${_ofx_bundle_dir}/Contents/Resources/fonts"
+        COMMENT "Staging status-card fonts into the OFX bundle..."
+    )
 elseif(APPLE)
     # BMT macOS (Apple Silicon) OFX bundle per the OpenFX portable bundle
     # spec: Contents/MacOS/ carries the .ofx module, the corridorkey CLI
@@ -259,6 +275,15 @@ elseif(APPLE)
     # name + Mach-O modules.
     configure_file("${_corridorkey_ofx_root}/macos/Info.plist.in"
         "${_ofx_bundle_dir}/Contents/Info.plist" @ONLY)
+
+    # BMT v0.2: status-card fonts (see the Win64 staging comment above).
+    add_custom_command(TARGET corridorkey_ofx POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/fonts"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/third_party/fonts"
+            "${_ofx_bundle_dir}/Contents/Resources/fonts"
+        COMMENT "Staging status-card fonts into the macOS OFX bundle..."
+    )
 
     add_custom_command(TARGET corridorkey_ofx POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_contents_dir}"

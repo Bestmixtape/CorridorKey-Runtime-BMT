@@ -45,6 +45,10 @@ struct DownloadContext {
     std::uint64_t completed_before = 0;
     int total_files = 0;
     std::string filename;
+    // BMT v0.2 first-run overlay: bytes of the other pack files already
+    // complete on disk when this file starts (multi-file resume state), so
+    // the progress callback can report whole-pack bytes, not just this file.
+    std::uint64_t pack_base_bytes = 0;
 };
 
 struct FetchMonitor {
@@ -124,6 +128,16 @@ bool download_one_file(const std::filesystem::path& dir, const ModelPackFile& fi
     DownloadContext context;
     context.resume_bytes = resume_bytes;
     context.filename = file.filename;
+    // BMT: seed the pack-level byte base (files other than this one that are
+    // already at their exact expected size on disk).
+    for (const auto& other : model_pack_files()) {
+        if (other.filename == file.filename) {
+            continue;
+        }
+        if (model_pack_file_present(dir, other)) {
+            context.pack_base_bytes += other.size_bytes;
+        }
+    }
 
     session.SetWriteCallback(cpr::WriteCallback{
         [](std::string_view data, intptr_t userdata) -> bool {
@@ -148,6 +162,12 @@ bool download_one_file(const std::filesystem::path& dir, const ModelPackFile& fi
             monitor_update([&](ModelPackProgress& progress) {
                 progress.current_file = ctx->filename;
                 progress.percent = percent > kPercentScale ? kPercentScale : percent;
+                // BMT v0.2: whole-pack bytes for the preview overlay bar.
+                std::uint64_t pack_done = ctx->pack_base_bytes + done;
+                if (progress.bytes_total > 0 && pack_done > progress.bytes_total) {
+                    pack_done = progress.bytes_total;
+                }
+                progress.bytes_done = pack_done;
             });
             return true;
         },
@@ -375,9 +395,11 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         return result;
     }
 
+    std::uint64_t present_bytes = 0;
     for (const auto& file : selected) {
         if (model_pack_file_present(dir, file)) {
             ++result.present_files;
+            present_bytes += file.size_bytes;
         }
     }
 
@@ -386,11 +408,14 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         return result;
     }
     if (only_file.empty() && model_pack_present(dir, active_track)) {
+        const std::uint64_t pack_bytes = expected_pack_bytes(active_track);
         monitor_update([&](ModelPackProgress& progress) {
             progress.phase = ModelPackPhase::Ready;
             progress.total_files = static_cast<int>(selected.size());
             progress.completed_files = progress.total_files;
             progress.percent = kPercentScale;
+            progress.bytes_total = pack_bytes;
+            progress.bytes_done = pack_bytes;
             progress.current_file.clear();
             progress.detail.clear();
             progress.retry_url.clear();
@@ -413,6 +438,9 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         progress.completed_files = result.present_files;
         progress.total_files = static_cast<int>(selected.size());
         progress.percent = 0;
+        // BMT v0.2: whole-pack sizing for the preview overlay progress bar.
+        progress.bytes_total = expected_pack_bytes(active_track);
+        progress.bytes_done = present_bytes;
         progress.detail.clear();
         progress.retry_url.clear();
     });
@@ -425,7 +453,13 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         std::string download_error;
         if (download_one_file(dir, file, url, download_error)) {
             ++result.downloaded_files;
-            monitor_update([](ModelPackProgress& progress) { ++progress.completed_files; });
+            monitor_update([&file](ModelPackProgress& progress) {
+                ++progress.completed_files;
+                progress.bytes_done += file.size_bytes;
+                if (progress.bytes_total > 0 && progress.bytes_done > progress.bytes_total) {
+                    progress.bytes_done = progress.bytes_total;
+                }
+            });
             continue;
         }
         ++result.failed_files;
@@ -483,6 +517,8 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
                 progress.completed_files = static_cast<int>(selected.size());
                 progress.total_files = progress.completed_files;
                 progress.percent = kPercentScale;
+                progress.bytes_total = expected_pack_bytes(active_track);
+                progress.bytes_done = progress.bytes_total;
                 progress.current_file.clear();
                 progress.detail.clear();
                 progress.retry_url.clear();

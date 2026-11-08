@@ -3,6 +3,7 @@
 #include <corridorkey/types.hpp>
 #include <corridorkey/version.hpp>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -241,6 +242,17 @@ struct InstanceData {
     // constructs to nullptr already.
     std::unique_ptr<app::HostPluginRuntimeClient> runtime_client;
     std::filesystem::path models_root = {};
+
+    // BMT v0.2 first-run model gate: while the active track's model pack is
+    // not on disk yet the render path copies the source through and stamps a
+    // download status card into the preview pixels. want_panel_lock is a
+    // render-thread request; update_runtime_panel_values applies it on the
+    // host thread. model_pack_ready is re-probed at most once a second.
+    std::atomic<bool> model_pack_ready{true};
+    std::atomic<bool> want_panel_lock{false};
+    std::atomic<bool> panel_locked{false};
+    std::chrono::steady_clock::time_point model_pack_next_check{};
+    std::filesystem::path bundle_resources_fonts_dir = {};
     std::filesystem::path model_path = {};
     std::filesystem::path runtime_server_path = {};
     DeviceInfo device = {};
