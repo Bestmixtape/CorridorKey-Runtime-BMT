@@ -117,14 +117,30 @@ jobs:
           "$RUNNER_TEMP/mlxenv/bin/pip" install --upgrade pip > /dev/null
           "$RUNNER_TEMP/mlxenv/bin/pip" install mlx
           echo "MLX cmake-dir: $("$RUNNER_TEMP/mlxenv/bin/python" -m mlx --cmake-dir)"
-          MLX_LIB="$("$RUNNER_TEMP/mlxenv/bin/python" -c "import mlx, os; print(os.path.join(os.path.dirname(mlx.__file__), 'lib', 'libmlx.dylib'))")"
+          SITE=$("$RUNNER_TEMP/mlxenv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          MLX_LIB="$SITE/mlx/lib/libmlx.dylib"
+          if [ ! -f "$MLX_LIB" ]; then
+            MLX_LIB=$(find "$SITE" -name 'libmlx.dylib' | head -1)
+          fi
           echo "MLX dylib: $MLX_LIB"
+          test -f "$MLX_LIB"
+          # mlx >=0.29 splits Metal kernels into a sibling metalfn dylib that
+          # libmlx loads at runtime; it must ride into the bundle too.
+          METALFN=$(dirname "$MLX_LIB")/libmlx.metalfn.dylib
+          if [ -f "$METALFN" ]; then
+            echo "MLX metalfn dylib: $METALFN"
+            install_name_tool -id "@rpath/libmlx.metalfn.dylib" "$METALFN" || true
+            codesign --force --sign - "$METALFN"
+          fi
           otool -D "$MLX_LIB"
           if [ "$(otool -D "$MLX_LIB" | sed -n 2p)" != "@rpath/libmlx.dylib" ]; then
             install_name_tool -id @rpath/libmlx.dylib "$MLX_LIB"
             codesign --force --sign - "$MLX_LIB"
             echo "normalized libmlx.dylib install_name to @rpath"
           fi
+          # Surface how libmlx locates the metalfn kernels (LC_LOAD_DYLIB vs
+          # dlopen) — decides whether staging metalfn next to it is enough.
+          otool -L "$MLX_LIB" | grep -i metalfn || echo "no metalfn load command (runtime dlopen)"
 
       - name: Configure
         run: |

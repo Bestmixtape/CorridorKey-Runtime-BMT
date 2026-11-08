@@ -287,6 +287,22 @@ elseif(APPLE)
                 COMMAND codesign --force --sign - "${_ofx_bundle_contents_dir}/libmlx.dylib"
                 COMMENT "Copying libmlx.dylib (MLX backend) into the macOS bundle..."
             )
+            # mlx >=0.29 splits the Metal kernel library out as a sibling
+            # libmlx.metalfn.dylib that libmlx resolves at runtime; stage it
+            # beside libmlx so the @loader_path chain finds it in the bundle.
+            get_filename_component(_corridorkey_mlx_dir "${_corridorkey_mlx_location}" DIRECTORY)
+            if(EXISTS "${_corridorkey_mlx_dir}/libmlx.metalfn.dylib")
+                add_custom_command(TARGET corridorkey_ofx POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_corridorkey_mlx_dir}/libmlx.metalfn.dylib"
+                        "${_ofx_bundle_contents_dir}/libmlx.metalfn.dylib"
+                    COMMAND install_name_tool -id "@rpath/libmlx.metalfn.dylib"
+                        "${_ofx_bundle_contents_dir}/libmlx.metalfn.dylib"
+                    COMMAND codesign --force --sign -
+                        "${_ofx_bundle_contents_dir}/libmlx.metalfn.dylib"
+                    COMMENT "Copying libmlx.metalfn.dylib (MLX Metal kernels) into the macOS bundle..."
+                )
+            endif()
         endif()
     endif()
 elseif(UNIX AND NOT APPLE)
