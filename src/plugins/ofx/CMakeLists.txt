@@ -286,12 +286,28 @@ elseif(APPLE)
     # harmless for binaries that never referenced ORT (the .ofx, per contract).
     # Always run the repair loop: covers both a stale LC_ID surviving
     # configure-time normalization AND any other path by which core/CLI end
-    # up with a versioned ORT load command. || true makes it a no-op when
-    # references are already clean or a binary never referenced ORT.
+    # up with a versioned ORT load command. install_name_tool failure is
+    # tolerated (no-op when references are already clean or the binary never
+    # referenced ORT). Kept as a generated script file: the inline one-liner
+    # broke ninja's lexer through CMake's Ninja escaping.
+    set(_ort_repair_script "${CMAKE_BINARY_DIR}/bmt_ort_repair.sh")
+    file(WRITE "${_ort_repair_script}"
+"#!/bin/sh
+DIR='${_ofx_bundle_contents_dir}'
+OLD='${ONNXRUNTIME_VERSIONED_ID}'
+NEW='@rpath/libonnxruntime.dylib'
+for f in libcorridorkey_core.dylib corridorkey; do
+    p=\"$DIR/$f\"
+    [ -f \"$p\" ] || continue
+    install_name_tool -change \"$OLD\" \"$NEW\" \"$p\" 2>/dev/null || true
+    codesign --force --sign - \"$p\"
+done
+exit 0
+")
     add_custom_command(TARGET corridorkey_ofx POST_BUILD
-            COMMAND /bin/sh -c "for f in libcorridorkey_core.dylib corridorkey; do p='${_ofx_bundle_contents_dir}'/$f; install_name_tool -change '${ONNXRUNTIME_VERSIONED_ID}' '@rpath/libonnxruntime.dylib' \"$p\" 2>/dev/null || true; codesign --force --sign - \"$p\"; done"
-            COMMENT "Repairing stale ORT load-name references in staged binaries..."
-        )
+        COMMAND /bin/sh "${_ort_repair_script}"
+        COMMENT "Repairing stale ORT load-name references in staged binaries..."
+    )
 
     # BMT: libmlx.dylib (Apple Silicon MLX inference backend) rides along
     # when the root CMakeLists resolved the MLX package (portable bottle or
