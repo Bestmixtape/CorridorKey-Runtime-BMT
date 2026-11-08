@@ -213,6 +213,12 @@ jobs:
         run: |
           set -euo pipefail
           B=build/macos/CorridorKey-BMT.ofx.bundle/Contents/MacOS
+          # mlx.metallib sits inside the flat-bundle dir the .ofx declares as its
+          # resource manifest, so codesign treats it as nested code — verify fails
+          # unless it carries its own (ad-hoc) signature. Sign it first.
+          for f in "$B"/*.metallib; do
+            codesign --force -s - "$f"
+          done
           for f in "$B"/*.dylib "$B"/corridorkey "$B"/CorridorKey-BMT.ofx; do
             codesign --force -s - "$f"
           done
