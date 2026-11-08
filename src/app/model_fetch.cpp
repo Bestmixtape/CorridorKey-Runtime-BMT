@@ -242,6 +242,22 @@ const std::vector<ModelPackFile>& model_pack_files() {
          14347062ULL, "shared"},
         {"mobilesam_prompt_decoder_fp16.onnx", "hint/mobilesam_prompt_decoder_fp16.onnx",
          8224865ULL, "shared"},
+        // BMT macOS: MLX weights + fixed-resolution callable bridges from the
+        // upstream mlx/ tree (HF api listing 2026-11). Track tag "mlx":
+        // fetched on Apple platforms only, outside the precision tracks
+        // (see model_pack_files_for_track).
+        {"corridorkey_mlx.safetensors", "mlx/corridorkey_mlx.safetensors",
+         398849072ULL, "mlx"},
+        {"corridorkey_mlx_bridge_512.mlxfn", "mlx/corridorkey_mlx_bridge_512.mlxfn",
+         288931878ULL, "mlx"},
+        {"corridorkey_mlx_bridge_768.mlxfn", "mlx/corridorkey_mlx_bridge_768.mlxfn",
+         298106918ULL, "mlx"},
+        {"corridorkey_mlx_bridge_1024.mlxfn", "mlx/corridorkey_mlx_bridge_1024.mlxfn",
+         310951974ULL, "mlx"},
+        {"corridorkey_mlx_bridge_1536.mlxfn", "mlx/corridorkey_mlx_bridge_1536.mlxfn",
+         347652134ULL, "mlx"},
+        {"corridorkey_mlx_bridge_2048.mlxfn", "mlx/corridorkey_mlx_bridge_2048.mlxfn",
+         399032358ULL, "mlx"},
     };
     return files;
 }
@@ -250,6 +266,22 @@ std::vector<ModelPackFile> model_pack_files_for_track(ModelTrack track) {
     const char* wanted = model_track_name(track);
     std::vector<ModelPackFile> selected;
     for (const auto& file : model_pack_files()) {
+#if defined(__APPLE__)
+        // BMT macOS: MLX safetensors + resolution bridges replace the ONNX
+        // main models and bypass the precision tracks (runtime_contracts
+        // registers corridorkey_mlx.safetensors + the per-resolution
+        // corridorkey_mlx_bridge_<res>.mlxfn set under CORRIDORKEY_WITH_MLX).
+        // Hint models stay ONNX fp16 — they run through ONNX Runtime's
+        // CoreML EP — and the fp16 corridorkey ONNX graphs are skipped so
+        // the first-run download is exactly the MLX set + hints.
+        if (std::string_view(file.track) == "mlx") {
+            selected.push_back(file);
+            continue;
+        }
+        if (std::string_view(file.filename).rfind("corridorkey_fp16_", 0) == 0) {
+            continue;
+        }
+#endif
         if (std::string_view(file.track) != "shared" && std::string_view(file.track) != wanted) {
             continue;
         }
@@ -307,12 +339,17 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
     // Full-pack runs follow the active precision track; --only runs fetch any
     // table entry regardless of track (installer smoke tests / manual pulls).
     const ModelTrack active_track = track.value_or(resolve_model_track());
+    // BMT: full-pack selection must go through model_pack_files_for_track —
+    // it carries the platform rules (no .ts off Windows, MLX set on Apple),
+    // which this loop used to duplicate without them.
     std::vector<ModelPackFile> selected;
-    for (const auto& file : model_pack_files()) {
-        const bool track_match = std::string_view(file.track) == "shared" ||
-                                 std::string_view(file.track) == model_track_name(active_track);
-        if (only_file.empty() ? track_match : only_file == file.filename) {
-            selected.push_back(file);
+    if (only_file.empty()) {
+        selected = model_pack_files_for_track(active_track);
+    } else {
+        for (const auto& file : model_pack_files()) {
+            if (only_file == file.filename) {
+                selected.push_back(file);
+            }
         }
     }
     if (selected.empty()) {

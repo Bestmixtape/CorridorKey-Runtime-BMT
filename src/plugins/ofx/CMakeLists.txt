@@ -267,6 +267,28 @@ elseif(APPLE)
             COMMENT "Copying libcorridorkey_core dylib into the macOS bundle..."
         )
     endif()
+
+    # BMT: libmlx.dylib (Apple Silicon MLX inference backend) rides along
+    # when the root CMakeLists resolved the MLX package (portable bottle or
+    # `python -m mlx --cmake-dir`). corridorkey_core links it PRIVATE, so the
+    # loader finds @rpath/libmlx.dylib via the @loader_path rpath chain of
+    # the loading .ofx/CLI — same contract as libonnxruntime above.
+    if(TARGET mlx)
+        get_target_property(_corridorkey_mlx_location mlx IMPORTED_LOCATION_RELEASE)
+        if(NOT _corridorkey_mlx_location)
+            get_target_property(_corridorkey_mlx_location mlx IMPORTED_LOCATION)
+        endif()
+        if(_corridorkey_mlx_location AND EXISTS "${_corridorkey_mlx_location}")
+            add_custom_command(TARGET corridorkey_ofx POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_corridorkey_mlx_location}" "${_ofx_bundle_contents_dir}/libmlx.dylib"
+                COMMAND install_name_tool -id "@rpath/libmlx.dylib"
+                    "${_ofx_bundle_contents_dir}/libmlx.dylib"
+                COMMAND codesign --force --sign - "${_ofx_bundle_contents_dir}/libmlx.dylib"
+                COMMENT "Copying libmlx.dylib (MLX backend) into the macOS bundle..."
+            )
+        endif()
+    endif()
 elseif(UNIX AND NOT APPLE)
     # Linux OFX bundle layout per the OpenFX portable bundle spec. Resolve's
     # plugin loader follows the same Contents/<arch>/ convention the macOS

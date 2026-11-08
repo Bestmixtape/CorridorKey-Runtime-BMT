@@ -55,8 +55,11 @@ namespace {
 // ShellExecuteW returns an HINSTANCE convertible to intptr_t. Per
 // Microsoft's documentation, a return value greater than 32 indicates
 // success; smaller values are SE_ERR_* error codes. The threshold is a
-// platform constant, not a tunable.
+// platform constant, not a tunable. BMT: guarded — Apple opens URLs via
+// posix_spawn("/usr/bin/open"), so clang flags the constant as unused.
+#if defined(_WIN32)
 constexpr std::intptr_t kShellExecuteSuccessThreshold = 32;
+#endif
 
 // Status-line truncation budgets for the runtime panel. Values picked to
 // keep the OFX status string readable in DaVinci Resolve's narrow inspector

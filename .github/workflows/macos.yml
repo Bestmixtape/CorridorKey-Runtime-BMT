@@ -110,6 +110,22 @@ jobs:
           fi
           echo "vcpkg root: $VCPKG_RESOLVED"
 
+      - name: Install MLX (Apple Silicon inference backend)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/mlxenv"
+          "$RUNNER_TEMP/mlxenv/bin/pip" install --upgrade pip > /dev/null
+          "$RUNNER_TEMP/mlxenv/bin/pip" install mlx
+          echo "MLX cmake-dir: $("$RUNNER_TEMP/mlxenv/bin/python" -m mlx --cmake-dir)"
+          MLX_LIB="$("$RUNNER_TEMP/mlxenv/bin/python" -c "import mlx, os; print(os.path.join(os.path.dirname(mlx.__file__), 'lib', 'libmlx.dylib'))")"
+          echo "MLX dylib: $MLX_LIB"
+          otool -D "$MLX_LIB"
+          if [ "$(otool -D "$MLX_LIB" | sed -n 2p)" != "@rpath/libmlx.dylib" ]; then
+            install_name_tool -id @rpath/libmlx.dylib "$MLX_LIB"
+            codesign --force --sign - "$MLX_LIB"
+            echo "normalized libmlx.dylib install_name to @rpath"
+          fi
+
       - name: Configure
         run: |
           cmake -B build/macos -G Ninja \
@@ -117,6 +133,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_RESOLVED/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=arm64-osx \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCORRIDORKEY_ENABLE_MLX=ON \
+            -DCORRIDORKEY_MLX_PYTHON="$RUNNER_TEMP/mlxenv/bin/python" \
             -DCORRIDORKEY_BUNDLE_MODELS=OFF
 
       - name: Build corridorkey_ofx
@@ -130,10 +148,16 @@ jobs:
           test -f "$B/Contents/MacOS/CorridorKey-BMT.ofx"
           test -f "$B/Contents/MacOS/corridorkey"
           test -f "$B/Contents/MacOS/libonnxruntime.${ONNXRUNTIME_MACOS_VERSION}.dylib"
+          # MLX backend must be compiled in and staged (root CMakeLists
+          # resolves the MLX package from the venv created in Install MLX).
+          test -f "$B/Contents/MacOS/libmlx.dylib"
+          otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib" | grep -q libmlx
+          otool -L "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -q libcorridorkey_core
           # Same import contract as the Windows dumpbin rule: the .ofx must
-          # not link ONNX Runtime; inference goes through the CLI server.
-          if otool -L "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -q onnxruntime; then
-            echo 'CONTRACT VIOLATION: .ofx imports onnxruntime'; exit 1
+          # not link ONNX Runtime or MLX directly; inference goes through the
+          # core dylib + CLI server.
+          if otool -L "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -qE 'onnxruntime|libmlx'; then
+            echo 'CONTRACT VIOLATION: .ofx imports onnxruntime or libmlx directly'; exit 1
           fi
           otool -l "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -q '@loader_path'
           plutil -lint "$B/Contents/Info.plist"
@@ -147,12 +171,13 @@ jobs:
           done
           codesign --verify --verbose=2 "$B/CorridorKey-BMT.ofx"
 
-      - name: Smoke test (CoreML inference via bundle CLI)
+      - name: Smoke test (Metal MLX inference via bundle CLI)
         run: |
           set -uo pipefail
           B="$PWD/build/macos/CorridorKey-BMT.ofx.bundle/Contents/MacOS"
           "$B/corridorkey" doctor --json | tee doctor.json
           grep -qi coreml doctor.json
+          grep -qi mlx doctor.json
           "$B/corridorkey" fetch-models
           "$B/corridorkey" matte-test --output /tmp/corridorkey-matte.png
           python3 - <<'PY'
