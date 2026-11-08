@@ -222,7 +222,15 @@ jobs:
           for f in "$B"/*.dylib "$B"/corridorkey "$B"/CorridorKey-BMT.ofx; do
             codesign --force -s - "$f"
           done
-          codesign --verify --verbose=2 "$B"
+          codesign --verify --verbose=2 "$B/CorridorKey-BMT.ofx"
+          codesign --verify --verbose=2 "$B"/corridorkey
+          # Do NOT verify "$B" itself: a bare Contents/MacOS dir with signed
+          # nested code is 'bundle format unrecognized' to codesign. Verifying
+          # the .ofx covers its flat-bundle resource manifest (incl. the
+          # metallib); dylibs/metallib carry standalone seals, checked next.
+          for f in "$B"/*.dylib "$B"/*.metallib; do
+            codesign --verify --verbose=2 "$f"
+          done
 
       - name: Smoke test (Metal MLX inference via bundle CLI)
         run: |
