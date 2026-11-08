@@ -43,7 +43,16 @@ if(APPLE)
     set_target_properties(corridorkey_core PROPERTIES
         C_VISIBILITY_PRESET default
         CXX_VISIBILITY_PRESET default
-        VISIBILITY_INLINES_HIDDEN OFF)
+        VISIBILITY_INLINES_HIDDEN OFF
+        # Staged bundle copies must resolve deps inside the bundle only:
+        # without BUILD_WITH_INSTALL_RPATH the build-tree LC_RPATH entries
+        # (venv MLX dir, vendor ORT dir) ride into the shipped dylib, so CI
+        # smoke passes by loading libs out of the runner while end-user
+        # machines would break. @loader_path matches the bundle layout
+        # (core, libmlx, mlx.metallib, libonnxruntime all in Contents/MacOS).
+        MACOSX_RPATH ON
+        INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
 # Private includes for internal implementation headers

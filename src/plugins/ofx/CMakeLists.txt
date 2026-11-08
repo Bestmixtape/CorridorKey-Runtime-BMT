@@ -56,6 +56,15 @@ target_include_directories(corridorkey_ofx PRIVATE
 # in Foundry Nuke. Validate via `dumpbin -imports CorridorKey.ofx` after
 # every link: onnxruntime.dll must not appear in the dependents list.
 target_link_libraries(corridorkey_ofx PRIVATE corridorkey_common)
+if(APPLE)
+    # corridorkey_common's alpha_edge.cpp / color_utils.cpp objects emit
+    # vDSP_vclip / vDSP_vmul references (src/common/accelerate_utils.hpp,
+    # #ifdef __APPLE__). Only corridorkey_core names '-framework Accelerate'
+    # and the .ofx links just the static common lib, so the framework must
+    # be on the plugin's own link line. System framework: does not violate
+    # the no-ORT/no-MLX import contract checked by the CI verify step.
+    target_link_libraries(corridorkey_ofx PRIVATE "-framework Accelerate")
+endif()
 corridorkey_apply_windows_common_compile_defs(corridorkey_ofx)
 
 if(MSVC)
@@ -287,20 +296,33 @@ elseif(APPLE)
                 COMMAND codesign --force --sign - "${_ofx_bundle_contents_dir}/libmlx.dylib"
                 COMMENT "Copying libmlx.dylib (MLX backend) into the macOS bundle..."
             )
-            # mlx >=0.29 splits the Metal kernel library out as a sibling
-            # libmlx.metalfn.dylib that libmlx resolves at runtime; stage it
-            # beside libmlx so the @loader_path chain finds it in the bundle.
+            # mlx 0.32 has no metalfn dylib: Metal kernels ship as
+            # mlx.metallib, which libmlx resolves via dladdr at its own
+            # image directory (backend/common/utils.cpp current_binary_dir
+            # -> device.cpp load_colocated_library). It must sit beside
+            # libmlx.dylib in the bundle; a missing metallib does NOT fail
+            # dyld — it throws at the first GPU op, so only a real
+            # inference smoke catches it. libjaccl.dylib is a hard dep only
+            # in the macosx_26 wheel build; stage it when present.
             get_filename_component(_corridorkey_mlx_dir "${_corridorkey_mlx_location}" DIRECTORY)
-            if(EXISTS "${_corridorkey_mlx_dir}/libmlx.metalfn.dylib")
+            if(EXISTS "${_corridorkey_mlx_dir}/mlx.metallib")
                 add_custom_command(TARGET corridorkey_ofx POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${_corridorkey_mlx_dir}/libmlx.metalfn.dylib"
-                        "${_ofx_bundle_contents_dir}/libmlx.metalfn.dylib"
-                    COMMAND install_name_tool -id "@rpath/libmlx.metalfn.dylib"
-                        "${_ofx_bundle_contents_dir}/libmlx.metalfn.dylib"
+                        "${_corridorkey_mlx_dir}/mlx.metallib"
+                        "${_ofx_bundle_contents_dir}/mlx.metallib"
+                    COMMENT "Copying mlx.metallib (MLX Metal kernels) into the macOS bundle..."
+                )
+            endif()
+            if(EXISTS "${_corridorkey_mlx_dir}/libjaccl.dylib")
+                add_custom_command(TARGET corridorkey_ofx POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_corridorkey_mlx_dir}/libjaccl.dylib"
+                        "${_ofx_bundle_contents_dir}/libjaccl.dylib"
+                    COMMAND install_name_tool -id "@rpath/libjaccl.dylib"
+                        "${_ofx_bundle_contents_dir}/libjaccl.dylib"
                     COMMAND codesign --force --sign -
-                        "${_ofx_bundle_contents_dir}/libmlx.metalfn.dylib"
-                    COMMENT "Copying libmlx.metalfn.dylib (MLX Metal kernels) into the macOS bundle..."
+                        "${_ofx_bundle_contents_dir}/libjaccl.dylib"
+                    COMMENT "Copying libjaccl.dylib into the macOS bundle..."
                 )
             endif()
         endif()

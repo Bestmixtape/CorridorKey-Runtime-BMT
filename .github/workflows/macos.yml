@@ -124,23 +124,23 @@ jobs:
           fi
           echo "MLX dylib: $MLX_LIB"
           test -f "$MLX_LIB"
-          # mlx >=0.29 splits Metal kernels into a sibling metalfn dylib that
-          # libmlx loads at runtime; it must ride into the bundle too.
-          METALFN=$(dirname "$MLX_LIB")/libmlx.metalfn.dylib
-          if [ -f "$METALFN" ]; then
-            echo "MLX metalfn dylib: $METALFN"
-            install_name_tool -id "@rpath/libmlx.metalfn.dylib" "$METALFN" || true
-            codesign --force --sign - "$METALFN"
-          fi
+          # Pin the mlx-metal backend to the macOS-14 build. The macos-15
+          # runner would otherwise pick the macosx_15_0 wheel whose LC_BUILD
+          # minos refuses to load on macOS 14; our deployment floor is 14.
+          METAL_VER=$("$RUNNER_TEMP/mlxenv/bin/python" -c "import importlib.metadata as m; print(m.version('mlx-metal'))")
+          METAL_URL=$(curl -s "https://pypi.org/pypi/mlx-metal/$METAL_VER/json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next(u['url'] for u in d['urls'] if 'macosx_14_0_arm64' in u['filename']))")
+          "$RUNNER_TEMP/mlxenv/bin/pip" install --force-reinstall --no-deps "$METAL_URL" > /dev/null
+          MLX_LIB=$(find "$("$RUNNER_TEMP/mlxenv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")" -name 'libmlx.dylib' | head -1)
+          # Kernels are mlx.metallib colocated with libmlx (dladdr lookup);
+          # CMake stages it into the bundle beside libmlx.dylib.
+          METLLIB=$(dirname "$MLX_LIB")/mlx.metallib
+          test -f "$METLLIB" && echo "MLX metallib: $(du -h "$METLLIB" | cut -f1)"
           otool -D "$MLX_LIB"
           if [ "$(otool -D "$MLX_LIB" | sed -n 2p)" != "@rpath/libmlx.dylib" ]; then
             install_name_tool -id @rpath/libmlx.dylib "$MLX_LIB"
             codesign --force --sign - "$MLX_LIB"
             echo "normalized libmlx.dylib install_name to @rpath"
           fi
-          # Surface how libmlx locates the metalfn kernels (LC_LOAD_DYLIB vs
-          # dlopen) — decides whether staging metalfn next to it is enough.
-          otool -L "$MLX_LIB" | grep -i metalfn || echo "no metalfn load command (runtime dlopen)"
 
       - name: Configure
         run: |
@@ -167,8 +167,26 @@ jobs:
           # MLX backend must be compiled in and staged (root CMakeLists
           # resolves the MLX package from the venv created in Install MLX).
           test -f "$B/Contents/MacOS/libmlx.dylib"
+          # Metal kernels archive must ride beside libmlx in the bundle —
+          # libmlx resolves it via dladdr at its own dir; missing metallib
+          # only throws at first GPU op, so verify the file, not dyld.
+          test -f "$B/Contents/MacOS/mlx.metallib"
           otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib" | grep -q libmlx
-          otool -L "$B/Contents/MacOS/CorridorKey-BMT.ofx" | grep -q libcorridorkey_core
+          # The .ofx links only the static corridorkey_common (same ORT-free
+          # import contract as Windows); the core dylib is loaded by the
+          # bundle CLI, which doubles as the runtime server — prove the
+          # dylib graph via the CLI, not the .ofx.
+          otool -L "$B/Contents/MacOS/corridorkey" | grep -q libcorridorkey_core
+          # Staged binaries must not carry build-tree rpaths (venv MLX dir,
+          # runner workdir) — those pass on CI but do not exist on user
+          # machines. BUILD_WITH_INSTALL_RPATH pins them to @loader_path.
+          for db in libcorridorkey_core.dylib corridorkey CorridorKey-BMT.ofx; do
+            if otool -l "$B/Contents/MacOS/$db" | grep -qE '_temp/mlxenv|/Users/runner/work'; then
+              echo "LEAKED_BUILD_RPATH in $db"
+              otool -l "$B/Contents/MacOS/$db" | grep -A2 LC_RPATH
+              exit 1
+            fi
+          done
           # Same import contract as the Windows dumpbin rule: the .ofx must
           # not link ONNX Runtime or MLX directly; inference goes through the
           # core dylib + CLI server.
@@ -185,7 +203,7 @@ jobs:
           for f in "$B"/*.dylib "$B"/corridorkey "$B"/CorridorKey-BMT.ofx; do
             codesign --force -s - "$f"
           done
-          codesign --verify --verbose=2 "$B/CorridorKey-BMT.ofx"
+          codesign --verify --verbose=2 "$B"
 
       - name: Smoke test (Metal MLX inference via bundle CLI)
         run: |
