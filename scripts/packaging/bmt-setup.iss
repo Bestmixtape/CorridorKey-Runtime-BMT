@@ -12,7 +12,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher=Bestmixtape
-AppPublisherURL=https://github.com/Bestmixtape/CorridorKey-2.0-OFX-BMT
+AppPublisherURL=https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT
 DefaultDirName={commonpf}\Common Files\OFX\Plugins
 DefaultGroupName=CorridorKey BMT
 DisableProgramGroupPage=yes
@@ -42,7 +42,7 @@ Source: "..\..\README.md"; DestDir: "{app}\{#MyBundleName}"; DestName: "README-B
 Name: "{app}"
 
 [Run]
-Filename: "https://github.com/Bestmixtape/CorridorKey-2.0-OFX-BMT"; Description: "Open the CorridorKey BMT page (models download on first use)"; Flags: shellexec postinstall skipifsilent nowait
+Filename: "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT"; Description: "Open the CorridorKey BMT page (models download on first use)"; Flags: shellexec postinstall skipifsilent nowait
 
 [Code]
 // On uninstall, offer to delete the model pack + caches (~1.2 GB) too.

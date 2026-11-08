@@ -80,7 +80,7 @@ constexpr const char* kRepoHelpBaseUrl =
 // the update check polls (matches VersionCheckOptions::repository). kRepoHelpBaseUrl
 // stays on the upstream runtime repo because the help/ guides live there.
 constexpr const char* kReleasesIndexUrl =
-    "https://github.com/Bestmixtape/CorridorKey-2.0-OFX-BMT/releases/latest";
+    "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT/releases/latest";
 
 std::string help_doc_url(const char* filename) {
     return std::string(kRepoHelpBaseUrl) + filename;

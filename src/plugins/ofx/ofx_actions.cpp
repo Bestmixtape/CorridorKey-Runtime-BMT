@@ -854,7 +854,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // the bottom of the host panel). Static credit lines + a Check for Update
     // button that reuses the standard update-check pipeline: on notification
     // (ofx_instance.cpp) it forces kickoff_global_update_check(true) against
-    // the Bestmixtape/CorridorKey-2.0-OFX-BMT releases, and the normal
+    // the Bestmixtape/CorridorKey2.0-OFX-BMT releases, and the normal
     // kParamUpdateStatus / kParamOpenUpdatePage banner in runtime_group
     // surfaces the result. ---
     define_group_param(param_set, kParamBmtAboutGroup, "BMT Build — About", false);
@@ -865,7 +865,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_info_param(
         param_set, kParamBmtCommunityLine, "Community",
         "bestmixtape community build — updates & source: "
-        "https://github.com/Bestmixtape/CorridorKey-2.0-OFX-BMT",
+        "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT",
         "Open the community package page on GitHub for downloads and source.",
         kParamBmtAboutGroup);
     define_info_param(
