@@ -56,6 +56,7 @@ jobs:
           key: ${{ runner.os }}-vcpkg-x64-windows-v1-${{ hashFiles('vcpkg.json', 'external/ports/**') }}
 
       - name: Stage curated Windows vendor pack (ORT TensorRT-RTX + TensorRT-RTX SDK)
+        shell: bash
         run: |
           set -euo pipefail
           curl -fsSL -o vendor-pack.zip \
@@ -70,6 +71,7 @@ jobs:
           du -sh vendor/onnxruntime-windows-rtx vendor/TensorRT-RTX-1.2.0.54
 
       - name: Bootstrap vcpkg (no longer preinstalled on runner images)
+        shell: bash
         run: |
           if [ -n "${VCPKG_INSTALLATION_ROOT:-}" ] && [ -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
             echo "VCPKG_RESOLVED=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
@@ -115,6 +117,7 @@ jobs:
           echo WINDOWS_BUNDLE_OK
 
       - name: Install packaging tools (Inno Setup + WiX v7)
+        shell: bash
         run: |
           set -euo pipefail
           choco install innosetup --no-progress -y > /dev/null
@@ -126,6 +129,7 @@ jobs:
           echo "ISCC_PATH=$ISCC" >> "$GITHUB_ENV"
 
       - name: Build dist trio (zip + Setup.exe + MSI)
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
