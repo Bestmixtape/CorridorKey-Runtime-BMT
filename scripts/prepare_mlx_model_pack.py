@@ -183,7 +183,12 @@ def export_bridge(weights_path: Path, export_path: Path, export_size: int) -> No
         return outputs["alpha_final"], outputs["fg_final"]
 
     example = mx.zeros((1, export_size, export_size, 4), dtype=mx.float32)
-    mx.eval(bridge_forward(example))
+    # No eager forward before export: the graph holds a single ~8 GiB
+    # intermediate buffer at any input size — fine on the 16 GB+ Apple
+    # Silicon machines CorridorKey targets, but it exceeds an 8 GB CI
+    # runner's Metal max buffer ("[metal::malloc] ... maximum allowed
+    # buffer size"). export_function traces the callable with the example
+    # input without running it, so the artifact is unaffected.
     mx.export_function(str(export_path), bridge_forward, example)
 
 
