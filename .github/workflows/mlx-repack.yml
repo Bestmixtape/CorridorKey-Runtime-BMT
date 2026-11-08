@@ -108,7 +108,7 @@ jobs:
           EOF
 
       - name: Upload regenerated bridges
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mlx-bridges-${{ inputs.mlx_version }}
           path: dist-mlx-repack/*_bridge_*.mlxfn
