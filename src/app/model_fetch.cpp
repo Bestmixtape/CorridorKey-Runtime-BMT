@@ -310,7 +310,22 @@ std::string model_pack_base_url() {
     return std::string("https://huggingface.co/") + kHfRepo + "/resolve/" + kHfRevision;
 }
 
+// BMT: the repacked MLX callable bridges (exported by CI with mlx==0.32.4,
+// see .github/workflows/mlx-repack.yml) are hosted as GitHub release assets
+// on this repo — the upstream HF mlx/ tree still carries 0.31-era exports,
+// which MLX 0.32.x refuses to import ("[import_function] Invalid string
+// size", ml-explore/mlx#4637). Only .mlxfn artifacts redirect; everything
+// else (weights, ONNX, hints) still downloads from HF.
 std::string model_pack_url(const ModelPackFile& file) {
+    const std::string_view remote = file.remote_path;
+    constexpr std::string_view suffix = ".mlxfn";
+    if (remote.size() >= suffix.size() && remote.compare(remote.size() - suffix.size(),
+                                                         suffix.size(), suffix) == 0) {
+        const auto slash = remote.find_last_of('/');
+        return std::string("https://github.com/Bestmixtape/CorridorKey-Runtime-BMT/"
+                           "releases/download/mlx-bridges-v1/") +
+               std::string(remote.substr(slash == std::string_view::npos ? 0 : slash + 1));
+    }
     return model_pack_base_url() + "/" + file.remote_path;
 }
 
