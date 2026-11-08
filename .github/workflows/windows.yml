@@ -162,8 +162,9 @@ jobs:
           # OutputDir override: CI keeps dist inside the workspace. Source:
           # paths stay relative to scripts/packaging and resolve identically
           # (same repo layout, same build\release dir name as local).
-          sed -E "s|OutputDir=.*|OutputDir=$(cygpath -w "$GITHUB_WORKSPACE/dist")|
-                   s|#define MyAppVersion   \"[^\"]*\"|#define MyAppVersion   \"${BMT_VERSION}.0\"|" \
+          sed -E "s|OutputDir=.*|OutputDir=$(cygpath -w \"$GITHUB_WORKSPACE/dist\")|
+                   s|#define MyAppVersion   \"[^\"]*\"|#define MyAppVersion   \"${BMT_VERSION}.0\"|
+                   s|OutputBaseFilename=.*|OutputBaseFilename=CorridorKey2.0-BMT-Win64-v${BMT_VERSION}-Setup|" \
             scripts/packaging/bmt-setup.iss > scripts/packaging/bmt-setup.ci.iss
           grep -n "MyAppVersion" scripts/packaging/bmt-setup.ci.iss | head -1
           grep -n "OutputDir=" scripts/packaging/bmt-setup.ci.iss
