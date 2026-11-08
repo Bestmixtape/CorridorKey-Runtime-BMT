@@ -322,7 +322,7 @@ std::string model_pack_url(const ModelPackFile& file) {
     if (remote.size() >= suffix.size() && remote.compare(remote.size() - suffix.size(),
                                                          suffix.size(), suffix) == 0) {
         const auto slash = remote.find_last_of('/');
-        return std::string("https://github.com/Bestmixtape/CorridorKey-Runtime-BMT/"
+        return std::string("https://github.com/Bestmixtape/CorridorKey-2.0-OFX-BMT/"
                            "releases/download/mlx-bridges-v1/") +
                std::string(remote.substr(slash == std::string_view::npos ? 0 : slash + 1));
     }
