@@ -128,8 +128,11 @@ jobs:
         run: |
           set -euo pipefail
           choco install innosetup --no-progress -y > /dev/null
-          dotnet tool install --global wix
-          "$HOME/.dotnet/tools/wix.exe" extension add -g WixToolset.UI.wixext
+          # Pin WiX to 5.x: WiX v7's dotnet install hard-fails on CI demanding
+          # OSMF EULA acceptance (error WIX7015). v5 .wxs/WixUI syntax is what
+          # gen_wxs.py targets; the extension must carry the same version.
+          dotnet tool install --global wix --version 5.0.2
+          "$HOME/.dotnet/tools/wix.exe" extension add -g WixToolset.UI.wixext/5.0.2
           ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
           test -f "$ISCC" && echo "ISCC: $ISCC"
           # ISCC is not on PATH under bash — expose the exact path for later steps.
