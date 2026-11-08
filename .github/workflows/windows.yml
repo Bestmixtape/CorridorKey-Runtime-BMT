@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BMT_VERSION: "0.1"
+  BMT_VERSION: "0.2"
   VENDOR_PACK_TAG: vendor-windows-rtx-v1
 
 jobs:
@@ -98,7 +98,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="%VCPKG_RESOLVED%/scripts/buildsystems/vcpkg.cmake" ^
             -DVCPKG_TARGET_TRIPLET=x64-windows ^
             -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON ^
-            -DCORRIDORKEY_DISPLAY_VERSION_LABEL=0.1.0 ^
+            -DCORRIDORKEY_DISPLAY_VERSION_LABEL=0.2.0 ^
             -DCORRIDORKEY_BUNDLE_MODELS=OFF
           if errorlevel 1 exit /b 1
           cmake --build build\release --target corridorkey_ofx
@@ -159,8 +159,10 @@ jobs:
           # OutputDir override: CI keeps dist inside the workspace. Source:
           # paths stay relative to scripts/packaging and resolve identically
           # (same repo layout, same build\release dir name as local).
-          sed -E "s|OutputDir=.*|OutputDir=$(cygpath -w "$GITHUB_WORKSPACE/dist")|" \
+          sed -E "s|OutputDir=.*|OutputDir=$(cygpath -w "$GITHUB_WORKSPACE/dist")|
+                   s|#define MyAppVersion   \"[^\"]*\"|#define MyAppVersion   \"${BMT_VERSION}.0\"|" \
             scripts/packaging/bmt-setup.iss > scripts/packaging/bmt-setup.ci.iss
+          grep -n "MyAppVersion" scripts/packaging/bmt-setup.ci.iss | head -1
           grep -n "OutputDir=" scripts/packaging/bmt-setup.ci.iss
           "$ISCC_PATH" /Qp scripts/packaging/bmt-setup.ci.iss
           ls -l dist

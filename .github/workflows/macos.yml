@@ -16,7 +16,7 @@ permissions:
 
 env:
   ONNXRUNTIME_MACOS_VERSION: "1.24.3"
-  BMT_VERSION: "0.1"
+  BMT_VERSION: "0.2"
 
 concurrency:
   group: macos-bmt-ci
@@ -156,7 +156,8 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCORRIDORKEY_ENABLE_MLX=ON \
             -DCORRIDORKEY_MLX_PYTHON="$RUNNER_TEMP/mlxenv/bin/python" \
-            -DCORRIDORKEY_BUNDLE_MODELS=OFF
+            -DCORRIDORKEY_BUNDLE_MODELS=OFF \
+            -DCORRIDORKEY_DISPLAY_VERSION_LABEL="${BMT_VERSION}.0"
 
       - name: Build corridorkey_ofx
         run: cmake --build build/macos --target corridorkey_ofx
