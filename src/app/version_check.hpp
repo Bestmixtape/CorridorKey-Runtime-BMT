@@ -42,10 +42,10 @@ struct UpdateInfo {
 struct VersionCheckOptions {
     std::string current_version;
     // BMT Build branding: the community package checks its own GitHub repo
-    // (Bestmixtape/CorridorKey-2.0-BMT-Build) for releases, not the upstream
+    // (Bestmixtape/CorridorKey-Runtime-BMT) for releases, not the upstream
     // runtime. GitHub repo slugs carry no spaces, so no URL encoding is
     // needed at composition time.
-    std::string repository = "Bestmixtape/CorridorKey-2.0-BMT-Build";
+    std::string repository = "Bestmixtape/CorridorKey-Runtime-BMT";
     bool include_prereleases = false;
     std::string platform_code;
     std::filesystem::path cache_path;
