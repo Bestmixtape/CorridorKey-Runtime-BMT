@@ -140,6 +140,27 @@ if(APPLE)
         list(GET ONNXRUNTIME_DYLIB_CANDIDATES 0 ONNXRUNTIME_DYLIB)
     endif()
 
+    # Mach-O fixup: the release tarball's unversioned libonnxruntime.dylib is
+    # a copy of the versioned file and carries the VERSIONED name as its
+    # LC_ID_DYLIB (@rpath/libonnxruntime.<v>.dylib). Linking it verbatim bakes
+    # a load command for a filename we never ship (bundle carries the
+    # unversioned copy) — historically masked on CI because the leaked
+    # build-tree rpath pointed back at the vendor dir. Normalize a build-tree
+    # copy (ad-hoc re-signed) so linked name == staged name, always.
+    set(_corridorkey_ort_normalized "${CMAKE_BINARY_DIR}/onnxruntime/libonnxruntime.dylib")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/onnxruntime"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ONNXRUNTIME_DYLIB}" "${_corridorkey_ort_normalized}"
+        COMMAND install_name_tool -id "@rpath/libonnxruntime.dylib" "${_corridorkey_ort_normalized}"
+        COMMAND codesign --force --sign - "${_corridorkey_ort_normalized}"
+        RESULT_VARIABLE _corridorkey_ort_norm_rc
+        ERROR_VARIABLE _corridorkey_ort_norm_err
+    )
+    if(NOT _corridorkey_ort_norm_rc EQUAL 0)
+        message(FATAL_ERROR "ORT install-name normalization failed: ${_corridorkey_ort_norm_err}")
+    endif()
+    set(ONNXRUNTIME_DYLIB "${_corridorkey_ort_normalized}")
+
     # Create the imported target manually since we are skipping find_package config
     add_library(onnxruntime::onnxruntime SHARED IMPORTED)
     set_target_properties(onnxruntime::onnxruntime PROPERTIES
