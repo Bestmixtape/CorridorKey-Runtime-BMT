@@ -148,6 +148,13 @@ if(APPLE)
     # build-tree rpath pointed back at the vendor dir. Normalize a build-tree
     # copy (ad-hoc re-signed) so linked name == staged name, always.
     set(_corridorkey_ort_normalized "${CMAKE_BINARY_DIR}/onnxruntime/libonnxruntime.dylib")
+    # Remember the versioned install-name the linker may bake if any input
+    # still carries it; the bundle staging below repairs such references.
+    execute_process(
+        COMMAND otool -D "${ONNXRUNTIME_DYLIB}"
+        OUTPUT_VARIABLE ONNXRUNTIME_VERSIONED_ID
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
     execute_process(
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/onnxruntime"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ONNXRUNTIME_DYLIB}" "${_corridorkey_ort_normalized}"
@@ -158,6 +165,21 @@ if(APPLE)
     )
     if(NOT _corridorkey_ort_norm_rc EQUAL 0)
         message(FATAL_ERROR "ORT install-name normalization failed: ${_corridorkey_ort_norm_err}")
+    endif()
+    # Self-verify: on at least one runner install_name_tool exited 0 while
+    # leaving LC_ID_DYLIB untouched, silently poisoning every link against
+    # the 'normalized' copy. Fail loudly instead of shipping core with a
+    # load command for a filename the bundle never carries.
+    execute_process(
+        COMMAND otool -D "${_corridorkey_ort_normalized}"
+        OUTPUT_VARIABLE _corridorkey_ort_norm_id
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    message(STATUS "Normalized ORT id now: ${_corridorkey_ort_norm_id}")
+    if(NOT _corridorkey_ort_norm_id MATCHES "@rpath/libonnxruntime\\.dylib$")
+        message(WARNING
+            "ORT id normalization did not stick (otool -D reports ${_corridorkey_ort_norm_id}); "
+            "bundle staging will rewrite stale references, but investigate the runner's install_name_tool.")
     endif()
     set(ONNXRUNTIME_DYLIB "${_corridorkey_ort_normalized}")
 

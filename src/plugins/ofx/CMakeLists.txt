@@ -277,6 +277,22 @@ elseif(APPLE)
         )
     endif()
 
+    # Belt for the observed runner quirk where the configure-time install_name_tool
+    # -id on the ORT build-tree copy exited 0 without rewriting LC_ID, leaving core
+    # (and possibly the CLI) with a load command for @rpath/libonnxruntime.<v>.dylib,
+    # which the bundle never carries. The root CMakeLists self-checks the id after
+    # normalization; when it reports stale, rewrite any stale references in the
+    # staged binaries to the shipped unversioned name and re-sign. || true keeps it
+    # harmless for binaries that never referenced ORT (the .ofx, per contract).
+    # Always run the repair loop: covers both a stale LC_ID surviving
+    # configure-time normalization AND any other path by which core/CLI end
+    # up with a versioned ORT load command. || true makes it a no-op when
+    # references are already clean or a binary never referenced ORT.
+    add_custom_command(TARGET corridorkey_ofx POST_BUILD
+            COMMAND /bin/sh -c "for f in libcorridorkey_core.dylib corridorkey; do p='${_ofx_bundle_contents_dir}'/$f; install_name_tool -change '${ONNXRUNTIME_VERSIONED_ID}' '@rpath/libonnxruntime.dylib' \"$p\" 2>/dev/null || true; codesign --force --sign - \"$p\"; done"
+            COMMENT "Repairing stale ORT load-name references in staged binaries..."
+        )
+
     # BMT: libmlx.dylib (Apple Silicon MLX inference backend) rides along
     # when the root CMakeLists resolved the MLX package (portable bottle or
     # `python -m mlx --cmake-dir`). corridorkey_core links it PRIVATE, so the
