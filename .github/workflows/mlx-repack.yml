@@ -1,0 +1,110 @@
+name: MLX model pack repack (macos-15)
+# One-shot regeneration of the mlx/ bridge artifacts (.mlxfn) with the exact
+# MLX version the macOS runtime links (see macos.yml pin). MLX export format
+# has no real versioning; bridges MUST be re-exported whenever the runtime
+# mlx version changes (ml-explore/mlx#4637). Weights safetensors is fetched
+# from the live HF pack so it stays byte-identical — only the 5 bridges are
+# regenerated and need re-upload + manifest byte re-pin.
+on:
+  workflow_dispatch:
+    inputs:
+      mlx_version:
+        description: "Exact mlx version (must equal runtime pin in macos.yml)"
+        required: true
+        default: "0.32.4"
+      bridge_resolutions:
+        description: "Comma-separated bridge resolutions"
+        required: true
+        default: "512,768,1024,1536,2048"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mlx-repack-ci
+  cancel-in-progress: false
+
+jobs:
+  repack:
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      HF_REPO: alexandrealvaro/CorridorKey
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch current weights safetensors from HF (stays byte-identical)
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/src_weights" "$GITHUB_WORKSPACE/dist-mlx-repack"
+          curl -fsSL --retry 3 "https://huggingface.co/${HF_REPO}/resolve/main/mlx/corridorkey_mlx.safetensors" \
+            -o "$RUNNER_TEMP/src_weights/corridorkey_mlx.safetensors"
+          ls -la "$RUNNER_TEMP/src_weights"
+
+      - name: venv with exact mlx (+ macOS-14 wheel variant like the runtime)
+        run: |
+          set -euxo pipefail
+          python3 -m venv "$RUNNER_TEMP/mlxenv"
+          "$RUNNER_TEMP/mlxenv/bin/pip" install --upgrade pip > /dev/null
+          "$RUNNER_TEMP/mlxenv/bin/pip" install "corridorkey-mlx @ git+https://github.com/nikopueringer/corridorkey-mlx.git"
+          "$RUNNER_TEMP/mlxenv/bin/pip" install "mlx==${{ inputs.mlx_version }}"
+          METAL_VER=$("$RUNNER_TEMP/mlxenv/bin/python" -c "import importlib.metadata as m; print(m.version('mlx-metal'))")
+          test "$METAL_VER" = "${{ inputs.mlx_version }}"
+          METAL_URL=$(curl -s "https://pypi.org/pypi/mlx-metal/$METAL_VER/json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next(u['url'] for u in d['urls'] if 'macosx_14_0_arm64' in u['filename']))")
+          "$RUNNER_TEMP/mlxenv/bin/pip" install --force-reinstall --no-deps "$METAL_URL" > /dev/null
+          "$RUNNER_TEMP/mlxenv/bin/pip" install huggingface_hub
+          "$RUNNER_TEMP/mlxenv/bin/python" - <<'EOF'
+          import mlx.core as mx, mlx
+          print("mlx version:", mlx.__version__ if hasattr(mlx, "__version__") else mx.__version__)
+          mx.eval(mx.ones((4, 4)))  # prove GPU op works on this runner
+          print("GPU eval OK")
+          EOF
+
+      - name: Re-export bridges locally (HF bridge source disabled via --hf-repo '')
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/mlxenv/bin/python" scripts/prepare_mlx_model_pack.py \
+            --weights-path "$RUNNER_TEMP/src_weights/corridorkey_mlx.safetensors" \
+            --output-dir "$GITHUB_WORKSPACE/dist-mlx-repack" \
+            --hf-repo "" \
+            --bridge-resolutions "${{ inputs.bridge_resolutions }}" \
+            --force
+
+      - name: Verify bridges parse (catch Invalid string size before humans do) + 512 forward
+        run: |
+          set -euxo pipefail
+          "$RUNNER_TEMP/mlxenv/bin/python" - <<'EOF'
+          import glob, json, mlx.core as mx
+          paths = sorted(glob.glob("dist-mlx-repack/*_bridge_*.mlxfn"))
+          assert paths, "no bridges produced"
+          for p in paths:
+              mx.import_function(p)
+              print("PARSE OK:", p)
+          p512 = next(p for p in paths if p.endswith("_512.mlxfn"))
+          fn = mx.import_function(p512)
+          outs = fn(mx.zeros((1, 512, 512, 4), dtype=mx.float32))
+          mx.eval(outs)
+          print("512 FORWARD OK:", [tuple(o.shape) for o in outs])
+          EOF
+
+      - name: Sizes JSON for manifest re-pin
+        run: |
+          set -euxo pipefail
+          python3 - <<'EOF'
+          import glob, json, os
+          rows = []
+          for p in sorted(glob.glob("dist-mlx-repack/*_bridge_*.mlxfn")):
+              rows.append({"file": os.path.basename(p), "bytes": os.path.getsize(p),
+                           "sha256": __import__("hashlib").sha256(open(p, "rb").read()).hexdigest()})
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
+              s.write("```json\n" + json.dumps(rows, indent=2) + "\n```\n")
+          print(json.dumps(rows, indent=2))
+          EOF
+
+      - name: Upload regenerated bridges
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlx-bridges-${{ inputs.mlx_version }}
+          path: dist-mlx-repack/*_bridge_*.mlxfn
+          if-no-files-found: error
+          retention-days: 14
