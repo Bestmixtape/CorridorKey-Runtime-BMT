@@ -115,7 +115,11 @@ jobs:
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/mlxenv"
           "$RUNNER_TEMP/mlxenv/bin/pip" install --upgrade pip > /dev/null
-          "$RUNNER_TEMP/mlxenv/bin/pip" install mlx
+          # Pin to 0.31.2: the HF mlx/ bridges were exported by the 0.31.x
+          # generation (repo last pushed 2026-05). MLX export format has no
+          # real versioning; reading a 0.31.x .mlxfn with 0.32.x throws
+          # "[import_function] Invalid string size" (see ml-explore/mlx#4637).
+          "$RUNNER_TEMP/mlxenv/bin/pip" install mlx==0.31.2
           echo "MLX cmake-dir: $("$RUNNER_TEMP/mlxenv/bin/python" -m mlx --cmake-dir)"
           SITE=$("$RUNNER_TEMP/mlxenv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
           MLX_LIB="$SITE/mlx/lib/libmlx.dylib"
