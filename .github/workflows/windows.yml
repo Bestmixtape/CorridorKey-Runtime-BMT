@@ -1,0 +1,172 @@
+name: Windows BMT OFX
+
+# Windows counterpart of macos.yml. Produces the same trio as the local
+# pipeline: Inno Setup exe, WiX MSI, raw bundle zip — all CorridorKey2.0-*.
+#
+# The heavy runtime trees (curated ONNX Runtime TensorRT-RTX build +
+# TensorRT-RTX SDK) are NOT rebuilt here: they were built once by
+# scripts/prepare_windows_rtx_release.ps1 and are pinned as release assets
+# (release tag: vendor-windows-rtx-v1). Rebuild + re-upload that pack only
+# when the inference runtime itself must change; every plugin commit just
+# consumes the pinned pack.
+#
+# GitHub Windows runners have NO NVIDIA GPU. CUDA discovery is disabled so
+# the compile matches the shipped local binaries (no pinned-host/NPP paths,
+# no npp*.dll dependency). Runtime smoke that needs a GPU (blue .ts path,
+# TensorRT-RTX EP) stays on user machines; CI verifies layout + import
+# contracts + packaging.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - macos-bmt
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/macos.yml'
+      - '.github/workflows/mlx-repack.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-bmt-ci
+  cancel-in-progress: true
+
+env:
+  BMT_VERSION: "0.1"
+  VENDOR_PACK_TAG: vendor-windows-rtx-v1
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;files,C:/vcpkg-bcache,readwrite'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vendor OpenFX SDK (not committed to this repo)
+        run: git clone --depth=1 https://github.com/AcademySoftwareFoundation/OpenFX vendor/openfx
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: C:/vcpkg-bcache
+          key: ${{ runner.os }}-vcpkg-x64-windows-v1-${{ hashFiles('vcpkg.json', 'external/ports/**') }}
+
+      - name: Stage curated Windows vendor pack (ORT TensorRT-RTX + TensorRT-RTX SDK)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o vendor-pack.zip \
+            "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT/releases/download/${VENDOR_PACK_TAG}/vendor-windows-rtx-v1.zip"
+          tar -xf vendor-pack.zip -C vendor/
+          rm vendor-pack.zip
+          # Fail fast with a clear line if the pack is malformed.
+          test -f vendor/onnxruntime-windows-rtx/include/onnxruntime/core/session/onnxruntime_cxx_api.h
+          test -f vendor/onnxruntime-windows-rtx/lib/onnxruntime.lib
+          test -f vendor/onnxruntime-windows-rtx/bin/onnxruntime.dll
+          test -f vendor/TensorRT-RTX-1.2.0.54/lib/tensorrt_rtx_1_2.lib
+          du -sh vendor/onnxruntime-windows-rtx vendor/TensorRT-RTX-1.2.0.54
+
+      - name: Bootstrap vcpkg (no longer preinstalled on runner images)
+        run: |
+          if [ -n "${VCPKG_INSTALLATION_ROOT:-}" ] && [ -f "$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" ]; then
+            echo "VCPKG_RESOLVED=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+          else
+            git clone --filter=blob:none --depth=1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+            "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
+            echo "VCPKG_RESOLVED=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          fi
+          echo "vcpkg root: $VCPKG_RESOLVED"
+
+      - name: Configure + build corridorkey_ofx (MSVC x64)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+          cmake -B build\release -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%VCPKG_RESOLVED%/scripts/buildsystems/vcpkg.cmake" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows ^
+            -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON ^
+            -DCORRIDORKEY_DISPLAY_VERSION_LABEL=0.1.0 ^
+            -DCORRIDORKEY_BUNDLE_MODELS=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build build\release --target corridorkey_ofx
+          if errorlevel 1 exit /b 1
+
+      - name: Verify bundle layout + import contracts
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" >nul
+          set B=build\release\CorridorKey-BMT.ofx.bundle\Contents\x86_64
+          dir /b %B%
+          for %%f in (CorridorKey-BMT.ofx corridorkey.exe) do if not exist "%B%\%%f" (echo MISSING %%f & exit /b 1)
+          # Same contract as the macos.yml rule: the .ofx must not link ONNX
+          # Runtime directly; inference runs through the core dll / CLI server.
+          dumpbin /dependents "%B%\CorridorKey-BMT.ofx" > ofx-deps.txt
+          type ofx-deps.txt
+          findstr /I "onnxruntime" ofx-deps.txt >nul && (echo CONTRACT VIOLATION: .ofx links onnxruntime & exit /b 1)
+          findstr /I "npp" ofx-deps.txt >nul && (echo CUDA LEAK: npp linked but never staged & exit /b 1)
+          dumpbin /dependents "%B%\corridorkey.exe" > cli-deps.txt
+          type cli-deps.txt
+          findstr /I "onnxruntime" cli-deps.txt >nul || (echo corridorkey.exe must link onnxruntime & exit /b 1)
+          for %%f in (onnxruntime.dll onnxruntime_providers_nv_tensorrt_rtx.dll onnxruntime_providers_shared.dll cudart64_12.dll tensorrt_rtx_1_2.dll tensorrt_onnxparser_rtx_1_2.dll) do if not exist "%B%\%%f" (echo STAGED DLL MISSING %%f & exit /b 1)
+          echo WINDOWS_BUNDLE_OK
+
+      - name: Install packaging tools (Inno Setup + WiX v7)
+        run: |
+          set -euo pipefail
+          choco install innosetup --no-progress -y > /dev/null
+          dotnet tool install --global wix
+          "$USERPROFILE/.dotnet/tools/wix.exe" extension add -g WixToolset.UI.wixext
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          test -f "$ISCC" && echo "ISCC: $ISCC"
+          # ISCC is not on PATH under bash — expose the exact path for later steps.
+          echo "ISCC_PATH=$ISCC" >> "$GITHUB_ENV"
+
+      - name: Build dist trio (zip + Setup.exe + MSI)
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          B="build/release/CorridorKey-BMT.ofx.bundle"
+          # True deflate ZIP (never tar-as-zip: Windows Explorer must open it).
+          python3 - <<'PY'
+          import os, zipfile
+          b = "build/release/CorridorKey-BMT.ofx.bundle"
+          out = os.path.join("dist", "CorridorKey2.0-BMT-Win64-v%s.zip" % os.environ["BMT_VERSION"])
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for dp, _, fns in os.walk(b):
+                  for f in fns:
+                      p = os.path.join(dp, f)
+                      z.write(p, os.path.relpath(p, "."))
+          with zipfile.ZipFile(out) as z:
+              assert z.testzip() is None
+          print("ZIP_OK", out)
+          PY
+          # OutputDir override: CI keeps dist inside the workspace. Source:
+          # paths stay relative to scripts/packaging and resolve identically
+          # (same repo layout, same build\release dir name as local).
+          sed -E "s|OutputDir=.*|OutputDir=$(cygpath -w "$GITHUB_WORKSPACE/dist")|" \
+            scripts/packaging/bmt-setup.iss > scripts/packaging/bmt-setup.ci.iss
+          grep -n "OutputDir=" scripts/packaging/bmt-setup.ci.iss
+          "$ISCC_PATH" /Qp scripts/packaging/bmt-setup.ci.iss
+          ls -l dist
+          python3 scripts/packaging/gen_wxs.py "$B" dist/bmt-package.wxs
+          "$USERPROFILE/.dotnet/tools/wix.exe" build dist/bmt-package.wxs -ext WixToolset.UI.wixext -o "dist/CorridorKey2.0-BMT-Win64-v${BMT_VERSION}.msi"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CorridorKey2.0-BMT-Win64-setup-exe
+          path: dist/CorridorKey2.0-BMT-Win64-v${{ env.BMT_VERSION }}-Setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CorridorKey2.0-BMT-Win64-msi
+          path: dist/CorridorKey2.0-BMT-Win64-v${{ env.BMT_VERSION }}.msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CorridorKey2.0-BMT-Win64-zip
+          path: dist/CorridorKey2.0-BMT-Win64-v${{ env.BMT_VERSION }}.zip
