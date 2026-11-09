@@ -30,7 +30,7 @@ corridorkey_stage_ort_runtime(test_regression)
 if(WIN32 AND TARGET corridorkey_ofx)
     add_dependencies(test_regression corridorkey_ofx)
     target_compile_definitions(test_regression PRIVATE
-        CORRIDORKEY_OFX_BUNDLE_WIN64_DIR="${CMAKE_BINARY_DIR}/CorridorKey.ofx.bundle/Contents/Win64"
+        CORRIDORKEY_OFX_BUNDLE_WIN64_DIR="${CMAKE_BINARY_DIR}/CorridorKey-BMT.ofx.bundle/Contents/Win64"
     )
 endif()
 

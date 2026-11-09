@@ -722,7 +722,9 @@ TEST_CASE("expected_quality_artifact_paths surfaces only blue under blue request
                                         1080, 10240, QualityFallbackMode::Auto, 0, false, "blue");
 
     REQUIRE_FALSE(expected.empty());
-    REQUIRE(expected.front().filename() == "corridorkey_dynamic_blue_fp16.ts");
+    // BMT default precision track is fp32 (blue FP16 NaNs at 1536+ rungs),
+    // so the default expectation surfaces the dedicated FP32 blue artifact.
+    REQUIRE(expected.front().filename() == "corridorkey_blue_torchtrt_fp32_1536.ts");
     REQUIRE(expected.size() == 1);
 }
 
@@ -735,14 +737,20 @@ TEST_CASE("artifact_path_for_backend resolves blue artifacts when screen_color='
         REQUIRE(path.filename().string() == "corridorkey_fp16_1024.onnx");
     }
 
-    SECTION("TensorRT + blue returns the dedicated blue filename") {
+    SECTION("TensorRT + blue returns the dedicated blue filename (default fp32 track)") {
         const auto path = artifact_path_for_backend(models_root, Backend::TensorRT, 1024, "blue");
+        REQUIRE(path.filename().string() == "corridorkey_blue_torchtrt_fp32_1536.ts");
+    }
+
+    SECTION("TensorRT + blue on the explicit fp16 track returns the dynamic blue filename") {
+        const auto path =
+            artifact_path_for_backend(models_root, Backend::TensorRT, 1024, "blue", "fp16");
         REQUIRE(path.filename().string() == "corridorkey_dynamic_blue_fp16.ts");
     }
 
-    SECTION("CUDA + blue returns the same dynamic blue filename") {
+    SECTION("CUDA + blue returns the same dedicated blue filename") {
         const auto path = artifact_path_for_backend(models_root, Backend::CUDA, 2048, "blue");
-        REQUIRE(path.filename().string() == "corridorkey_dynamic_blue_fp16.ts");
+        REQUIRE(path.filename().string() == "corridorkey_blue_torchtrt_fp32_1536.ts");
     }
 
     SECTION("MLX path is unaffected by screen_color") {

@@ -90,7 +90,9 @@ TEST_CASE("CLI exposes only public model-pack download choices", "[e2e][cli]") {
     REQUIRE(help.find("blue") == std::string::npos);
     REQUIRE(help.find("768") == std::string::npos);
     REQUIRE(help.find("int8") == std::string::npos);
-    REQUIRE(help.find("fp32") == std::string::npos);
+    // BMT build: fp32 is a first-class precision track (blue default track;
+    // torchtrt/fp32-blue pack), so it is legitimately documented in --help.
+    REQUIRE(help.find("fp32") != std::string::npos);
 
     int download_result = 0;
     const std::string download_output =

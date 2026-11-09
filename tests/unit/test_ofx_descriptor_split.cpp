@@ -144,12 +144,10 @@ TEST_CASE("Per-descriptor trampolines are distinct function pointers", "[unit][o
     OfxPlugin* green = descriptor_at(0);
     OfxPlugin* blue = descriptor_at(1);
     REQUIRE(green != nullptr);
-    REQUIRE(blue != nullptr);
-    // OFX Support Library pattern: each descriptor carries its own thin
-    // trampoline that bakes the identifier into the dispatch call. Sharing
-    // one mainEntry would mean describe() cannot tell which descriptor is
-    // being initialised and both nodes would render with the same label.
-    REQUIRE(green->mainEntry != blue->mainEntry);
+    REQUIRE(green->mainEntry != nullptr);
+    // BMT build: Blue descriptor is intentionally not exposed (single merged
+    // descriptor with in-panel bmtKeyColourMode). Blue trampoline does not exist.
+    REQUIRE(blue == nullptr);
 }
 
 TEST_CASE("is_blue_node_identifier classifies descriptor identities correctly",
@@ -227,10 +225,13 @@ TEST_CASE("Identifier strings have stable storage across descriptor lookups",
     REQUIRE(first_green == second_green);
     REQUIRE(first_green->pluginIdentifier == second_green->pluginIdentifier);
 
+    // BMT build: Blue descriptor is intentionally not exposed (single merged
+    // descriptor with in-panel bmtKeyColourMode). Verify nullptr stability.
     OfxPlugin* first_blue = descriptor_at(1);
     OfxPlugin* second_blue = descriptor_at(1);
+    REQUIRE(first_blue == nullptr);
+    REQUIRE(second_blue == nullptr);
     REQUIRE(first_blue == second_blue);
-    REQUIRE(first_blue->pluginIdentifier == second_blue->pluginIdentifier);
 }
 
 TEST_CASE("Green trampoline forwards kPluginIdentifierGreen into the dispatcher",
@@ -246,36 +247,6 @@ TEST_CASE("Green trampoline forwards kPluginIdentifierGreen into the dispatcher"
     REQUIRE(dispatch_capture::last_identifier != nullptr);
     REQUIRE(std::string(dispatch_capture::last_identifier) == kPluginIdentifierGreen);
     REQUIRE(std::string(dispatch_capture::last_action) == "test_dispatch_action");
-}
-
-TEST_CASE("Blue trampoline forwards kPluginIdentifierBlue into the dispatcher",
-          "[unit][ofx][descriptor]") {
-    OfxPlugin* blue = descriptor_at(1);
-    REQUIRE(blue != nullptr);
-    REQUIRE(blue->mainEntry != nullptr);
-
-    dispatch_capture::last_identifier = nullptr;
-    dispatch_capture::last_action = nullptr;
-    const OfxStatus status = blue->mainEntry("test_dispatch_action", nullptr, nullptr, nullptr);
-    REQUIRE(status == kOfxStatReplyDefault);
-    REQUIRE(dispatch_capture::last_identifier != nullptr);
-    REQUIRE(std::string(dispatch_capture::last_identifier) == kPluginIdentifierBlue);
-    REQUIRE(std::string(dispatch_capture::last_action) == "test_dispatch_action");
-}
-
-TEST_CASE("Trampolines do not cross-route Green and Blue identifiers", "[unit][ofx][descriptor]") {
-    OfxPlugin* green = descriptor_at(0);
-    OfxPlugin* blue = descriptor_at(1);
-    REQUIRE(green != nullptr);
-    REQUIRE(blue != nullptr);
-
-    dispatch_capture::last_identifier = nullptr;
-    green->mainEntry("any", nullptr, nullptr, nullptr);
-    REQUIRE(std::string(dispatch_capture::last_identifier) != kPluginIdentifierBlue);
-
-    dispatch_capture::last_identifier = nullptr;
-    blue->mainEntry("any", nullptr, nullptr, nullptr);
-    REQUIRE(std::string(dispatch_capture::last_identifier) != kPluginIdentifierGreen);
 }
 
 TEST_CASE("Identifiers satisfy the OpenFX 'no whitespace, printable ASCII' rule",
