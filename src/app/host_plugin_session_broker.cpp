@@ -358,7 +358,14 @@ Result<HostPluginRuntimeRenderFrameResponse> HostPluginSessionBroker::render_fra
     auto result = session->second.engine->process_frame_into(
         transport->rgb_view(), transport->hint_view(), output_views, request.params, on_stage);
     if (!result) {
-        m_sessions.erase(session);
+        // BMT v0.2.1: never destroy the session on a single-frame failure.
+        // One bad frame (e.g. all-NaN model output from the 2048px fp16 model
+        // on TensorRT-RTX) used to erase the session, forcing a full 35-78 s
+        // engine rebuild on the next frame; that repeated create/destroy churn
+        // tripped an onnxruntime.dll access violation and froze Resolve. The
+        // session stays alive (idle cleanup still reclaims it); the OFX side
+        // caches the failed selection and downshifts the quality ladder.
+        session->second.last_used_at = std::chrono::steady_clock::now();
         return Unexpected<Error>(result.error());
     }
 

@@ -482,6 +482,10 @@ InferenceResult resolve_inference_buffers(InstanceData* data, OfxImageEffectHand
                          data->requested_resolution, data->active_resolution,
                          data->runtime_client->backend_fallback(), result.error().message);
         log_message("render", std::string("Render processing failed: ") + result.error().message);
+        // BMT v0.2.1: numerical (NaN) model outputs get cached so the next
+        // frame downshifts the quality ladder instead of retrying the same
+        // broken rung; the broker now keeps the session alive across this.
+        note_numerical_render_failure(data, requested_device, result.error().message);
         set_runtime_error(data, result.error().message, instance);
         bypass_with_source(source_data, output_data, width, height, source_row_bytes,
                            output_row_bytes, source_depth);

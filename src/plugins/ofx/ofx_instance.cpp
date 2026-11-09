@@ -429,6 +429,34 @@ bool should_record_quality_backend_mismatch(Backend backend) {
     return use_quality_compile_failure_cache(backend);
 }
 
+// BMT v0.2.1: when a model executes but returns non-finite alpha (the all-NaN
+// 2048px fp16 output on TensorRT-RTX), remember that artifact/resolution rung
+// so the next frame's ensure_engine_for_quality filters it out and falls back
+// to the next working rung of the quality ladder. Without this the same
+// broken configuration was re-prepared every frame — the session-churn loop
+// behind the runtime-server ACCESS_VIOLATION crashes.
+void note_numerical_render_failure_impl(InstanceData* data, const DeviceInfo& requested_device,
+                                        std::string_view error_message) {
+    if (data == nullptr || error_message.find("non-finite") == std::string_view::npos) {
+        return;
+    }
+    const auto context = build_quality_compile_failure_cache_context(*data, requested_device);
+    if (!use_quality_compile_failure_cache(context.backend) ||
+        !quality_compile_failure_cache_matches(data->quality_compile_failure_cache, context)) {
+        return;
+    }
+    QualityArtifactSelection selection{};
+    selection.executable_model_path = data->model_path;
+    selection.requested_resolution = data->requested_resolution;
+    selection.effective_resolution = data->active_resolution;
+    record_quality_compile_failure(data->quality_compile_failure_cache, context, selection,
+                                   std::string(error_message));
+    log_message("render", "event=numerical_failure_cached artifact=" +
+                              data->model_path.filename().string() +
+                              " resolution=" + std::to_string(data->active_resolution) +
+                              " detail=quality_ladder_skips_this_rung");
+}
+
 std::string truncate_status_message(const std::string& message, std::size_t max_length) {
     if (message.size() <= max_length) {
         return message;
@@ -1211,6 +1239,11 @@ DeviceInfo requested_device_for_quality_selection(const DeviceInfo& requested_de
 
 }  // namespace
 
+void note_numerical_render_failure(InstanceData* data, const DeviceInfo& requested_device,
+                                   std::string_view error_message) {
+    note_numerical_render_failure_impl(data, requested_device, error_message);
+}
+
 bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
                                                     const DeviceInfo& requested_device) {
     return allow_unrestricted_quality_attempt_for_request_impl(data, quality_mode,
@@ -1882,6 +1915,15 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                std::string(quality_mode_label(requested_quality_mode)) + " using " +
                                selection.executable_model_path.filename().string() + ": " +
                                prepare_result.error().message;
+            // BMT v0.2.1: the Blue-screen model family is TorchTRT-only and
+            // TorchTRT is not compiled into the Windows build; turn the raw
+            // backend error into an actionable one-line hint.
+            if (prepare_result.error().message.find("TorchTRT backend not compiled") !=
+                std::string::npos) {
+                data->last_error +=
+                    " Blue-screen keys need the TorchTRT runtime, which this Windows build "
+                    "does not ship — please key green screens instead.";
+            }
             log_engine_event("ensure_engine_for_quality", "engine_create_error",
                              kQualitySwitchPhase, candidate_requested_device,
                              candidate_requested_device, selection.executable_model_path,

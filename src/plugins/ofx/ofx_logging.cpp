@@ -46,16 +46,13 @@ std::filesystem::path resolve_log_path() {
         return std::filesystem::path(*override_path);
     }
 
-#ifdef __APPLE__
-    if (auto home = common::environment_variable_copy("HOME"); home.has_value()) {
-        return std::filesystem::path(*home) / "Library" / "Logs" / "CorridorKey" / "ofx.log";
+    // BMT v0.2.1: use the single canonical BMT logs root so the plugin never
+    // spawns a second legacy "CorridorKey" user-data folder. default_logs_root()
+    // covers both platforms (~/Library/Logs/CorridorKey2.0-BMT,
+    // %LOCALAPPDATA%\CorridorKey2.0-BMT\Logs) plus temp fallback.
+    if (auto root = common::default_logs_root(); !root.empty()) {
+        return root / "ofx.log";
     }
-#elif defined(_WIN32)
-    if (auto local_app_data = common::environment_variable_copy("LOCALAPPDATA");
-        local_app_data.has_value()) {
-        return std::filesystem::path(*local_app_data) / "CorridorKey" / "Logs" / "ofx.log";
-    }
-#endif
 
     return std::filesystem::path("corridorkey_ofx.log");
 }

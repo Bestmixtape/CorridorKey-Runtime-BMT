@@ -2,6 +2,8 @@
 
 #include <cpr/cpr.h>
 
+#include "common/runtime_paths.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -413,19 +415,11 @@ std::string prerelease_platform_code(const std::string& prerelease) {
 
 std::filesystem::path default_cache_path() {
     constexpr const char* kFilename = "update_check.json";
-#ifdef _WIN32
-    if (auto base = windows_local_app_data(); base.has_value()) {
-        return *base / "corridorkey" / kFilename;
-    }
-    return std::filesystem::temp_directory_path() / "corridorkey" / kFilename;
-#elif defined(__APPLE__)
-    return resolve_home_dir() / "Library" / "Caches" / "corridorkey" / kFilename;
-#else
-    if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg != nullptr && *xdg != '\0') {
-        return std::filesystem::path(xdg) / "corridorkey" / kFilename;
-    }
-    return resolve_home_dir() / ".cache" / "corridorkey" / kFilename;
-#endif
+    // BMT v0.2.1: write into the single canonical BMT cache root
+    // (CorridorKey2.0-BMT/Cache). The old lowercase "corridorkey" directory
+    // collided with the legacy "CorridorKey" folder on case-insensitive
+    // Windows/macOS filesystems, spawning a second user-data folder.
+    return common::configured_cache_root() / kFilename;
 }
 
 std::optional<CachedCheck> read_cache(const std::filesystem::path& cache_file) {

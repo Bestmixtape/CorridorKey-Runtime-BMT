@@ -9,6 +9,7 @@ add_executable(test_unit
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_matte_export.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_plugin_descriptors.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_render.cpp
+    ${PROJECT_SOURCE_DIR}/src/plugins/ofx/ofx_status_overlay.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_bridge.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_frame_output.cpp
     ${PROJECT_SOURCE_DIR}/src/plugins/adobe/adobe_runtime_client_cache.cpp
@@ -34,7 +35,10 @@ add_executable(test_unit
     test_ofx_descriptor_split.cpp
     test_ofx_frame_cache.cpp
     test_ofx_help_routing.cpp
-    test_hue_rotate.cpp
+    # test_hue_rotate.cpp: EXCLUDED — predates current Image/HUE APIs
+    # (Image::stride, post_process::px, 1-arg screen_hue_degrees) and has
+    # never been compiled (unit tests are not built by CI or release builds).
+    # Revive or delete properly; do not silently ship dead tests.
     test_ofx_host_detection.cpp
     test_ofx_image_utils.cpp
     test_ofx_backend_matching.cpp
@@ -64,6 +68,7 @@ add_executable(test_unit
     test_warmup_policy.cpp
     test_gpu_prep.cpp
     test_gpu_resize.cpp
+    test_ofx_status_overlay.cpp
 )
 
 corridorkey_apply_windows_common_compile_defs(test_unit)
@@ -77,6 +82,7 @@ target_link_libraries(test_unit
 target_include_directories(test_unit
     PRIVATE
         ${PROJECT_SOURCE_DIR}/vendor/openfx/include
+        ${PROJECT_SOURCE_DIR}/third_party/stb
 )
 
 if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)

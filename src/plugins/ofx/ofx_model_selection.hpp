@@ -249,7 +249,13 @@ inline std::string quality_fallback_warning(int quality_mode,
 }
 
 inline bool use_quality_compile_failure_cache(Backend backend) {
-    return backend == Backend::TensorRT;
+    // BMT v0.2.1: TorchTRT failures must be memoized too (the Blue-screen model
+    // family is TorchTRT-only). Previously a missing backend was never cached,
+    // so the render path re-ran full prepare_session RPCs every single frame:
+    // an OFX progress-scope per frame (Resolve went unresponsive) plus ORT
+    // session create/destroy churn that ended in ACCESS_VIOLATION crashes of
+    // the runtime server inside onnxruntime.dll.
+    return backend == Backend::TensorRT || backend == Backend::TorchTRT;
 }
 
 inline bool quality_compile_failure_cache_matches(

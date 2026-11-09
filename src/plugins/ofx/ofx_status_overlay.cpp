@@ -246,15 +246,20 @@ void draw_text(Surface& s, Face& face, float scale, int pen_x, int baseline_y, c
     std::size_t index = 0;
     while (index < text.size()) {
         const std::uint32_t cp = next_codepoint(text, index);
-        int x0 = 0;
-        int y0 = 0;
+        // NOTE (v0.2.1): stbtt_GetCodepointBitmapSubpixel's out-params are
+        // (width, height, xoffset, yoffset) — NOT (x, y, w, h). v0.2 passed
+        // them in (x,y,w,h) order, so the loop bound (gh) received the glyph
+        // yoffset (negative), the row loop never ran, and every glyph rendered
+        // as nothing — the "blank download card" bug.
         int gw = 0;
         int gh = 0;
+        int gxo = 0;
+        int gyo = 0;
         unsigned char* bitmap =
-            stbtt_GetCodepointBitmapSubpixel(&face.info, scale, scale, 0.0f, 0.0f, static_cast<int>(cp), &x0, &y0, &gw, &gh);
+            stbtt_GetCodepointBitmapSubpixel(&face.info, scale, scale, 0.0f, 0.0f, static_cast<int>(cp), &gw, &gh, &gxo, &gyo);
         if (bitmap) {
-            const int gx = x + x0;
-            const int gy = baseline_y + y0;
+            const int gx = x + gxo;
+            const int gy = baseline_y + gyo;
             for (int row = 0; row < gh; ++row) {
                 for (int col = 0; col < gw; ++col) {
                     const unsigned char coverage = bitmap[row * gw + col];

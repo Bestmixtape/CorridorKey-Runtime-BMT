@@ -464,6 +464,11 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                RefinementMode refinement_mode = RefinementMode::Auto,
                                std::string_view screen_color = "green",
                                std::string_view model_track = "fp32");
+// BMT v0.2.1: caches numerical (non-finite output) render failures into the
+// quality compile-failure cache so the ladder downshifts away from broken
+// artifact/resolution rungs instead of re-preparing them every frame.
+void note_numerical_render_failure(InstanceData* data, const DeviceInfo& requested_device,
+                                   std::string_view error_message);
 bool allow_unrestricted_quality_attempt_for_request(const InstanceData& data, int quality_mode,
                                                     const DeviceInfo& requested_device);
 std::string requested_quality_runtime_label(int quality_mode, int requested_resolution,
