@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BMT_VERSION: "0.2.1"
+  BMT_VERSION: "0.2.2"
   VENDOR_PACK_TAG: vendor-windows-rtx-v1
 
 jobs:
