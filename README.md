@@ -19,7 +19,7 @@ by Bestmixtape. Free — not for sale.
 | Windows 10/11 x64 | CUDA + TensorRT-RTX / ONNX Runtime | RTX GPU; FP32 default, FP16 experimental |
 | macOS 14+ **Apple Silicon only** (M1/M2/M3/M4 — not Intel) | Metal via MLX (main model) + CoreML EP (hint models) | arm64 binaries; no CUDA/TensorRT |
 
-## Installers (v0.2)
+## Installers (v0.2.1)
 
 Grab any of these from the
 [Releases page](https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT/releases).
@@ -45,11 +45,11 @@ Grab any of these from the
 
 | File | What it is |
 |---|---|
-| `CorridorKey2.0-BMT-Win64-v0.2.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins` |
-| `CorridorKey2.0-BMT-Win64-v0.2-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
-| `CorridorKey2.0-BMT-Win64-v0.2.msi` | MSI for managed deployment (same uninstall entry) |
-| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
-| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script. **Refuses to install on Intel Macs** |
+| `CorridorKey2.0-BMT-Win64-v0.2.1.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins` |
+| `CorridorKey2.0-BMT-Win64-v0.2.1-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
+| `CorridorKey2.0-BMT-Win64-v0.2.1.msi` | MSI for managed deployment (same uninstall entry) |
+| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.1.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
+| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.1.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script. **Refuses to install on Intel Macs** |
 
 > MSIX is deliberately not offered: MSIX packages install into a per-app
 > container that Resolve's OFX plugin scan does not read.
