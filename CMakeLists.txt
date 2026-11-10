@@ -18,6 +18,31 @@ project(CorridorKey-Runtime
     LANGUAGES CXX
 )
 
+# BMT v0.3: embed the OFX overlay fonts into the module binaries as hex blobs
+# (see src/plugins/ofx/embedded_fonts.hpp.in). Configured once; both the OFX
+# target and the unit-test target include ${CMAKE_BINARY_DIR}/generated.
+file(READ "${CMAKE_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf" CK_FONT_REGULAR_HEX HEX)
+file(READ "${CMAKE_SOURCE_DIR}/third_party/fonts/DejaVuSans-Bold.ttf" CK_FONT_BOLD_HEX HEX)
+# MSVC caps string literals at 65,535 total (C2026), so fonts are emitted as
+# C byte arrays instead. Built in 15,000-byte chunks to keep regex work small.
+function(corridorkey_hex_to_cbytes in_var out_var)
+    set(_bytes "")
+    string(LENGTH "${${in_var}}" _len)
+    math(EXPR _n "(${_len} + 29999) / 30000")
+    foreach(_i RANGE 1 ${_n})
+        math(EXPR _off "(${_i} - 1) * 30000")
+        string(SUBSTRING "${${in_var}}" ${_off} 30000 _chunk)
+        string(REGEX REPLACE "([0-9a-fA-F][0-9a-fA-F])" "0x\\1," _chunk "${_chunk}")
+        string(APPEND _bytes "${_chunk}
+")
+    endforeach()
+    set(${out_var} "${_bytes}" PARENT_SCOPE)
+endfunction()
+corridorkey_hex_to_cbytes(CK_FONT_REGULAR_HEX CK_FONT_REGULAR_BYTES)
+corridorkey_hex_to_cbytes(CK_FONT_BOLD_HEX CK_FONT_BOLD_BYTES)
+configure_file("${CMAKE_SOURCE_DIR}/src/plugins/ofx/embedded_fonts.hpp.in"
+               "${CMAKE_BINARY_DIR}/generated/embedded_fonts.hpp" @ONLY)
+
 set(CORRIDORKEY_DISPLAY_VERSION_LABEL "" CACHE STRING
     "Optional user-facing build label for local optimization checkpoint builds")
 

@@ -879,8 +879,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     // kickoff in ofx_instance.cpp).
     define_runtime_status_param(
         param_set, kParamBmtModelStatus, "Model Pack", "Initializing...",
-        "First-run download progress for the 13 runtime model files (~2.4 GB) fetched "
-        "from Hugging Face into the user-local CorridorKey models folder.",
+        "Model pack status. v0.3: models are downloaded by the installer,",
+        "the effect itself never fetches anything.",
         kParamBmtAboutGroup);
     define_push_button_param(param_set, kParamBmtCheckUpdate, "Check for Update",
                              "Check GitHub for a newer BMT Build release; results appear in the "

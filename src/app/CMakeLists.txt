@@ -82,5 +82,36 @@ if(WIN32)
     )
 endif()
 
+
+# BMT v0.3: installer-side model pack fetcher. The Windows Setup wizard page
+# and the macOS installer app drive this console helper and parse its
+# unbuffered PLAN/PROGRESS/DONE stdout protocol to render a progress bar
+# during installation, so the OFX plugin never downloads models at first use.
+# Links only corridorkey_common (ORT-free static slice that already hosts
+# model_fetch.cpp), keeping the helper tiny and dependency-portable.
+add_executable(corridorkey_model_fetch model_fetch_cli.cpp)
+target_include_directories(corridorkey_model_fetch PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(corridorkey_model_fetch PRIVATE corridorkey_common)
+if(WIN32)
+    # --install-ui progress window (progress bar + labels via Win32 GDI).
+    target_link_libraries(corridorkey_model_fetch PRIVATE user32 gdi32)
+endif()
+corridorkey_apply_windows_common_compile_defs(corridorkey_model_fetch)
+if(MSVC)
+    target_compile_options(corridorkey_model_fetch PRIVATE /W4 /WX /permissive-)
+else()
+    target_compile_options(corridorkey_model_fetch PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    if(APPLE)
+        target_compile_options(corridorkey_model_fetch PRIVATE
+            -Wno-unused-function -Wno-unused-const-variable -Wno-unused-variable)
+    endif()
+endif()
+set_target_properties(corridorkey_model_fetch PROPERTIES
+    OUTPUT_NAME "corridorkey_model_fetch"
+)
+
+
 # corridorkey_core_static is defined later in src/CMakeLists.txt and inherits
 # sources via get_target_property, so we do not wire it up here.

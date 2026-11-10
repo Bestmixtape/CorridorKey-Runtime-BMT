@@ -364,6 +364,11 @@ extern OfxHost* g_host;
 extern OfxSuites g_suites;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::unique_ptr<SharedFrameCache> g_frame_cache;
+
+// BMT v0.3: force-stops the runtime client of every live effect instance.
+// Called from kOfxActionUnload so Resolve can exit even when instances were
+// never explicitly destroyed (their clients own a dedicated server process).
+void shutdown_all_runtime_clients();
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::string g_host_name;
 

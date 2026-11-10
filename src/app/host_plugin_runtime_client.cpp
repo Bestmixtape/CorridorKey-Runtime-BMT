@@ -304,11 +304,7 @@ HostPluginRuntimeClient::HostPluginRuntimeClient(HostPluginRuntimeClientOptions 
 
 HostPluginRuntimeClient::~HostPluginRuntimeClient() {
     try {
-        auto release_result = release_session();
-        if (!release_result) {
-            log_message("host_plugin_runtime_client",
-                        "release_session_failed detail=" + release_result.error().message);
-        }
+        force_shutdown(2000);
     } catch (...) {  // NOLINT(bugprone-empty-catch)
         // Destructors must not propagate exceptions; release_session relies on
         // logging and JSON serialisation that may throw under OOM. Swallowing
@@ -585,6 +581,32 @@ Result<void> HostPluginRuntimeClient::release_session() {
         return Unexpected<Error>(response.error());
     }
     return {};
+}
+
+void HostPluginRuntimeClient::force_shutdown(int release_timeout_ms) {
+    // BMT v0.3: bounded cleanup contract. ReleaseSession is attempted with a
+    // hard timeout so a server stuck inside a 30-90 s TensorRT prepare can
+    // never hold the OFX host hostage, and the dedicated server process is
+    // always terminated afterwards — no orphaned runtime servers after the
+    // plugin goes away.
+    if (!m_session.session_id.empty()) {
+        HostPluginRuntimeReleaseSessionRequest request;
+        request.session_id = m_session.session_id;
+        auto response = send_command_without_launch(
+            HostPluginRuntimeCommand::ReleaseSession, to_json(request), release_timeout_ms);
+        if (!response) {
+            log_message("host_plugin_runtime_client",
+                        "force_shutdown_release_timeout_or_error detail=" + response.error().message);
+        }
+        m_session = {};
+        m_session_server_pid = 0;
+        m_last_prepare_request = std::nullopt;
+    }
+    if (m_server_pid > 0) {
+        const int pid = m_server_pid;
+        m_server_pid = 0;
+        (void)terminate_server_process(pid);
+    }
 }
 
 DeviceInfo HostPluginRuntimeClient::current_device() const {

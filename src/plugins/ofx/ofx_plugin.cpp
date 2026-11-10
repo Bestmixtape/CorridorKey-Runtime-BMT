@@ -343,6 +343,10 @@ OfxStatus plugin_main_entry_dispatch(const char* plugin_identifier, const char* 
         }
 
         if (std::strcmp(action, kOfxActionUnload) == 0) {
+            // BMT v0.3: force-stop runtime clients + server processes before
+            // teardown completes; this is the guarantee Resolve's exit waits
+            // on. Instances the host already destroyed self-cleaned.
+            shutdown_all_runtime_clients();
             g_frame_cache.reset();
             close_log();
             return kOfxStatOK;

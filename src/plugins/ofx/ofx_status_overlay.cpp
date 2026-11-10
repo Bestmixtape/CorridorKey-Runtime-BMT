@@ -7,6 +7,7 @@
 // so the user still sees motion instead of a "hung" preview.
 #include "ofx_status_overlay.hpp"
 
+#include "embedded_fonts.hpp"
 #include "ofxImageEffect.h"  // bit-depth property constants
 
 #if defined(_MSC_VER)
@@ -91,12 +92,53 @@ std::string truncate_utf8(const std::string& text, std::size_t max_codepoints) {
     return text.substr(0, cut) + "...";
 }
 
+// BMT v0.3: decode the CMake-embedded hex font blobs (see
+// embedded_fonts.hpp.in). Tiny straight-line pass; runs once per process.
+[[maybe_unused]] std::vector<unsigned char> decode_hex(const char* hex) {
+    std::vector<unsigned char> out;
+    const auto nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a';
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A';
+        }
+        return -1;
+    };
+    for (const char* p = hex; p[0] != '\0' && p[1] != '\0'; p += 2) {
+        const int hi = nibble(p[0]);
+        const int lo = nibble(p[1]);
+        if (hi < 0 || lo < 0) {
+            break;
+        }
+        out.push_back(static_cast<unsigned char>(hi * 16 + lo));
+    }
+    return out;
+}
+
 // One loaded face: the TTF bytes must outlive the stbtt_fontinfo (it points
 // into them), so both live in this static holder.
 struct Face {
     std::vector<unsigned char> data;
     stbtt_fontinfo info{};
     bool ok = false;
+
+    bool load_bytes(std::vector<unsigned char> bytes) {
+        data = std::move(bytes);
+        if (data.empty()) {
+            return false;
+        }
+        const int offset = stbtt_GetFontOffsetForIndex(data.data(), 0);
+        if (offset < 0 || !stbtt_InitFont(&info, data.data(), offset)) {
+            data.clear();
+            return false;
+        }
+        ok = true;
+        return true;
+    }
 
     bool load(const std::filesystem::path& path) {
         std::ifstream stream(path, std::ios::binary);
@@ -124,7 +166,21 @@ struct FontSet {
     bool ready = false;
 
     explicit FontSet(const std::filesystem::path& fonts_dir) {
-        // Try the bundle first, then common OS font locations so an exotic
+        // BMT v0.3: embedded bytes are the primary source. Inside Resolve the
+        // module-path based fonts_dir has landed on the wrong directory, and
+        // the fallback faces then rendered scrambled glyphs; the embedded
+        // DejaVu pair removes any path dependency entirely. Filesystem
+        // candidates stay only as a safety net if embedding is unavailable.
+        const bool embedded_regular = regular.load_bytes(std::vector<unsigned char>(
+            embedded_fonts::kDejaVuSansBytes,
+            embedded_fonts::kDejaVuSansBytes +
+                sizeof(embedded_fonts::kDejaVuSansBytes) - 1));
+        const bool embedded_bold = bold.load_bytes(std::vector<unsigned char>(
+            embedded_fonts::kDejaVuSansBoldBytes,
+            embedded_fonts::kDejaVuSansBoldBytes +
+                sizeof(embedded_fonts::kDejaVuSansBoldBytes) - 1));
+
+        // Try the bundle next, then common OS font locations so an exotic
         // packaging slip still yields readable text where possible.
         const std::filesystem::path candidates_regular[] = {
             fonts_dir / "DejaVuSans.ttf",
@@ -144,14 +200,18 @@ struct FontSet {
             std::filesystem::path("/Library/Fonts/Arial Bold.ttf"),
 #endif
         };
-        for (const auto& candidate : candidates_regular) {
-            if (regular.load(candidate)) {
-                break;
+        if (!embedded_regular) {
+            for (const auto& candidate : candidates_regular) {
+                if (regular.load(candidate)) {
+                    break;
+                }
             }
         }
-        for (const auto& candidate : candidates_bold) {
-            if (bold.load(candidate)) {
-                break;
+        if (!embedded_bold) {
+            for (const auto& candidate : candidates_bold) {
+                if (bold.load(candidate)) {
+                    break;
+                }
             }
         }
         if (!regular.ok && bold.ok) {
@@ -309,40 +369,26 @@ void build_card_lines(const app::ModelPackProgress& progress, const std::filesys
     auto title = style_title(is_float);
     auto error = style_error(is_float);
 
-    if (progress.phase == app::ModelPackPhase::Failed) {
-        lines.push_back({"CORRIDORKEY 2.0 — MODEL DOWNLOAD FAILED", base * 1.25f, true, error});
-        const std::string detail = progress.detail.empty() ? "Unknown download error." : progress.detail;
-        lines.push_back({truncate_utf8(detail, 84), base * 0.85f, false, body});
-        lines.push_back({"Check your internet connection. The download retries", base, false, body});
-        lines.push_back({"automatically when you re-open the clip or restart Resolve.", base, false, body});
-        lines.push_back({"You can also copy the model pack manually into:", base * 0.8f, false, muted});
-        lines.push_back({truncate_utf8(models_dir.string(), 92), base * 0.75f, false, muted});
-        return;
-    }
-
+    // BMT v0.3: the installer (Setup.exe / installer app) fetches the model
+    // pack; the OFX never downloads, so this card is purely an installer
+    // hint when the pack is absent. No progress bar semantics.
+    (void)progress;
     lines.push_back({"CORRIDORKEY 2.0 — BMT BUILD", base * 1.25f, true, title});
-    lines.push_back({"The CorridorKey models are not on this system yet.", base * 1.05f, false, body});
-    lines.push_back({"They are downloading automatically. This only happens once.", base, false, body});
-    std::string current = progress.current_file.empty() ? "Starting download..."
-                                                        : truncate_utf8(progress.current_file, 72);
-    lines.push_back({"Now: " + current, base * 0.8f, false, muted});
-    lines.push_back({"The effect stays locked while the models download.", base * 0.9f, false, muted});
-    lines.push_back({"Keep Resolve open — the effect unlocks by itself.", base * 0.9f, false, muted});
+    lines.push_back({"The CorridorKey models are not on this system.", base * 1.05f, false, body});
+    lines.push_back({"As of v0.3 the models are installed with the plugin,", base, false, body});
+    lines.push_back({"not downloaded inside the effect.", base, false, body});
+    lines.push_back({"Run the CorridorKey installer once, then restart Resolve.", base * 0.9f, false, body});
+    lines.push_back({"Models folder expected at:", base * 0.8f, false, muted});
+    lines.push_back({truncate_utf8(models_dir.string(), 92), base * 0.75f, false, muted});
+    (void)error;
 }
 
 std::string bar_label(const app::ModelPackProgress& progress) {
-    if (progress.phase == app::ModelPackPhase::Failed) {
-        return "download failed";
-    }
-    int percent = 0;
-    if (progress.bytes_total > 0) {
-        percent = static_cast<int>((progress.bytes_done * 100ULL) / progress.bytes_total);
-    } else if (progress.percent > 0) {
-        percent = progress.percent / 10;
-    }
-    std::string label = std::to_string(percent) + "%";
-    if (progress.bytes_total > 0) {
-        label += "  ·  " + format_bytes(progress.bytes_done) + " of " + format_bytes(progress.bytes_total);
+    // BMT v0.3: no in-plugin download — the installer fetches the pack.
+    // The status bar now only ever reads as a static hint.
+    (void)progress;
+    std::string label = "waiting for installer";
+    {
     }
     if (progress.total_files > 0) {
         label += "  ·  file " + std::to_string(std::max(progress.completed_files, 0) + 1) + "/" +

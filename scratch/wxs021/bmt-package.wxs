@@ -1,0 +1,72 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="CorridorKey 2.0 BMT Build" Language="1033" Version="0.2.2"
+           Manufacturer="Bestmixtape" UpgradeCode="B621DD00-3899-4543-894E-95466CC310D0"
+           Scope="perMachine" InstallerVersion="500" Codepage="65001">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of CorridorKey 2.0 BMT Build is already installed."
+                  AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Real installer wizard (license agreement -> progress -> finish) via
+         the globally installed WixToolset.UI.wixext extension
+         (wix extension add -g WixToolset.UI.wixext). WixUI_Minimal by
+         design: OFX plugins are only scanned by hosts from the standard
+         ProgramFiles location, so no custom-directory page to shoot
+         ourselves in the foot with. -->
+    <WixVariable Id="WixUILicenseRtf" Value="C:\hermes-files\corridorkey\CorridorKey-Runtime\scripts\packaging\license.rtf" />
+    <ui:WixUI Id="WixUI_Minimal" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="CommonFilesDir" Name="Common Files">
+        <Directory Id="OfxDir" Name="OFX">
+          <Directory Id="PluginsDir" Name="Plugins">
+            <Directory Id="BundleRoot" Name="CorridorKey-BMT.ofx.bundle">
+          <Directory Id="ROOT_0" Name="Contents">
+            <Directory Id="ROOT_0_0" Name="Resources">
+              <Directory Id="ROOT_0_0_0" Name="fonts">
+                <Component Id="c_ROOT_0_0_0" Guid="20e21f18-1994-52e1-8798-ccc28d1c7b64">
+                  <File Id="f00001" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Resources\fonts\DejaVuSans-Bold.ttf" />
+                  <File Id="f00002" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Resources\fonts\DejaVuSans.ttf" />
+                  <File Id="f00003" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Resources\fonts\LICENSE-DejaVu.txt" />
+                </Component>
+              </Directory>
+              <Directory Id="ROOT_0_0_1" Name="torchtrt-runtime">
+                <Directory Id="ROOT_0_0_1_0" Name="bin">
+                </Directory>
+              </Directory>
+            </Directory>
+            <Directory Id="ROOT_0_1" Name="Win64">
+              <Component Id="c_ROOT_0_1" Guid="4fc0017f-dba3-5e7e-ae82-824238a04df7">
+                <File Id="f00004" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\CorridorKey-BMT.ofx" />
+                <File Id="f00005" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\concrt140.dll" />
+                <File Id="f00006" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\corridorkey.exe" />
+                <File Id="f00007" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\corridorkey_host_plugin_runtime_server.exe" />
+                <File Id="f00008" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\cudart64_12.dll" />
+                <File Id="f00009" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\msvcp140.dll" />
+                <File Id="f00010" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\msvcp140_1.dll" />
+                <File Id="f00011" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\msvcp140_2.dll" />
+                <File Id="f00012" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\msvcp140_atomic_wait.dll" />
+                <File Id="f00013" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\msvcp140_codecvt_ids.dll" />
+                <File Id="f00014" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\onnxruntime.dll" />
+                <File Id="f00015" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\onnxruntime_providers_nv_tensorrt_rtx.dll" />
+                <File Id="f00016" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\onnxruntime_providers_shared.dll" />
+                <File Id="f00017" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\tensorrt_onnxparser_rtx_1_2.dll" />
+                <File Id="f00018" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\tensorrt_rtx_1_2.dll" />
+                <File Id="f00019" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\vcruntime140.dll" />
+                <File Id="f00020" Source="C:\hermes-files\corridorkey\CorridorKey-Runtime\build\release\CorridorKey-BMT.ofx.bundle\Contents\Win64\vcruntime140_1.dll" />
+              </Component>
+            </Directory>
+          </Directory>
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="CorridorKey 2.0 BMT Build" Level="1" Display="expand">
+      <ComponentRef Id="c_ROOT_0_0_0" />
+      <ComponentRef Id="c_ROOT_0_1" />
+    </Feature>
+  </Package>
+</Wix>

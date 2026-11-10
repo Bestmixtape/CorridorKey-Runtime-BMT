@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <functional>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -367,23 +368,20 @@ bool model_pack_present(const std::filesystem::path& dir, std::optional<ModelTra
     return true;
 }
 
-ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
-                                        const std::string& only_file,
-                                        std::optional<ModelTrack> track) {
+ModelPackEnsureResult ensure_model_pack_impl(const std::filesystem::path& dir,
+                                             const std::string& only_file,
+                                             const std::vector<ModelPackFile>& selected_in,
+                                             const char* status_track) {
     ModelPackEnsureResult result;
     std::error_code error;
     std::filesystem::create_directories(dir, error);
 
-    // Full-pack runs follow the active precision track; --only runs fetch any
-    // table entry regardless of track (installer smoke tests / manual pulls).
-    const ModelTrack active_track = track.value_or(resolve_model_track());
-    // BMT: full-pack selection must go through model_pack_files_for_track —
-    // it carries the platform rules (no .ts off Windows, MLX set on Apple),
-    // which this loop used to duplicate without them.
-    std::vector<ModelPackFile> selected;
-    if (only_file.empty()) {
-        selected = model_pack_files_for_track(active_track);
-    } else {
+    // BMT: full-pack selection arrives precomputed by the public wrappers —
+    // model_pack_files_for_track carries the platform rules (no .ts off
+    // Windows, MLX set on Apple); union mode dedupes shared entries once.
+    std::vector<ModelPackFile> selected = selected_in;
+    if (!only_file.empty()) {
+        selected.clear();
         for (const auto& file : model_pack_files()) {
             if (only_file == file.filename) {
                 selected.push_back(file);
@@ -407,8 +405,13 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         result.ok = true;
         return result;
     }
-    if (only_file.empty() && model_pack_present(dir, active_track)) {
-        const std::uint64_t pack_bytes = expected_pack_bytes(active_track);
+    if (only_file.empty() && std::all_of(selected.begin(), selected.end(),
+                                 [&](const ModelPackFile& file) { return model_pack_file_present(dir, file); })) {
+        const std::uint64_t pack_bytes = [&] {
+            std::uint64_t t = 0;
+            for (const auto& f : selected) t += f.size_bytes;
+            return t;
+        }();
         monitor_update([&](ModelPackProgress& progress) {
             progress.phase = ModelPackPhase::Ready;
             progress.total_files = static_cast<int>(selected.size());
@@ -439,7 +442,7 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         progress.total_files = static_cast<int>(selected.size());
         progress.percent = 0;
         // BMT v0.2: whole-pack sizing for the preview overlay progress bar.
-        progress.bytes_total = expected_pack_bytes(active_track);
+        progress.bytes_total = [&] { std::uint64_t t = 0; for (const auto& f : selected) t += f.size_bytes; return t; }();
         progress.bytes_done = present_bytes;
         progress.detail.clear();
         progress.retry_url.clear();
@@ -471,8 +474,9 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
 
     const bool complete =
         result.failed_files == 0 &&
-        (only_file.empty() ? model_pack_present(dir, active_track)
-                           : model_pack_file_present(dir, selected[0]));
+        (only_file.empty() ? std::all_of(selected.begin(), selected.end(),
+                                     [&](const ModelPackFile& file) { return model_pack_file_present(dir, file); })
+                       : model_pack_file_present(dir, selected[0]));
     if (complete) {
         if (only_file.empty()) {
             // model_pack_status.json mirrors the packaging-stage status file
@@ -485,7 +489,7 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         // BMT Build: records the precision track this pack run targeted so
         // later launches and the status panel know which artifact set the
         // dir is certified for.
-        status["track"] = model_track_name(active_track);
+        status["track"] = status_track;
         nlohmann::json expected_models = nlohmann::json::array();
         nlohmann::json present_models = nlohmann::json::array();
         nlohmann::json missing_models = nlohmann::json::array();
@@ -517,7 +521,7 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
                 progress.completed_files = static_cast<int>(selected.size());
                 progress.total_files = progress.completed_files;
                 progress.percent = kPercentScale;
-                progress.bytes_total = expected_pack_bytes(active_track);
+                progress.bytes_total = [&] { std::uint64_t t = 0; for (const auto& f : selected) t += f.size_bytes; return t; }();
                 progress.bytes_done = progress.bytes_total;
                 progress.current_file.clear();
                 progress.detail.clear();
@@ -575,6 +579,49 @@ std::string model_pack_status_label(const std::filesystem::path& dir,
     return "Model pack not installed yet — download starting…";
 }
 
-}  // namespace corridorkey::app
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,performance-unnecessary-value-param,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+// BMT v0.3: single-track path keeps the resolve_model_track() default of old.
+ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
+                                        const std::string& only_file,
+                                        std::optional<ModelTrack> track) {
+    const ModelTrack active_track = track.value_or(resolve_model_track());
+    // --only runs fetch any table entry regardless of track (installer smoke
+    // tests / manual pulls); full-pack follows the track's platform set.
+    std::vector<ModelPackFile> selected;
+    if (only_file.empty()) {
+        selected = model_pack_files_for_track(active_track);
+    } else {
+        for (const auto& file : model_pack_files()) {
+            if (only_file == file.filename) {
+                selected.push_back(file);
+            }
+        }
+    }
+    return ensure_model_pack_impl(dir, only_file, selected,
+                                  model_track_name(active_track));
+}
+
+// BMT v0.3 installer mode: deduped union of the given tracks (shared hint
+// models counted once), one single-pass download covering the full pack.
+ModelPackEnsureResult ensure_model_pack_tracks(
+    const std::filesystem::path& dir, const std::vector<ModelTrack>& tracks) {
+    std::vector<ModelPackFile> selected;
+    for (const auto& track : tracks) {
+        for (const auto& file : model_pack_files_for_track(track)) {
+            bool seen = false;
+            for (const auto& existing : selected) {
+                if (std::string(existing.filename) == std::string(file.filename)) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                selected.push_back(file);
+            }
+        }
+    }
+    return ensure_model_pack_impl(dir, {}, selected, "both");
+}
+
+}  // namespace corridorkey::app

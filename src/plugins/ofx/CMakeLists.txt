@@ -52,6 +52,7 @@ target_include_directories(corridorkey_ofx PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${_corridorkey_ofx_sdk_root}/include
     ${CMAKE_SOURCE_DIR}/third_party/stb
+    ${CMAKE_BINARY_DIR}/generated
 )
 
 # The .ofx links exclusively against corridorkey_common (no ONNX Runtime).

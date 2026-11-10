@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Probe" Manufacturer="BMT" Version="0.3" UpgradeCode="11111111-2222-3333-4444-555555555555">
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="newer" />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="BundleRoot" Name="probe.ofx.bundle">
+        <Directory Id="FetchToolsDir" Name="tools">
+          <Component Id="c_fetch" Guid="*">
+            <File Id="fetch_exe" Source="build/release/src/app/corridorkey_model_fetch.exe" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Complete" Level="1">
+      <ComponentRef Id="c_fetch" />
+    </Feature>
+    <Binary Id="FetchPackExe" SourceFile="build/release/src/app/corridorkey_model_fetch.exe" />
+    <CustomAction Id="SetFetchCmd" Property="FetchPackExe"
+                  Value="&quot;[FetchToolsDir]corridorkey_model_fetch.exe&quot; --help" />
+    <CustomAction Id="FetchPackExe" BinaryRef="FetchPackExe" ExeCommand="fetch"
+                  Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="SetFetchCmd" Before="FetchPackExe" Condition="NOT REMOVE" />
+      <Custom Action="FetchPackExe" After="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

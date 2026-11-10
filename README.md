@@ -19,40 +19,43 @@ by Bestmixtape. Free — not for sale.
 | Windows 10/11 x64 | CUDA + TensorRT-RTX / ONNX Runtime | RTX GPU; FP32 default, FP16 experimental |
 | macOS 14+ **Apple Silicon only** (M1/M2/M3/M4 — not Intel) | Metal via MLX (main model) + CoreML EP (hint models) | arm64 binaries; no CUDA/TensorRT |
 
-## Installers (v0.2.2)
+## Installers (v0.3)
 
 Grab any of these from the
 [Releases page](https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT/releases).
 
-### What's new in 0.2
+### What's new in 0.3
 
-- **First-run download is now visible:** while the model pack is missing or
-  downloading, the plugin stamps a status card into the preview (you see it in
-  Resolve's viewer) — the source image passes through until the models land.
-- **Live progress:** percent plus *bytes downloaded of total pack size* and
-  the current file, in the card and in the panel's Model Pack row. Progress
-  covers the whole pack across all files and survives resuming a partial
-  download.
-- **Controls lock during download:** keying controls grey out until the pack
-  is complete, so settings can't be changed against a half-installed pack.
-  The Model Precision dropdown stays live so you can switch FP32/FP16 tracks.
-- **Failure is not a dead end:** if a download fails, the controls unlock
-  again and the card explains what happened and where the files go.
-- Once the pack is complete the card disappears and the effect works exactly
-  as before.
+- **The installer downloads the models.** Setup.exe, the MSI and the macOS
+  installer app copy the plugin *and* fetch the model pack with a live
+  progress window, so the install is complete before Resolve ever touches
+  the effect. The OFX effect itself no longer downloads anything.
+- **No desktop icon** — it's an OFX plugin, not an application.
+- **Readable status text** in the preview overlay (fonts embedded in the
+  plugin binary).
+- **Cleaner shutdown** — bounded runtime teardown when Resolve unloads the
+  plugin, so exiting Resolve no longer hangs behind a long-running model
+  load.
+- If the models folder is ever missing, the effect passes the clip through
+  untouched and stamps a short readable note in the preview instead of
+  attempting anything.
 
 ### Files
 
 | File | What it is |
 |---|---|
-| `CorridorKey2.0-BMT-Win64-v0.2.2.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins` |
-| `CorridorKey2.0-BMT-Win64-v0.2.2-Setup.exe` | Windows installer; removable via **Settings → Apps → Add or remove programs** |
-| `CorridorKey2.0-BMT-Win64-v0.2.2.msi` | MSI for managed deployment (same uninstall entry) |
-| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.2.zip` | Portable: copy the bundle into `/Library/OFX/Plugins` |
-| `CorridorKey2.0-BMT-macOS-Silicon-v0.2.2.dmg` | Double-click `Install CorridorKey BMT.command` (asks for sudo); includes an uninstall script. **Refuses to install on Intel Macs** |
+| `CorridorKey2.0-BMT-Win64-v0.3.zip` | Portable: drop `CorridorKey-BMT.ofx.bundle` into `C:\Program Files\Common Files\OFX\Plugins`, then run `tools\corridorkey_model_fetch.exe --install-ui` once to download the models |
+| `CorridorKey2.0-BMT-Win64-v0.3-Setup.exe` | Windows installer; downloads models during install; removable via **Settings → Apps → Add or remove programs** |
+| `CorridorKey2.0-BMT-Win64-v0.3.msi` | MSI for managed deployment; also fetches the model pack during install |
+| `CorridorKey2.0-BMT-macOS-Silicon-v0.3.zip` | Portable: copy the bundle into `/Library/OFX/Plugins`, then run `tools/corridorkey_model_fetch --install-ui` |
+| `CorridorKey2.0-BMT-macOS-Silicon-v0.3.dmg` | Double-click `CorridorKeyInstaller.app` — copies the bundle and downloads models with a progress bar. **Refuses to install on Intel Macs** |
 
 > MSIX is deliberately not offered: MSIX packages install into a per-app
 > container that Resolve's OFX plugin scan does not read.
+
+> The installer downloads the full model pack (15 files, ~3.0 GB: both FP32
+> and FP16 precision tracks plus shared hint models). Downloads resume where
+> they stopped if the network blips.
 
 After installing, restart Resolve and (if needed) tick the plugin under
 **Preferences → System → Video Plugins**.

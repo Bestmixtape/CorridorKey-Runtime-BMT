@@ -49,6 +49,13 @@ class HostPluginRuntimeClient {
                                       StageTimingCallback on_stage = nullptr);
     Result<void> release_session();
 
+    // BMT v0.3: hard-stop used by host teardown (OFX instance destroy /
+    // kOfxActionUnload). Sends ReleaseSession with a bounded short timeout,
+    // then unconditionally terminates the dedicated server process so the
+    // destructor can never block behind a long-running prepare_session
+    // (Resolve hang-on-exit root cause).
+    void force_shutdown(int release_timeout_ms = 2000);
+
     [[nodiscard]] DeviceInfo current_device() const;
     [[nodiscard]] std::optional<BackendFallbackInfo> backend_fallback() const;
     [[nodiscard]] bool has_session() const;

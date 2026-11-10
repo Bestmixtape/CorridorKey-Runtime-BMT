@@ -1,0 +1,20 @@
+#pragma once
+// BMT v0.3 — GENERATED file (do not edit). Produced at CMake configure time
+// from third_party/fonts/DejaVuSans.ttf and DejaVuSans-Bold.ttf as hex pairs.
+//
+// The OFX status overlay embeds its fonts directly into the module binary:
+// inside DaVinci Resolve the runtime module-path resolution has been observed
+// to land on the wrong DLL, sending the filesystem font lookup to a directory
+// that does not exist and degrading the overlay to fallback faces with
+// scrambled glyph mapping (garbled panel text). Embedded bytes remove every
+// path assumption.
+#include <cstddef>
+
+namespace corridorkey::ofx::embedded_fonts {
+
+inline constexpr unsigned char kDejaVuSansBytes[] = {
+@CK_FONT_REGULAR_BYTES@0};  // trailing 0 = sentinel, not a font byte
+inline constexpr unsigned char kDejaVuSansBoldBytes[] = {
+@CK_FONT_BOLD_BYTES@0};  // trailing 0 = sentinel, not a font byte
+
+}  // namespace corridorkey::ofx::embedded_fonts

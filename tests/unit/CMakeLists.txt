@@ -83,6 +83,7 @@ target_include_directories(test_unit
     PRIVATE
         ${PROJECT_SOURCE_DIR}/vendor/openfx/include
         ${PROJECT_SOURCE_DIR}/third_party/stb
+        ${CMAKE_BINARY_DIR}/generated
 )
 
 if(CORRIDORKEY_ADOBE_PLUGIN_AVAILABLE)

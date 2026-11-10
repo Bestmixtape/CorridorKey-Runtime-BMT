@@ -1136,73 +1136,13 @@ std::filesystem::path resolve_models_root() {
 
     // BMT download-on-first-run layout: when the bundle ships without
     // Contents/Resources/models, use the per-user writable model pack dir
-    // (common::user_models_root(), populated by kickoff_model_pack_fetch
-    // below). Returned even when it does not exist yet so the fetcher's
+    // (common::user_models_root(), populated by the v0.3 installer).
+    // Returned even when it does not exist yet so the installer's
     // destination and the artifact resolver's root always agree.
     auto user_root = common::user_models_root();
     log_message("resolve_models_root",
                 std::string("Using user model pack dir: ") + user_root.string());
     return user_root;
-}
-
-// First-run model pack fetch state (process-global, mirrors the
-// UpdateCheckState pattern above). The OFX bundle no longer ships the 2.4 GB
-// windows-rtx model pack; the first createInstance spawns one detached thread
-// that streams missing files (cpr, Range-resumable .part files, verified by
-// the exact-size table in app/model_fetch.cpp) into the instance's resolved
-// models root. The OFX "Model Pack" row renders progress through
-// app::model_pack_status_label(); inference re-probes naturally because the
-// render path calls ensure_engine_for_quality on every render, which starts
-// succeeding once the pack is complete. A failed fetch un-arms the started
-// latch so adding another plugin instance retries the download.
-struct ModelPackFetchState {
-    // BMT Build: the started latch is per precision track so switching the
-    // Model Precision dropdown on a live instance re-arms a fetch for the
-    // newly selected artifact set (shared files already on disk are skipped
-    // by the size-verified downloader anyway).
-    std::mutex mutex;
-    std::set<std::string> started_tracks;
-};
-
-ModelPackFetchState& model_pack_fetch_state() {
-    static ModelPackFetchState state;
-    return state;
-}
-
-void kickoff_model_pack_fetch(const std::filesystem::path& models_root,
-                              std::optional<app::ModelTrack> track = std::nullopt) {
-    if (models_root.empty()) {
-        return;
-    }
-    const app::ModelTrack active_track = track.value_or(app::resolve_model_track());
-    if (app::model_pack_present(models_root, active_track)) {
-        log_message("model_pack_fetch",
-                    "Model pack already present: " + models_root.string());
-        return;
-    }
-    auto& state = model_pack_fetch_state();
-    const std::string track_name = app::model_track_name(active_track);
-    {
-        const std::scoped_lock lock(state.mutex);
-        if (state.started_tracks.count(track_name) != 0) {
-            return;
-        }
-        state.started_tracks.insert(track_name);
-    }
-    log_message("model_pack_fetch", "Starting first-run model pack download [" + track_name +
-                                        "] into " + models_root.string());
-    std::thread([&state, models_root, active_track, track_name] {
-        const auto result = app::ensure_model_pack(models_root, {}, active_track);
-        log_message("model_pack_fetch",
-                    std::string("Fetch finished ok=") + (result.ok ? "1" : "0") +
-                        " downloaded=" + std::to_string(result.downloaded_files) +
-                        " failed=" + std::to_string(result.failed_files) +
-                        (result.error.empty() ? "" : " error=" + result.error));
-        if (!result.ok) {
-            const std::scoped_lock lock(state.mutex);
-            state.started_tracks.erase(track_name);
-        }
-    }).detach();
 }
 
 app::HostPluginRuntimePrepareSessionRequest build_prepare_request(
@@ -1385,6 +1325,37 @@ bool ensure_runtime_client(InstanceData* data, OfxImageEffectHandle instance) {
     return true;
 }
 
+// BMT v0.3: process-wide registry of live effect instances. kOfxActionUnload
+// iterates it to force-stop every runtime client (and its dedicated server
+// process) even when the host exited without destroying instances — the
+// Resolve hang-on-exit path where ~HostPluginRuntimeClient used to block on
+// an unbounded ReleaseSession RPC behind a multi-minute TensorRT prepare.
+namespace {
+std::mutex g_live_instances_mutex;
+std::vector<InstanceData*> g_live_instances;
+
+void register_live_instance(InstanceData* data) {
+    std::lock_guard<std::mutex> lock(g_live_instances_mutex);
+    g_live_instances.push_back(data);
+}
+
+void unregister_live_instance(InstanceData* data) {
+    std::lock_guard<std::mutex> lock(g_live_instances_mutex);
+    g_live_instances.erase(
+        std::remove(g_live_instances.begin(), g_live_instances.end(), data),
+        g_live_instances.end());
+}
+}  // namespace
+
+void shutdown_all_runtime_clients() {
+    std::lock_guard<std::mutex> lock(g_live_instances_mutex);
+    for (InstanceData* data : g_live_instances) {
+        if (data != nullptr && data->runtime_client != nullptr) {
+            data->runtime_client->force_shutdown(2000);
+        }
+    }
+}
+
 // NOLINTBEGIN(readability-function-size,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 // create_instance is the canonical OFX kOfxImageEffectActionCreateInstance
 // handler: most of the body is the explicit list of paramGetHandle calls
@@ -1554,12 +1525,9 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
     // spawning a subprocess from this action triggers host-side stalls and
     // crashes on stricter hosts (Foundry Nuke 17).
     data->models_root = resolve_models_root();
-    // BMT packaging omits the model pack from the bundle; start (once per
-    // process) the first-run Hugging Face download into the resolved models
-    // root. This mirrors kickoff_global_update_check above: detached thread,
-    // process-global latch, no OFX suite calls off the host thread — the
-    // progress is only read back by update_runtime_panel_values later.
-    kickoff_model_pack_fetch(data->models_root);
+    // BMT v0.3: model pack is fetched by the INSTALLER (Setup.exe/.pkg post
+    // install), not by the OFX. The plugin never downloads; it only probes
+    // presence below and shows an installer hint if the pack is absent.
 
     // BMT v0.2: seed the first-run gate so a fresh install starts locked;
     // render re-probes presence and clears model_pack_ready once the pack
@@ -1640,6 +1608,7 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
     set_param_secret(data->open_update_page_param, true);
 
     set_instance_data(instance, data.release());
+    register_live_instance(get_instance_data(instance));
     log_create_total("success", "bootstrap=deferred");
     return kOfxStatOK;
 }
@@ -1745,14 +1714,9 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
             input_height, requested_device.available_memory_mb, fallback_mode,
             coarse_resolution_override, allow_unrestricted_quality_attempt, screen_color,
             model_track);
-        // BMT Build: switching the Model Precision dropdown on a live
-        // instance lands here when the newly selected track's artifacts are
-        // not staged yet — re-arm the fetcher for that track (per-track
-        // latch) so the Model Pack panel row shows first-run-style progress
-        // for the new track instead of a dead "missing artifact" state.
-        kickoff_model_pack_fetch(data->models_root,
-                                 model_track == "fp16" ? app::ModelTrack::Fp16
-                                                       : app::ModelTrack::Fp32);
+        // BMT v0.3: no in-plugin fetching. A precision track whose
+        // artifacts the installer did not stage reports a missing-artifact
+        // state; the installer ships the default track set.
         if (auto expected_artifact = primary_expected_artifact_path(expected_artifacts);
             expected_artifact.has_value()) {
             set_runtime_panel_state_for_failed_quality_request(
@@ -2462,6 +2426,7 @@ OfxStatus destroy_instance(OfxImageEffectHandle instance) {
         // returned here through delete. A smart pointer cannot manage the
         // raw pointer that was already stashed in the property set, so the
         // tidy gsl::owner annotation does not apply here.
+        unregister_live_instance(data);
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         delete data;
         set_instance_data(instance, nullptr);

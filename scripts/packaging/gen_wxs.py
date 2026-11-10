@@ -8,6 +8,11 @@ import sys, os, uuid
 BUNDLE = os.path.abspath(sys.argv[1])
 OUT = os.path.abspath(sys.argv[2])
 BUNDLE_NAME = os.path.basename(BUNDLE)
+# BMT v0.3: optional path to corridorkey_model_fetch(.exe). When given, the MSI
+# installs it under <bundle>/tools and runs it after InstallFinalize so the
+# model pack is downloaded during install (helper shows its own progress
+# window), not on first use inside Resolve.
+FETCH_EXE = os.path.abspath(sys.argv[4]) if len(sys.argv) > 4 else None
 
 UPGRADE_CODE = "B621DD00-3899-4543-894E-95466CC310D0"
 PRODUCT_NAME = "CorridorKey 2.0 BMT Build"
@@ -58,6 +63,34 @@ def emit_dir(d, depth):
 emit_dir(BUNDLE, 5)
 refs = "\n".join(f'      <ComponentRef Id="{c}" />' for c in comp_ids)
 
+fetch_dir = fetch_refs = fetch_ca = ""
+if FETCH_EXE:
+    fetch_cid = "c_fetch_tools"
+    fetch_dir = (
+        f'            <Directory Id="FetchToolsDir" Name="tools">\n'
+        f'              <Component Id="{fetch_cid}" Guid="{uuid.uuid5(uuid.NAMESPACE_URL, "corridorkey-model-fetch-tools")}">\n'
+        f'                <File Id="fetch_exe" Source="{esc(FETCH_EXE)}" />\n'
+        f'              </Component>\n'
+        f'            </Directory>\n'
+    )
+    fetch_refs = f'      <ComponentRef Id="{fetch_cid}" />\n'
+    # Property CA sets the command line; Binary CA executes it under the
+    # user's profile so LocalAppDataFolder is theirs and the helper's
+    # progress window shows in their session. Return=ignore keeps a failed
+    # fetch from rolling back the plugin install (re-run the tool or the
+    # installer to retry).
+    fetch_ca = f"""
+    <Binary Id="FetchPackExe" SourceFile="{esc(FETCH_EXE)}" />
+    <CustomAction Id="SetFetchCmd" Property="FetchPackExe"
+                  Value="&quot;[FetchToolsDir]corridorkey_model_fetch.exe&quot; --dest &quot;[LocalAppDataFolder]CorridorKey2.0-BMT\\models&quot; --install-ui" />
+    <CustomAction Id="FetchPackExe" BinaryRef="FetchPackExe" ExeCommand="fetch"
+                  Execute="immediate" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="SetFetchCmd" Before="FetchPackExe" Condition="NOT REMOVE" />
+      <Custom Action="FetchPackExe" After="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+"""
+
 wxs = f"""<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="{esc(PRODUCT_NAME)}" Language="1033" Version="{VERSION}"
@@ -83,7 +116,7 @@ wxs = f"""<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
           <Directory Id="PluginsDir" Name="Plugins">
             <Directory Id="BundleRoot" Name="{esc(BUNDLE_NAME)}">
 {chr(10).join(lines)}
-            </Directory>
+{fetch_dir}            </Directory>
           </Directory>
         </Directory>
       </Directory>
@@ -91,8 +124,8 @@ wxs = f"""<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
 
     <Feature Id="Complete" Title="{esc(PRODUCT_NAME)}" Level="1" Display="expand">
 {refs}
-    </Feature>
-  </Package>
+{fetch_refs}    </Feature>
+{fetch_ca}  </Package>
 </Wix>
 """
 open(OUT, "w", encoding="utf-8").write(wxs)

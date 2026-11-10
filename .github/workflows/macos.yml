@@ -16,7 +16,7 @@ permissions:
 
 env:
   ONNXRUNTIME_MACOS_VERSION: "1.24.3"
-  BMT_VERSION: "0.2.2"
+  BMT_VERSION: "0.3"
 
 concurrency:
   group: macos-bmt-ci
@@ -159,8 +159,10 @@ jobs:
             -DCORRIDORKEY_BUNDLE_MODELS=OFF \
             -DCORRIDORKEY_DISPLAY_VERSION_LABEL="${BMT_VERSION}"
 
-      - name: Build corridorkey_ofx
-        run: cmake --build build/macos --target corridorkey_ofx
+      - name: Build corridorkey_ofx + model fetch helper
+        run: |
+          cmake --build build/macos --target corridorkey_ofx
+          cmake --build build/macos --target corridorkey_model_fetch
 
       - name: Verify bundle layout + link contracts
         run: |
@@ -288,34 +290,31 @@ jobs:
           cd build/macos
           zip -qr "$GITHUB_WORKSPACE/CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.zip" CorridorKey-BMT.ofx.bundle
 
+      - name: Build installer app
+        run: |
+          set -euo pipefail
+          app=installer/CorridorKeyInstaller.app
+          rm -rf installer; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp scripts/packaging/macos/Info.plist "$app/Contents/Info.plist"
+          swiftc -O scripts/packaging/macos/main.swift -o "$app/Contents/MacOS/CorridorKeyInstaller"
+          # Payloads the installer consumes (see scripts/packaging/macos/main.swift).
+          cp -R build/macos/CorridorKey-BMT.ofx.bundle "$app/Contents/Resources/"
+          cp build/macos/corridorkey_model_fetch "$app/Contents/Resources/corridorkey_model_fetch"
+          chmod +x "$app/Contents/Resources/corridorkey_model_fetch"
+          # Ad-hoc sign inner binaries then the app itself.
+          codesign --force -s - "$app/Contents/MacOS/CorridorKeyInstaller"
+          codesign --force -s - "$app/Contents/Resources/corridorkey_model_fetch"
+          codesign --force -s - --deep "$app"
+          codesign --verify --verbose=2 "$app"
+
       - name: Build DMG installer
         run: |
           set -euo pipefail
           stage=dmg-stage
           rm -rf "$stage"; mkdir -p "$stage"
-          cp -R build/macos/CorridorKey-BMT.ofx.bundle "$stage/"
+          cp -R installer/CorridorKeyInstaller.app "$stage/"
           cp -R build/macos/README-mac.txt "$stage/README.txt" 2>/dev/null || \
             cp README-mac.txt "$stage/README.txt"
-          cat > "$stage/Install CorridorKey BMT.command" <<'SH'
-          #!/bin/bash
-          set -euo pipefail
-          if [ "$(uname -m)" != "arm64" ]; then
-            echo "This build is Apple Silicon (M-series) only."
-            echo "Intel Macs are not supported — exiting without installing."
-            read -n 1 -s -r -p "Press any key to close. "
-            exit 1
-          fi
-          cd "$(dirname "$0")"
-          echo "CorridorKey 2.0 BMT Build — installing into /Library/OFX/Plugins (sudo required)."
-          sudo mkdir -p /Library/OFX/Plugins
-          sudo rm -rf /Library/OFX/Plugins/CorridorKey-BMT.ofx.bundle
-          sudo ditto CorridorKey-BMT.ofx.bundle /Library/OFX/Plugins/CorridorKey-BMT.ofx.bundle
-          # Clear quarantine so the ad-hoc-signed dylibs load inside Resolve.
-          sudo xattr -rd com.apple.quarantine /Library/OFX/Plugins/CorridorKey-BMT.ofx.bundle || true
-          echo "Installed. Restart DaVinci Resolve; the effect is under Open FX > Keying."
-          echo "Models (~715 MB) download automatically on first use, or run the bundle's 'corridorkey fetch-models'."
-          read -n 1 -s -r -p "Press any key to close. "
-          SH
           cat > "$stage/Uninstall CorridorKey BMT.command" <<'SH'
           #!/bin/bash
           set -euo pipefail
