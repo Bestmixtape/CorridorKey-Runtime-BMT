@@ -184,6 +184,9 @@ int main(int argc, char** argv) {
     std::string dest;
     std::vector<ModelTrack> tracks;  // v0.3: full-pack union
     bool show_ui = false;
+#ifndef _WIN32
+    (void)show_ui;  // native progress window is Windows-only; macOS uses the installer app's own bar
+#endif
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--dest" && i + 1 < argc) {
