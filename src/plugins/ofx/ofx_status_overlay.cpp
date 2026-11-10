@@ -31,20 +31,6 @@
 namespace corridorkey::ofx {
 namespace {
 
-constexpr std::uint64_t kBytesPerMb = 1000ULL * 1000ULL;
-constexpr std::uint64_t kBytesPerGb = 1000ULL * 1000ULL * 1000ULL;
-
-std::string format_bytes(std::uint64_t bytes) {
-    char buffer[32];
-    if (bytes >= kBytesPerGb) {
-        std::snprintf(buffer, sizeof(buffer), "%.1f GB", static_cast<double>(bytes) / static_cast<double>(kBytesPerGb));
-    } else if (bytes >= kBytesPerMb) {
-        std::snprintf(buffer, sizeof(buffer), "%.0f MB", static_cast<double>(bytes) / static_cast<double>(kBytesPerMb));
-    } else {
-        std::snprintf(buffer, sizeof(buffer), "%.0f KB", static_cast<double>(bytes) / 1000.0);
-    }
-    return buffer;
-}
 
 // Minimal UTF-8 decoder; invalid bytes fall through as U+FFFD so the card
 // never renders garbage boxes from mixed-encoding host strings.
