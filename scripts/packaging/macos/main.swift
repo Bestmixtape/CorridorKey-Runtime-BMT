@@ -40,6 +40,7 @@ final class InstallerWindowController: NSObject {
     private var statusLabel: NSTextField!
     private var progress: NSProgressIndicator!
     private var installButton: NSButton!
+    private var uninstallButton: NSButton!
     private var busy = false
 
     // MARK: Window construction
@@ -81,12 +82,22 @@ final class InstallerWindowController: NSObject {
         installButton.target = self
         installButton.action = #selector(installTapped)
 
+        // BMT v0.3.1: the installer doubles as the uninstall entry point
+        // (macOS has no Add/Remove programs), matching the Windows wizard's
+        // Install-or-Uninstall page.
+        uninstallButton = NSButton(frame: NSRect(x: 264, y: 18, width: 132, height: 32))
+        uninstallButton.title = "Uninstall"
+        uninstallButton.bezelStyle = .rounded
+        uninstallButton.target = self
+        uninstallButton.action = #selector(uninstallTapped)
+
         let cv = w.contentView!
         cv.addSubview(headline)
         cv.addSubview(desc)
         cv.addSubview(statusLabel)
         cv.addSubview(progress)
         cv.addSubview(installButton)
+        cv.addSubview(uninstallButton)
 
         window = w
     }
@@ -182,9 +193,17 @@ final class InstallerWindowController: NSObject {
     }
 
     private func runPrivilegedCopy(from srcPath: String) -> (Bool, String) {
+        return runPrivilegedScript(buildAppleScript(srcPath: srcPath),
+            declined: "Administrator authentication was declined, so the plug-in was not installed.",
+            failPrefix: "Plug-in copy failed:")
+    }
+
+    /// Runs one osascript 'do shell script … with administrator privileges'
+    /// source; shared by install (copy in) and uninstall (rm).
+    private func runPrivilegedScript(_ script: String, declined: String, failPrefix: String) -> (Bool, String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", buildAppleScript(srcPath: srcPath)]
+        process.arguments = ["-e", script]
         let outPipe = Pipe()
         let errPipe = Pipe()
         process.standardOutput = outPipe
@@ -206,14 +225,59 @@ final class InstallerWindowController: NSObject {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if process.terminationStatus != 0 {
             if errText.contains("User canceled") || errText.contains("(-128)") {
-                return (false, "Administrator authentication was declined, so the plug-in was not installed.")
+                return (false, declined)
             }
             let detail = errText.isEmpty
                 ? "osascript exited with status \(process.terminationStatus)."
                 : errText
-            return (false, "Plug-in copy failed: \(detail)")
+            return (false, "\(failPrefix) \(detail)")
         }
         return (true, "")
+    }
+
+    // MARK: Uninstall entry point (v0.3.1)
+
+    @objc private func uninstallTapped() {
+        guard !busy else { return }
+        let alert = NSAlert()
+        alert.messageText = "Uninstall CorridorKey 2.0?"
+        alert.informativeText =
+            "Removes the plug-in from \(kPluginDir) and the downloaded model pack "
+            + "(up to ~4.3 GB) from your user Library. macOS will ask for an "
+            + "administrator password for the plug-in folder."
+        alert.addButton(withTitle: "Uninstall")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        busy = true
+        installButton.isEnabled = false
+        uninstallButton.isEnabled = false
+        setStatus("Uninstalling: deleting the model pack from your user Library (no admin rights needed)…")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            // Models live under the user's own Library — no privileges needed.
+            let packDir = (NSHomeDirectory() as NSString)
+                .appendingPathComponent("Library/Application Support/CorridorKey2.0-BMT")
+            try? FileManager.default.removeItem(atPath: packDir)
+            self.setStatus("Model pack removed. Removing the plug-in from \(kPluginDir)… approve the administrator prompt.")
+            let script = "do shell script \"rm -rf "
+                + "& quoted form of " + self.appleScriptStringLiteral("\(kPluginDir)/\(kBundleName)")
+                + "\" with administrator privileges"
+            let (ok, err) = self.runPrivilegedScript(script,
+                declined: "Administrator authentication was declined, so the plug-in folder was not removed.",
+                failPrefix: "Plug-in removal failed:")
+            DispatchQueue.main.async {
+                self.busy = false
+                self.uninstallButton.isEnabled = true
+                self.installButton.isEnabled = true
+                self.installButton.title = "Install"
+                self.progress.doubleValue = 0
+                self.statusLabel.stringValue = ok
+                    ? "CorridorKey removed: model pack deleted and plug-in gone from \(kPluginDir)."
+                    : "Uninstall incomplete: \(err) (the model pack was already deleted.)"
+            }
+        }
     }
 
     // MARK: Step 2 — per-user model fetch, streamed stdout

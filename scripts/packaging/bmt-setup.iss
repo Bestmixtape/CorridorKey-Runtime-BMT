@@ -47,6 +47,63 @@ Name: "{app}"
 Filename: "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT"; Description: "Open the CorridorKey BMT page"; Flags: shellexec postinstall skipifsilent nowait
 
 [Code]
+// BMT v0.3.1: if the plug-in is already installed, the wizard opens with an
+// Install-or-Uninstall choice, so the installer doubles as the uninstall
+// entry point (matching the macOS installer app's Uninstall button).
+var
+  ModePage: TInputOptionWizardPage;
+  ModePageID: Integer;
+  InstalledUninstStr: String;
+
+function GetInstalledUninstallString(): String;
+var
+  Key, S: String;
+begin
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
+  Result := '';
+  if RegQueryStringValue(HKLM, Key, 'UninstallString', S) then
+    Result := S
+  else if RegQueryStringValue(HKCU, Key, 'UninstallString', S) then
+    Result := S;
+end;
+
+procedure InitializeWizard();
+begin
+  ModePageID := 0;
+  if WizardSilent then Exit;
+  InstalledUninstStr := GetInstalledUninstallString();
+  if InstalledUninstStr = '' then Exit;
+  ModePage := CreateInputOptionPage(wpWelcome,
+    'Install or Uninstall',
+    '{#MyAppName} is already installed on this computer.',
+    'What would you like to do?' #13#10#13#10 +
+    'Uninstall removes the plug-in files and then asks whether to also delete' + #13#10 +
+    'the downloaded model pack.',
+    True, False);
+  ModePage.Add('Install or update to version {#MyAppVersion} (recommended)');
+  ModePage.Add('Uninstall the existing installation');
+  ModePage.Values[0] := True;
+  ModePageID := ModePage.WizardPageID;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+  if (ModePageID <> 0) and (CurPageID = ModePageID) and ModePage.Values[1] then
+  begin
+    Log('BMT v0.3.1: user chose Uninstall on the setup mode page');
+    // Detached launch, then leave: the standalone uninstaller (with its own
+    // elevation + model-pack cleanup) takes over from Setup.
+    if not Exec(RemoveQuotes(InstalledUninstStr), '', SW_SHOW, ewNoWait, ResultCode) then
+      Log('BMT v0.3.1: could not start the uninstaller; user can still use Settings > Apps')
+    else
+      Log('BMT v0.3.1: handed off to ' + InstalledUninstStr);
+    ExitApp;
+  end;
+end;
+
 // BMT v0.3: the model pack (~3.0 GB full pack) downloads DURING installation, right
 // after the plugin files land, instead of on the OFX plugin's first use. The
 // helper process owns the live progress window (Inno's Exec blocks the
@@ -89,7 +146,7 @@ begin
     if DirExists(ModelsDir) then
     begin
       if MsgBox('Also delete the downloaded model pack and caches?' #13#10 +
-                '(about 1.2 GB in your Local AppData)?' #13#10 +
+                '(about 3 GB in your Local AppData)?' #13#10 +
                 'Choose No to keep them for a reinstall.',
                 mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       begin
