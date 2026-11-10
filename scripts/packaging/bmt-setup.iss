@@ -52,7 +52,7 @@ Filename: "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT"; Description: 
 // entry point (matching the macOS installer app's Uninstall button).
 var
   ModePage: TInputOptionWizardPage;
-  ModePageID: Integer;
+  ModePageActive: Boolean;
   InstalledUninstStr: String;
 
 function GetInstalledUninstallString(): String;
@@ -69,21 +69,21 @@ end;
 
 procedure InitializeWizard();
 begin
-  ModePageID := 0;
+  ModePageActive := False;
   if WizardSilent then Exit;
   InstalledUninstStr := GetInstalledUninstallString();
   if InstalledUninstStr = '' then Exit;
   ModePage := CreateInputOptionPage(wpWelcome,
     'Install or Uninstall',
     '{#MyAppName} is already installed on this computer.',
-    'What would you like to do?' #13#10#13#10 +
-    'Uninstall removes the plug-in files and then asks whether to also delete' + #13#10 +
+    'What would you like to do?' + Chr(13) + Chr(10) + Chr(13) + Chr(10) + 
+    'Uninstall removes the plug-in files and then asks whether to also delete' + Chr(13) + Chr(10) +
     'the downloaded model pack.',
     True, False);
   ModePage.Add('Install or update to version {#MyAppVersion} (recommended)');
   ModePage.Add('Uninstall the existing installation');
   ModePage.Values[0] := True;
-  ModePageID := ModePage.WizardPageID;
+  ModePageActive := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -91,16 +91,16 @@ var
   ResultCode: Integer;
 begin
   Result := True;
-  if (ModePageID <> 0) and (CurPageID = ModePageID) and ModePage.Values[1] then
+  if ModePageActive and ModePage.Values[1] then
   begin
     Log('BMT v0.3.1: user chose Uninstall on the setup mode page');
     // Detached launch, then leave: the standalone uninstaller (with its own
     // elevation + model-pack cleanup) takes over from Setup.
-    if not Exec(RemoveQuotes(InstalledUninstStr), '', SW_SHOW, ewNoWait, ResultCode) then
+    if not Exec(RemoveQuotes(InstalledUninstStr), '', '', SW_SHOW, ewNoWait, ResultCode) then
       Log('BMT v0.3.1: could not start the uninstaller; user can still use Settings > Apps')
     else
       Log('BMT v0.3.1: handed off to ' + InstalledUninstStr);
-    ExitApp;
+    WizardForm.Close;
   end;
 end;
 
@@ -127,8 +127,8 @@ begin
     else
       Log('BMT v0.3: model pack fetch could not start');
     if ResultCode <> 0 then
-      MsgBox('The model pack download did not complete (code ' + IntToStr(ResultCode) + ').' #13#10 +
-             'The plugin files are installed, but the models are missing.' #13#10 +
+      MsgBox('The model pack download did not complete (code ' + IntToStr(ResultCode) + ').' + Chr(13) + Chr(10) + 
+             'The plugin files are installed, but the models are missing.' + Chr(13) + Chr(10) + 
              'Re-run this Setup to retry the download, or use the manual link on the CorridorKey BMT page.',
              mbInformation, MB_OK);
   end;
@@ -145,8 +145,8 @@ begin
     ModelsDir := ExpandConstant('{localappdata}\CorridorKey2.0-BMT');
     if DirExists(ModelsDir) then
     begin
-      if MsgBox('Also delete the downloaded model pack and caches?' #13#10 +
-                '(about 3 GB in your Local AppData)?' #13#10 +
+      if MsgBox('Also delete the downloaded model pack and caches?' + Chr(13) + Chr(10) + 
+                '(about 3 GB in your Local AppData)?' + Chr(13) + Chr(10) + 
                 'Choose No to keep them for a reinstall.',
                 mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       begin
