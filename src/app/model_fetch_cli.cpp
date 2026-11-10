@@ -74,18 +74,26 @@ bool show(const wchar_t* title) {
     const int h = 190;
     const int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 3;
-    // WS_VISIBLE at creation is deliberate: installers start this helper with
-    // SW_HIDE in STARTUPINFO (to keep the console from flashing), and Windows
-    // then overrides the FIRST ShowWindow call on the process's first top-level
-    // window with that startup value — the v0.3 progress window was invisible
-    // because of exactly that quirk. A window born WS_VISIBLE bypasses the
-    // override entirely.
+    // Created WS_VISIBLE, but the startup-flag override below is what really
+    // guarantees visibility (see the post-creation block).
     HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, cls, title,
                                 WS_CAPTION | WS_SYSMENU | WS_VISIBLE, x, y, w, h,
                                 nullptr, nullptr, wc.hInstance, nullptr);
     if (hwnd == nullptr) {
         return false;
     }
+    // Inno's Exec starts us with STARTF_USESHOWWINDOW + SW_HIDE, and Windows
+    // applies that startup flag to the FIRST window shown -- overriding even
+    // WS_VISIBLE at creation. The startup flag only overrides the first
+    // ShowWindow call, so force-show twice: the first is swallowed, the
+    // second actually displays the window. SWP_SHOWWINDOW bypasses the rule
+    // as well; belt and braces.
+    ShowWindow(hwnd, SW_SHOW);
+    ShowWindow(hwnd, SW_SHOW);
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    SetForegroundWindow(hwnd);
+    BringWindowToTop(hwnd);
+    UpdateWindow(hwnd);
     HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     g_file_label = CreateWindowExW(0, L"STATIC", L"Preparing...",
         WS_CHILD | WS_VISIBLE, 18, 18, w - 36, 22, hwnd, nullptr, wc.hInstance, nullptr);
@@ -97,10 +105,7 @@ bool show(const wchar_t* title) {
     SendMessageW(g_bar, PBM_SETPOS, 0, 0);
     SendMessageW(g_file_label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     SendMessageW(g_bytes_label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    // No ShowWindow call here on purpose: as the first ShowWindow of this
-    // process it would be overridden by the installer's SW_HIDE startup flag
-    // and hide the WS_VISIBLE window again. Raise it above the Setup wizard
-    // instead.
+    // Raise above the Setup wizard (visibility was already forced above).
     SetForegroundWindow(hwnd);
     BringWindowToTop(hwnd);
     UpdateWindow(hwnd);
@@ -284,7 +289,7 @@ int main(int argc, char** argv) {
                             sanitize(p.current_file).c_str(),
                             static_cast<unsigned long long>(done),
                             static_cast<unsigned long long>(total),
-                            percent);
+                            percent / 10);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
