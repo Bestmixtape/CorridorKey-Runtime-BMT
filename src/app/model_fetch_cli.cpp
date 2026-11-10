@@ -74,8 +74,14 @@ bool show(const wchar_t* title) {
     const int h = 190;
     const int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 3;
+    // WS_VISIBLE at creation is deliberate: installers start this helper with
+    // SW_HIDE in STARTUPINFO (to keep the console from flashing), and Windows
+    // then overrides the FIRST ShowWindow call on the process's first top-level
+    // window with that startup value — the v0.3 progress window was invisible
+    // because of exactly that quirk. A window born WS_VISIBLE bypasses the
+    // override entirely.
     HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, cls, title,
-                                WS_CAPTION | WS_SYSMENU, x, y, w, h,
+                                WS_CAPTION | WS_SYSMENU | WS_VISIBLE, x, y, w, h,
                                 nullptr, nullptr, wc.hInstance, nullptr);
     if (hwnd == nullptr) {
         return false;
@@ -91,7 +97,12 @@ bool show(const wchar_t* title) {
     SendMessageW(g_bar, PBM_SETPOS, 0, 0);
     SendMessageW(g_file_label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
     SendMessageW(g_bytes_label, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    ShowWindow(hwnd, SW_SHOW);
+    // No ShowWindow call here on purpose: as the first ShowWindow of this
+    // process it would be overridden by the installer's SW_HIDE startup flag
+    // and hide the WS_VISIBLE window again. Raise it above the Setup wizard
+    // instead.
+    SetForegroundWindow(hwnd);
+    BringWindowToTop(hwnd);
     UpdateWindow(hwnd);
     g_visible = true;
     return true;

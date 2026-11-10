@@ -16,7 +16,7 @@ permissions:
 
 env:
   ONNXRUNTIME_MACOS_VERSION: "1.24.3"
-  BMT_VERSION: "0.3"
+  BMT_VERSION: "0.3.1"
 
 concurrency:
   group: macos-bmt-ci
