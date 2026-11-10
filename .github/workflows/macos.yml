@@ -299,7 +299,11 @@ jobs:
           swiftc -O scripts/packaging/macos/main.swift -o "$app/Contents/MacOS/CorridorKeyInstaller"
           # Payloads the installer consumes (see scripts/packaging/macos/main.swift).
           cp -R build/macos/CorridorKey-BMT.ofx.bundle "$app/Contents/Resources/"
-          cp build/macos/corridorkey_model_fetch "$app/Contents/Resources/corridorkey_model_fetch"
+          # add_executable has no RUNTIME_OUTPUT_DIRECTORY override -> lands
+          # under the target's build dir, not the build root.
+          fetch=$(LC_ALL=C find build/macos -name corridorkey_model_fetch -type f -perm +111 | head -1)
+          test -n "$fetch" || { echo "corridorkey_model_fetch not built"; exit 1; }
+          cp "$fetch" "$app/Contents/Resources/corridorkey_model_fetch"
           chmod +x "$app/Contents/Resources/corridorkey_model_fetch"
           # Ad-hoc sign inner binaries then the app itself.
           codesign --force -s - "$app/Contents/MacOS/CorridorKeyInstaller"
