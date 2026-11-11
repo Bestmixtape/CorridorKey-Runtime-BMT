@@ -73,14 +73,16 @@ struct ModelPackEnsureResult {
 // / smoke-test hook); empty means the full pack. On full-pack success a
 // model_pack_status.json summary is written next to the artifacts.
 CORRIDORKEY_API ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
-                                                        const std::string& only_file = {},
-                                                        std::optional<ModelTrack> track = {});
+                                                       const std::string& only_file = {},
+                                                       std::optional<ModelTrack> track = {},
+                                                       const char* stage = "model-pack-fetch");
 
 // BMT v0.3 installer mode: fetch the deduped union of the given tracks in a
 // single pass (shared hint models counted once), so one progress bar covers
 // the complete model pack.
 CORRIDORKEY_API ModelPackEnsureResult ensure_model_pack_tracks(
-    const std::filesystem::path& dir, const std::vector<ModelTrack>& tracks);
+    const std::filesystem::path& dir, const std::vector<ModelTrack>& tracks,
+    const char* stage = "model-pack-fetch");
 
 enum class ModelPackPhase : std::uint8_t { Idle, Downloading, Ready, Failed };
 

@@ -6,6 +6,7 @@
 #include "common/host_plugin_runtime_defaults.hpp"
 #include "ofx_logging.hpp"
 #include "ofx_shared.hpp"
+#include <corridorkey/version.hpp>
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,readability-function-size,modernize-use-integer-sign-comparison,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 //
@@ -860,8 +861,8 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_group_param(param_set, kParamBmtAboutGroup, "BMT Build — About", false);
 
     define_info_param(param_set, kParamBmtBuildLine, "Build",
-                      "BMT Build v0.1 (community packaging of CorridorKey Runtime 0.9.1)",
-                      "This is a community build packaged by bestmixtape.", kParamBmtAboutGroup);
+                          "BMT Build " CORRIDORKEY_DISPLAY_VERSION_STRING " (community packaging of CorridorKey Runtime " CORRIDORKEY_VERSION_STRING ")",
+                          "This is a community build packaged by bestmixtape.", kParamBmtAboutGroup);
     define_info_param(
         param_set, kParamBmtCommunityLine, "Community",
         "bestmixtape community build — updates & source: "

@@ -13,6 +13,8 @@
 #include "../core/mlx_memory_governor.hpp"
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <process.h>
 #else
 #include <unistd.h>
@@ -459,6 +461,40 @@ class MemoryPressureMonitor {
 
 }  // namespace
 
+
+void start_parent_watchdog(std::uint64_t parent_pid, const std::filesystem::path& log_path) {
+    if (parent_pid == 0) return;
+
+#ifdef _WIN32
+    HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(parent_pid));
+    if (parent != nullptr) {
+        std::thread([parent, log_path] {
+            WaitForSingleObject(parent, INFINITE);
+            RuntimeLogger logger(log_path);
+            logger.log("event=server_parent_exit action=terminate");
+            TerminateProcess(GetCurrentProcess(), 0);
+        }).detach();
+        // The handle intentionally stays open: the watchdog thread owns it.
+    }
+#elif __APPLE__
+    const pid_t expected_parent = static_cast<pid_t>(parent_pid);
+    std::thread([expected_parent, log_path] {
+        // getppid() re-parents to launchd (not necessarily exactly 1 on every
+        // macOS version) the moment our parent dies, so "not the PID we were
+        // spawned by" is the exit condition; loop-while-alive, then terminate.
+        while (::getppid() == expected_parent) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+        RuntimeLogger logger(log_path);
+        logger.log("event=server_parent_exit action=terminate");
+        std::_Exit(0);
+    }).detach();
+#else
+    (void)parent_pid;
+    (void)log_path;
+#endif
+}
+
 Result<void> HostPluginRuntimeService::run(const HostPluginRuntimeServiceOptions& options) {
     RuntimeLogger logger(options.log_path.empty() ? common::host_plugin_runtime_server_log_path()
                                                   : options.log_path);
@@ -511,6 +547,8 @@ Result<void> HostPluginRuntimeService::run(const HostPluginRuntimeServiceOptions
                    " detail=" + sanitize_log_token(server.error().message));
         return Unexpected<Error>(server.error());
     }
+
+    start_parent_watchdog(options.parent_pid, options.log_path);
 
     HostPluginSessionBroker broker(options.broker);
     bool should_exit = false;

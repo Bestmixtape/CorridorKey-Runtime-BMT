@@ -104,6 +104,21 @@ Result<void> parse_runtime_service_options(const std::vector<std::string>& args,
             continue;
         }
 
+        if (token == "--parent-pid") {
+            if (index + 1 >= args.size()) {
+                return Unexpected<Error>(Error{
+                    ErrorCode::InvalidParameters,
+                    "Missing value for --parent-pid.",
+                });
+            }
+            auto pid = parse_positive_int(args[++index], "--parent-pid");
+            if (!pid) {
+                return Unexpected<Error>(pid.error());
+            }
+            options.parent_pid = static_cast<std::uint64_t>(*pid);
+            continue;
+        }
+
         if (token == "--endpoint-port") {
             if (index + 1 >= args.size()) {
                 return Unexpected<Error>(Error{

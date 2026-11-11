@@ -371,7 +371,8 @@ bool model_pack_present(const std::filesystem::path& dir, std::optional<ModelTra
 ModelPackEnsureResult ensure_model_pack_impl(const std::filesystem::path& dir,
                                              const std::string& only_file,
                                              const std::vector<ModelPackFile>& selected_in,
-                                             const char* status_track) {
+                                             const char* status_track,
+                                             const char* status_stage = "ofx-first-run-model-fetch") {
     ModelPackEnsureResult result;
     std::error_code error;
     std::filesystem::create_directories(dir, error);
@@ -479,12 +480,12 @@ ModelPackEnsureResult ensure_model_pack_impl(const std::filesystem::path& dir,
                        : model_pack_file_present(dir, selected[0]));
     if (complete) {
         if (only_file.empty()) {
-            // model_pack_status.json mirrors the packaging-stage status file
-            // shape (stage / models_dir / expected / present / missing /
-            // counts). Only written for full-pack runs; --only single-file
-            // fetches (installer smoke tests) leave it untouched.
-            nlohmann::json status;
-        status["stage"] = "ofx-first-run-model-fetch";
+                    // model_pack_status.json mirrors the packaging-stage status file
+                    // shape (stage / models_dir / expected / present / missing /
+                    // counts). Only written for full-pack runs; --only single-file
+                    // fetches (installer smoke tests) leave it untouched.
+                    nlohmann::json status;
+                status["stage"] = status_stage;
         status["models_dir"] = dir.string();
         // BMT Build: records the precision track this pack run targeted so
         // later launches and the status panel know which artifact set the
@@ -502,10 +503,12 @@ ModelPackEnsureResult ensure_model_pack_impl(const std::filesystem::path& dir,
             }
         }
         status["expected_models"] = std::move(expected_models);
-        status["present_models"] = std::move(present_models);
+        int present_count = static_cast<int>(present_models.size());
+        int missing_count = static_cast<int>(missing_models.size());
+        status["present_models"] = present_models;  // copy; present_models valid for move below
         status["missing_models"] = std::move(missing_models);
-        status["present_count"] = static_cast<int>(present_models.size());
-        status["missing_count"] = static_cast<int>(missing_models.size());
+        status["present_count"] = present_count;
+        status["missing_count"] = missing_count;
         status["missing_models_allowed"] = false;
         status["parity_validated_models"] = nlohmann::json::array();
         status["contract_validated_models"] = std::move(present_models);
@@ -584,7 +587,8 @@ std::string model_pack_status_label(const std::filesystem::path& dir,
 // BMT v0.3: single-track path keeps the resolve_model_track() default of old.
 ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
                                         const std::string& only_file,
-                                        std::optional<ModelTrack> track) {
+                                        std::optional<ModelTrack> track,
+                                        const char* stage) {
     const ModelTrack active_track = track.value_or(resolve_model_track());
     // --only runs fetch any table entry regardless of track (installer smoke
     // tests / manual pulls); full-pack follows the track's platform set.
@@ -599,13 +603,14 @@ ModelPackEnsureResult ensure_model_pack(const std::filesystem::path& dir,
         }
     }
     return ensure_model_pack_impl(dir, only_file, selected,
-                                  model_track_name(active_track));
+                                  model_track_name(active_track), stage);
 }
 
 // BMT v0.3 installer mode: deduped union of the given tracks (shared hint
 // models counted once), one single-pass download covering the full pack.
 ModelPackEnsureResult ensure_model_pack_tracks(
-    const std::filesystem::path& dir, const std::vector<ModelTrack>& tracks) {
+    const std::filesystem::path& dir, const std::vector<ModelTrack>& tracks,
+    const char* stage) {
     std::vector<ModelPackFile> selected;
     for (const auto& track : tracks) {
         for (const auto& file : model_pack_files_for_track(track)) {
@@ -621,7 +626,7 @@ ModelPackEnsureResult ensure_model_pack_tracks(
             }
         }
     }
-    return ensure_model_pack_impl(dir, {}, selected, "both");
+    return ensure_model_pack_impl(dir, {}, selected, "both", stage);
 }
 
 }  // namespace corridorkey::app

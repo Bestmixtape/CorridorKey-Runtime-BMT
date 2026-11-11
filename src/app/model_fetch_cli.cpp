@@ -48,7 +48,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         PostQuitMessage(0);
         return 0;
     }
-    return DefWindowProc(hwnd, msg, w, l);
+    // DefWindowProcW, NOT the DefWindowProc macro: this target does not
+    // define UNICODE, so the macro binds the ANSI thunk, whose CREATESTRUCT
+    // conversion truncates the wide window title at its first embedded NUL
+    // (the caption rendered as just "C" in v0.3.1 — reproduced live).
+    return DefWindowProcW(hwnd, msg, w, l);
 }
 
 bool g_visible = false;
@@ -305,7 +309,8 @@ int main(int argc, char** argv) {
         // Fetch on a worker thread; the main thread owns the progress window
         // and its message loop (needed for live repaints).
         std::thread fetch([&]() {
-            result = ensure_model_pack_tracks(std::filesystem::path(dest), tracks);
+            result = ensure_model_pack_tracks(std::filesystem::path(dest), tracks,
+                                              "installer-model-pack-fetch");
 #ifdef _WIN32
             ui::finish(result.ok, result.error);
 #endif
@@ -319,7 +324,8 @@ int main(int argc, char** argv) {
     else
 #endif
     {
-        result = ensure_model_pack_tracks(std::filesystem::path(dest), tracks);
+        result = ensure_model_pack_tracks(std::filesystem::path(dest), tracks,
+                                          "installer-model-pack-fetch");
         stop_poller.store(true);
     }
     poller.join();

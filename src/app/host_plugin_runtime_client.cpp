@@ -22,6 +22,7 @@ extern char** environ;
 #include <windows.h>
 #else
 #include <signal.h>
+#include <unistd.h>
 #include <spawn.h>
 extern char** environ;
 #endif
@@ -869,8 +870,9 @@ Result<void> HostPluginRuntimeClient::launch_server() {
 #ifdef _WIN32
     std::wstring command_line = L"\"" + m_options.server_binary.wstring() +
                                 L"\" host-plugin-runtime-server --endpoint-port " +
-                                std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
-                                std::to_wstring(m_options.idle_timeout_ms);
+                                    std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
+                                    std::to_wstring(m_options.idle_timeout_ms) + L" --parent-pid " +
+                                    std::to_wstring(GetCurrentProcessId());
 
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
@@ -898,14 +900,17 @@ Result<void> HostPluginRuntimeClient::launch_server() {
     CloseHandle(process_info.hProcess);
 #else
     std::string port = std::to_string(m_options.endpoint.port);
-    std::string idle_timeout = std::to_string(m_options.idle_timeout_ms);
-    std::vector<char*> argv = {const_cast<char*>(m_options.server_binary.c_str()),
-                               const_cast<char*>("host-plugin-runtime-server"),
-                               const_cast<char*>("--endpoint-port"),
-                               port.data(),
-                               const_cast<char*>("--idle-timeout-ms"),
-                               idle_timeout.data(),
-                               nullptr};
+        std::string idle_timeout = std::to_string(m_options.idle_timeout_ms);
+        std::string parent_pid_str = std::to_string(static_cast<long>(::getpid()));
+        std::vector<char*> argv = {const_cast<char*>(m_options.server_binary.c_str()),
+                                   const_cast<char*>("host-plugin-runtime-server"),
+                                   const_cast<char*>("--endpoint-port"),
+                                   port.data(),
+                                   const_cast<char*>("--idle-timeout-ms"),
+                                   idle_timeout.data(),
+                                   const_cast<char*>("--parent-pid"),
+                                   parent_pid_str.c_str(),
+                                   nullptr};
     pid_t pid = 0;
 #if defined(__APPLE__)
     // DaVinci Resolve invokes OFX render actions on UTILITY/BACKGROUND QoS

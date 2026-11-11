@@ -2273,10 +2273,15 @@ OfxStatus instance_changed(OfxImageEffectHandle instance, OfxPropertySetHandle i
             }
             if (changed_param == kParamBmtExportMatte) {
                 // BMT Build: one-click matte export. The handler runs on the
-                // main thread (instance_changed), so it only captures the
-                // clip name + arms the one-shot request; the PNG write rides
-                // the next Render (see ofx_matte_export.cpp).
-                handle_matte_export_request(data);
+                // main thread (instance_changed). Idle/completed states arm a
+                // new sequence (dialog + extent read); a second click while
+                // streaming (state 3) stops and finalizes instead.
+                int state = data->matte_export_state.load();
+                if (state == 3) {
+                    handle_matte_export_stop(data);
+                } else {
+                    handle_matte_export_request(data);
+                }
                 return kOfxStatOK;
             }
             if (changed_param == kParamOpenLogFolder) {

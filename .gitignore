@@ -117,3 +117,4 @@ final_*.log
 package_*.log
 build_*.log
 offline_stage.log
+scratch/*.log

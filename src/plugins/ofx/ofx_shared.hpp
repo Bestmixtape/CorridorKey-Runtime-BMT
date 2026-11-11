@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -290,18 +291,28 @@ struct InstanceData {
     bool runtime_panel_dirty = false;
 
     // BMT Build: one-shot matte export armed by the "Export Matte (PNG
-    // sequence)" push button. The button handler (main thread) only records
-    // the request; the actual alpha capture + PNG write happens inside the
-    // next host-driven Render action (see ofx_matte_export.cpp) because OFX
-    // clip/image getters are host-locked and must not be called from a
-    // plugin-spawned thread. State machine: 0 = idle, 1 = request queued
-    // (render will consume), 2 = completed (result in matte_status_line).
-    std::atomic<int> matte_export_state{0};
-    // Guards matte_clip_name / matte_status_line: written from the render
-    // thread, surfaced from the main-thread panel refresh.
-    std::mutex matte_export_mutex;
-    std::string matte_clip_name;   // sanitized source clip name (button press)
-    std::string matte_status_line; // last export result for the panel row
+        // sequence)" push button. The button handler (main thread) only records
+        // the request; the actual alpha capture + PNG write happens inside the
+        // next host-driven Render action (see ofx_matte_export.cpp) because OFX
+        // clip/image getters are host-locked and must not be called from a
+        // plugin-spawned thread.
+        // State machine (all guarded by matte_export_mutex):
+        //   0 = idle
+        //   1 = legacy single-frame request queued (render will consume)
+        //   2 = completed (result in matte_status_line)
+        //   3 = streaming sequence armed (dialog accepted, dir/stem/frame-count set;
+        //       render writes frames until written == expected_frames, then -> 2)
+        std::atomic<int> matte_export_state{0};
+        // Guards matte_clip_name / matte_status_line / matte_export_dir / matte_export_stem /
+        // matte_expected_frames / matte_written_frames: written from the render
+        // thread, surfaced from the main-thread panel refresh.
+        std::mutex matte_export_mutex;
+        std::string matte_clip_name;         // sanitized source clip name (button press)
+        std::string matte_status_line;       // last export result for the panel row
+        std::filesystem::path matte_export_dir; // user-chosen directory for sequence export
+        std::string matte_export_stem;       // user-chosen base name (no extension)
+        long long matte_expected_frames = 0; // total frames in clip extent
+        std::set<long long> matte_written_frames; // clip-relative indices already written
 
     // Last (severity, body) pushed to the OFX message suite via
     // setPersistentMessage. setPersistentMessage replaces the alert bound to

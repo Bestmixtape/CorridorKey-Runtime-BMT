@@ -47,7 +47,7 @@ Name: "{app}"
 Filename: "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT"; Description: "Open the CorridorKey BMT page"; Flags: shellexec postinstall skipifsilent nowait
 
 [Code]
-// BMT v0.3: the model pack (~2.4 GB) downloads DURING installation, right
+// BMT v0.3: the model pack (~3.0 GB full pack) downloads DURING installation, right
 // after the plugin files land, instead of on the OFX plugin's first use. The
 // helper process owns the live progress window (Inno's Exec blocks the
 // wizard), and its PLAN/PROGRESS/DONE stdout protocol lands in the setup log.

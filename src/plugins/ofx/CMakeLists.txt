@@ -6,46 +6,34 @@ if(NOT EXISTS "${_corridorkey_ofx_sdk_root}/include/ofxImageEffect.h")
         "OpenFX SDK not found at ${_corridorkey_ofx_sdk_root}. Run: git clone https://github.com/AcademySoftwareFoundation/openfx vendor/openfx")
 endif()
 
+set(_corridorkey_ofx_sources
+    ofx_actions.cpp
+    ofx_frame_cache.cpp
+    ofx_frame_cache.hpp
+    ofx_image_utils.cpp
+    ofx_instance.cpp
+    ofx_logging.cpp
+    ofx_matte_export.cpp
+    ofx_matte_export.hpp
+    ofx_plugin.cpp
+    ofx_plugin_descriptors.cpp
+    ofx_plugin_descriptors.hpp
+    ofx_render.cpp
+    ofx_image_utils.hpp
+    ofx_status_overlay.cpp
+    ofx_status_overlay.hpp
+    ofx_logging.hpp
+    ofx_shared.hpp
+)
+
+if(APPLE)
+    list(APPEND _corridorkey_ofx_sources ofx_matte_save_panel.mm)
+endif()
+
 if(WIN32)
-    add_library(corridorkey_ofx SHARED
-        ofx_actions.cpp
-        ofx_frame_cache.cpp
-        ofx_frame_cache.hpp
-        ofx_image_utils.cpp
-        ofx_instance.cpp
-        ofx_logging.cpp
-        ofx_matte_export.cpp
-        ofx_matte_export.hpp
-        ofx_plugin.cpp
-        ofx_plugin_descriptors.cpp
-        ofx_plugin_descriptors.hpp
-        ofx_render.cpp
-        ofx_image_utils.hpp
-        ofx_status_overlay.cpp
-        ofx_status_overlay.hpp
-        ofx_logging.hpp
-        ofx_shared.hpp
-    )
+    add_library(corridorkey_ofx SHARED ${_corridorkey_ofx_sources})
 else()
-    add_library(corridorkey_ofx MODULE
-        ofx_actions.cpp
-        ofx_frame_cache.cpp
-        ofx_frame_cache.hpp
-        ofx_image_utils.cpp
-        ofx_instance.cpp
-        ofx_logging.cpp
-        ofx_matte_export.cpp
-        ofx_matte_export.hpp
-        ofx_plugin.cpp
-        ofx_plugin_descriptors.cpp
-        ofx_plugin_descriptors.hpp
-        ofx_render.cpp
-        ofx_image_utils.hpp
-        ofx_status_overlay.cpp
-        ofx_status_overlay.hpp
-        ofx_logging.hpp
-        ofx_shared.hpp
-    )
+    add_library(corridorkey_ofx MODULE ${_corridorkey_ofx_sources})
 endif()
 
 target_include_directories(corridorkey_ofx PRIVATE
@@ -53,6 +41,7 @@ target_include_directories(corridorkey_ofx PRIVATE
     ${_corridorkey_ofx_sdk_root}/include
     ${CMAKE_SOURCE_DIR}/third_party/stb
     ${CMAKE_BINARY_DIR}/generated
+    ${CMAKE_BINARY_DIR}/generated/include
 )
 
 # The .ofx links exclusively against corridorkey_common (no ONNX Runtime).
@@ -70,6 +59,13 @@ if(APPLE)
     # be on the plugin's own link line. System framework: does not violate
     # the no-ORT/no-MLX import contract checked by the CI verify step.
     target_link_libraries(corridorkey_ofx PRIVATE "-framework Accelerate")
+    # ofx_matte_save_panel.mm uses AppKit (NSSavePanel).
+    target_link_libraries(corridorkey_ofx PRIVATE "-framework AppKit")
+endif()
+if(WIN32)
+    # ofx_matte_export.cpp uses IFileSaveDialog (CoCreateInstance, ole32)
+    # and shell32 for IShellItem.
+    target_link_libraries(corridorkey_ofx PRIVATE ole32 shell32)
 endif()
 corridorkey_apply_windows_common_compile_defs(corridorkey_ofx)
 
