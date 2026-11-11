@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <sys/qos.h>
+#include <unistd.h>  // ::getpid for --parent-pid
 extern char** environ;
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -909,7 +910,7 @@ Result<void> HostPluginRuntimeClient::launch_server() {
                                    const_cast<char*>("--idle-timeout-ms"),
                                    idle_timeout.data(),
                                    const_cast<char*>("--parent-pid"),
-                                   parent_pid_str.c_str(),
+                                   parent_pid_str.data(),
                                    nullptr};
     pid_t pid = 0;
 #if defined(__APPLE__)
