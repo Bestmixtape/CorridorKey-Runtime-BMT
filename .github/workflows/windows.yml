@@ -50,7 +50,7 @@ jobs:
         run: git clone --depth=1 https://github.com/AcademySoftwareFoundation/OpenFX vendor/openfx
 
       - name: Restore vcpkg binary cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: C:/vcpkg-bcache
           key: ${{ runner.os }}-vcpkg-x64-windows-v1-${{ hashFiles('vcpkg.json', 'external/ports/**') }}
@@ -83,7 +83,7 @@ jobs:
           fi
           echo "vcpkg root: $VCPKG_RESOLVED"
       - name: Cache vcpkg binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: C:\vcpkg-bcache
           key: vcpkg-bmt-win-v1
