@@ -38,7 +38,8 @@ extern "C" bool bmt_matte_native_save_panel(const char* default_name_utf8,
         // UTType-based filter on macOS 11+; allowedFileTypes is deprecated
         // and would be fatal under -Werror if referenced unguarded.
         if (__builtin_available(macOS 11.0, *)) {
-            panel.allowedContentTypes = @[[UTType pngType]];
+            panel.allowedContentTypes =
+                @[[UTType typeWithIdentifier:@"public.png"]];
         } else {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -52,7 +53,7 @@ extern "C" bool bmt_matte_native_save_panel(const char* default_name_utf8,
         [panel setPrompt:@"Export"];
 
         NSInteger response = [panel runModal];
-        if (response == NSFileHandlingPanelOKButton) {
+        if (response == NSModalResponseOK) {
             NSURL* url = [panel URL];
             if (url != nil) {
                 NSString* path_str = [url path];
