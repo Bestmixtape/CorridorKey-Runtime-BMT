@@ -67,7 +67,7 @@ void set_parent(OfxPropertySetHandle param_props, const char* parent) {
 
 void define_double_param(OfxParamSetHandle param_set, const char* name, const char* label,
                          double default_value, double min_value, double max_value, const char* hint,
-                         const char* parent = nullptr) {
+                         const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeDouble, name, &param_props);
@@ -85,12 +85,15 @@ void define_double_param(OfxParamSetHandle param_set, const char* name, const ch
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     set_parent(param_props, parent);
 }
 
 void define_int_param(OfxParamSetHandle param_set, const char* name, const char* label,
                       int default_value, int min_value, int max_value, const char* hint,
-                      const char* parent = nullptr, bool enabled = true) {
+                      const char* parent = nullptr, bool enabled = true, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeInteger, name, &param_props);
@@ -109,11 +112,14 @@ void define_int_param(OfxParamSetHandle param_set, const char* name, const char*
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
     }
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     set_parent(param_props, parent);
 }
 
 void define_bool_param(OfxParamSetHandle param_set, const char* name, const char* label,
-                       int default_value, const char* hint, const char* parent = nullptr) {
+                       int default_value, const char* hint, const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeBoolean, name, &param_props);
@@ -126,6 +132,9 @@ void define_bool_param(OfxParamSetHandle param_set, const char* name, const char
     g_suites.property->propSetInt(param_props, kOfxParamPropDefault, 0, default_value);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
     }
     set_parent(param_props, parent);
 }
@@ -163,7 +172,7 @@ void define_choice_param(OfxParamSetHandle param_set, const char* name, const ch
 
 void define_rgb_param(OfxParamSetHandle param_set, const char* name, const char* label,
                       double default_r, double default_g, double default_b, const char* hint,
-                      const char* parent = nullptr) {
+                      const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeRGB, name, &param_props);
@@ -180,6 +189,9 @@ void define_rgb_param(OfxParamSetHandle param_set, const char* name, const char*
     g_suites.property->propSetDouble(param_props, kOfxParamPropDefault, 2, default_b);
     if (hint != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropHint, 0, hint);
+    }
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
     }
     set_parent(param_props, parent);
 }
@@ -264,7 +276,7 @@ void define_info_param(OfxParamSetHandle param_set, const char* name, const char
 }
 
 void define_group_param(OfxParamSetHandle param_set, const char* name, const char* label, bool open,
-                        const char* parent = nullptr) {
+                        const char* parent = nullptr, bool secret = false) {
     OfxPropertySetHandle param_props = nullptr;
     OfxStatus status =
         g_suites.parameter->paramDefine(param_set, kOfxParamTypeGroup, name, &param_props);
@@ -275,6 +287,9 @@ void define_group_param(OfxParamSetHandle param_set, const char* name, const cha
 
     g_suites.property->propSetString(param_props, kOfxPropLabel, 0, label);
     g_suites.property->propSetInt(param_props, kOfxParamPropGroupOpen, 0, open ? 1 : 0);
+    if (secret) {
+        g_suites.property->propSetInt(param_props, kOfxParamPropSecret, 0, 1);
+    }
     if (parent != nullptr) {
         g_suites.property->propSetString(param_props, kOfxParamPropParent, 0, parent);
     }
@@ -365,8 +380,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         log_message("describe_in_context", "Unsupported context.");
         return kOfxStatErrUnsupported;
     }
-    const bool is_blue_descriptor = is_blue_node_identifier(plugin_identifier);
-
+    (void)plugin_identifier;
     OfxPropertySetHandle clip_props = nullptr;
     if (g_suites.image_effect->clipDefine(descriptor, kOfxImageEffectSimpleSourceClipName,
                                           &clip_props) != kOfxStatOK) {
@@ -397,7 +411,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     g_suites.property->propSetString(clip_props, kOfxImageEffectPropSupportedComponents, 0,
                                      kOfxImageComponentRGBA);
 
-    OfxParamSetHandle param_set = nullptr;
+        OfxParamSetHandle param_set = nullptr;
     if (g_suites.image_effect->getParamSet(descriptor, &param_set) != kOfxStatOK) {
         log_message("describe_in_context", "Failed to get param set.");
         return kOfxStatFailed;
@@ -469,17 +483,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "the rolling average. This value persists across playback sequences until a new frame is "
         "computed.",
         "runtime_group", hide_per_frame_on_host);
-    // kParamRuntimePath and kParamRuntimeBackendWork live in the
-    // runtime_details_group subgroup further below. They are defined exactly
-    // once per OFX 1.5 spec (vendor/openfx/include/ofxParam.h:912 verbatim:
-    // "name -- unique name of the parameter"; ofxParam.h:362-363: "Valid
-    // Values - ASCII string unique to all parameters in the plug-in").
-    // DaVinci Resolve historically tolerates duplicate paramDefine names by
-    // silently keeping the first; Foundry Nuke 17 follows the spec and may
-    // invalidate the descriptor on the first duplicate, leaving the param
-    // panel empty. The regression test
-    // "describe_in_context defines every param exactly once"
-    // pins this contract.
 
     // Update banner params follow the Natron-documented Nuke quirk: params
     // declared as secret in describe can never be revealed afterwards on
@@ -571,18 +574,88 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                              "Manually check GitHub for a newer CorridorKey release.",
                              kParamHelpGroup);
 
-    // --- Group 3: Key Setup (the two choices that determine the AI result) ---
-    define_group_param(param_set, "setup_group", "Key Setup", true);
+    // --- Group 3: CorridorKey 2.0 (main controls) ---
+    // v0.4: This group replaces the v1 parameter ladder (Quality/precision/tiling/etc.)
+    // with the official CorridorKey 2.0 settings surface.
+    define_group_param(param_set, kParamCk2Group, "CorridorKey 2.0", true);
 
-    // BMT Build: "Key Colour" is the single in-panel switch that replaced the
-    // retired dedicated Blue descriptor (one effects-list entry now carries
-    // both weight families). The derived mode selects the green/blue model
-    // family at render time (ofx_render.cpp); Custom Picker additionally
-    // hue-rotates the model input so an arbitrary saturated background lands
-    // on the nearest trained hue (see post_process/hue_rotate.hpp). Defined
-    // immediately after the group so it renders at the top of Key Setup,
-    // with the picker swatch directly below it (hosts render params in
-    // definition order; no conditional hiding — the hints carry the gating).
+    // Hint Mode: 0=None, 1=First-frame hint, 2=Full hint video
+    define_choice_param(param_set, kParamCk2HintMode, "Hint Mode", kCk2HintModeNone,
+                        {"None", "First-Frame Hint", "Full Hint Video"},
+                        "Select the hint source for guiding the keyer. None = automatic rough fallback. "
+                        "First-Frame Hint = use the first frame's alpha hint for the entire clip. "
+                        "Full Hint Video = use a hint video (connected to Alpha Hint clip) for temporal guidance.",
+                        kParamCk2Group);
+
+    // Hint Path (file path for hint video/image when using Full Hint Video)
+    define_runtime_status_param(param_set, kParamCk2HintPath, "Hint Path", "No hint file selected",
+                                "Path to the hint video/image file. Used when Hint Mode is 'Full Hint Video'. "
+                                "Connect a clip to the Alpha Hint input for per-frame hints instead.",
+                                kParamCk2Group);
+
+    // Hint Quality: 0.95 / 0.75 / 0.5
+    define_choice_param(param_set, kParamCk2HintQuality, "Hint Quality", kCk2HintQualityDefaultIdx,
+                        {"High (0.95)", "Medium (0.75)", "Low (0.5)"},
+                        "Quality of the hint guidance. Higher values follow the hint more strictly. "
+                        "High (0.95) = strong adherence, Low (0.5) = loose guidance.",
+                        kParamCk2Group);
+
+    // Model Scale: 1.0 / 0.75 / 0.5
+    define_choice_param(param_set, kParamCk2ModelScale, "Model Scale", kCk2ModelScaleDefaultIdx,
+                        {"Full (1.0)", "Medium (0.75)", "Half (0.5)"},
+                        "Resolution scale for the model. Full (1.0) = native resolution. "
+                        "Lower scales are faster but may lose fine detail.",
+                        kParamCk2Group);
+
+    // Carry Hint: boolean default on
+    define_bool_param(param_set, kParamCk2CarryHint, "Carry Hint", 1,
+                      "When enabled, propagate the hint from frame to frame for temporal consistency. "
+                      "Disable for clips with discontinuous hint quality.",
+                      kParamCk2Group);
+
+    // Despill Strength: double 0-1 default 0.5
+    define_double_param(param_set, kParamCk2DespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
+                        "Strength of spill suppression on foreground edges. 0 = no despill, 1 = full despill.",
+                        kParamCk2Group);
+
+    // Auto VRAM: boolean default on
+    define_bool_param(param_set, kParamCk2AutoVram, "Auto VRAM", 1,
+                      "Automatically manage VRAM usage by selecting optimal Hann window chunk/stride. "
+                      "When disabled, Hann Chunk and Hann Stride are used manually.",
+                      kParamCk2Group);
+
+    // Hann Chunk: int default 80 (used when Auto VRAM off)
+    define_int_param(param_set, kParamCk2HannChunk, "Hann Chunk", kCk2HannChunkDefault, 16, 512,
+                     "Hann window chunk size for tiled processing. Used only when Auto VRAM is off. "
+                     "Larger chunks use more VRAM but reduce tile boundary artifacts.",
+                     kParamCk2Group, /*enabled=*/false);
+
+    // Hann Stride: int default 40 (used when Auto VRAM off)
+    define_int_param(param_set, kParamCk2HannStride, "Hann Stride", kCk2HannStrideDefault, 8, 256,
+                     "Hann window stride (overlap) for tiled processing. Used only when Auto VRAM is off. "
+                     "Larger strides increase overlap and reduce seams at the cost of more computation.",
+                     kParamCk2Group, /*enabled=*/false);
+
+    // Output Foreground: boolean default on
+    define_bool_param(param_set, kParamCk2OutputFg, "Output Foreground", 1,
+                      "When enabled, output the foreground (despilled RGB) alongside alpha. "
+                      "When disabled, only alpha is output (faster, less VRAM).",
+                      kParamCk2Group);
+
+    // Seed: int default -1 (random)
+    define_int_param(param_set, kParamCk2Seed, "Seed", -1, -1, 2147483647,
+                     "Random seed for reproducible results. -1 = random seed each session.",
+                     kParamCk2Group);
+
+
+
+    // --- Legacy v1 panels (hidden, kept for backward compatibility with tests) ---
+    const bool is_blue_descriptor = is_blue_node_identifier(plugin_identifier);
+    // These are defined but hidden so they don't appear in the UI while still
+    // existing in the parameter set for test compatibility.
+
+    // Group: setup_group (hidden)
+    define_group_param(param_set, "setup_group", "Key Setup", false);
     define_choice_param(param_set, kParamBmtKeyColourMode, "Key Colour",
                         kDefaultBmtKeyColourMode,
                         {"Blue Screen", "Green Screen", "Custom Picker (Experimental)"},
@@ -590,42 +663,19 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "model family with no colour preprocessing. Custom Picker "
                         "(Experimental) hue-rotates an arbitrary background colour to the "
                         "nearest trained colour — experimental.",
-                        "setup_group");
+                        "setup_group", /*enabled=*/true, /*secret=*/true);
     define_rgb_param(param_set, kParamBmtKeyColour, "Custom Key Colour", kDefaultBmtKeyColourR,
                      kDefaultBmtKeyColourG, kDefaultBmtKeyColourB,
                      "The background colour to key out. Only used when Key Colour is set to "
                      "Custom Picker: the engine hue-rotates the plate so this colour lands on "
-                     "the nearest trained colour (green or blue weights).",
-                     "setup_group");
-    // BMT Build: precision track switch. FP32 is the default first-run track
-    // (blue ships a dedicated FP32 artifact; a staged green
-    // corridorkey_torchtrt_fp32_<res>.ts wins over the fp16 ladder — see
-    // ofx_model_selection.hpp). The CORRIDORKEY_MODEL_TRACK env var overrides
-    // this choice for CLI/sidecar runs (app/model_track.hpp).
+                     "the nearest trained colour (green or blue weights)..",
+                     "setup_group", /*secret=*/true);
     define_choice_param(param_set, kParamBmtModelPrecision, "Model Precision",
                         kDefaultBmtModelPrecision,
                         {"FP32 (Recommended)", "FP16 (Experimental)"},
                         "FP16 models are smaller/faster but experimental on GTX/RTX-30-series "
                         "(Ampere) cards; FP32 is the supported default.",
-                        "setup_group");
-
-    // Per-descriptor screen-color contract (spec 0002 FR-8):
-    //
-    // - Blue descriptor hides the chooser entirely (secret=true) and
-    //   exposes a single option indexed at 0. The dedicated Blue model is
-    //   the only valid path; the render override in ofx_render.cpp maps
-    //   the raw choice value to kScreenColorBlue regardless of what the
-    //   param reports, so the param's actual storage shape stays clean
-    //   even on hosts that ignore secret-param defaults.
-    // - Green descriptor exposes a TWO-option chooser:
-    //   index 0 = Green direct (maps to kScreenColorGreen),
-    //   index 1 = Blue-Green Channel Swap (maps to kScreenColorBlueGreen).
-    //   Standalone "Blue" is no longer offered on the Green descriptor
-    //   because the dedicated Blue node serves that workflow now. Saved
-    //   projects whose Green node had the legacy `kScreenColorBlue` (1)
-    //   value naturally land on index 1 in the new layout, which the
-    //   render path remaps to Blue-Green Channel Swap — the closest
-    //   deterministic equivalent using the Green model.
+                        "setup_group", /*enabled=*/true, /*secret=*/true);
     const int screen_color_default = 0;
     const std::vector<const char*> screen_color_options =
         is_blue_descriptor ? std::vector<const char*>{"Blue"}
@@ -641,12 +691,6 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
     define_choice_param(param_set, kParamScreenColor, "Screen Color", screen_color_default,
                         screen_color_options, screen_color_hint, "setup_group",
                         /*enabled=*/true,
-                        // BMT Build: secret on every descriptor. The raw
-                        // screen_color value is superseded at render time by
-                        // the bmtKeyColourMode choice above; the param stays
-                        // defined (hidden) so saved graphs keep their
-                        // storage shape and the legacy value never fights
-                        // the new panel switch.
                         /*secret=*/true);
     define_choice_param(
         param_set, kParamQualityMode, "Quality", kQualityPreview,
@@ -657,7 +701,7 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "slot resolves to so saved projects render predictably without a host-dependent "
         "heuristic. Higher values produce better detail at the cost of speed. Resolutions: "
         "Draft (512), High (1024), Ultra (1536), Maximum (2048).",
-        "setup_group");
+        "setup_group", /*enabled=*/true, /*secret=*/true);
     define_choice_param(param_set, kParamInputColorSpace, "Input Color Space",
                         kDefaultInputColorSpace, {"sRGB", "Linear", "Host Managed"},
                         "How CorridorKey should interpret the incoming source. Host Managed "
@@ -665,21 +709,20 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "(sRGB). Linear means Linear Rec.709 (sRGB), not an arbitrary "
                         "project-linear space. If host-managed color is unavailable, CorridorKey "
                         "falls back to the manual Linear path.",
-                        "setup_group");
+                        "setup_group", /*enabled=*/true, /*secret=*/true);
 
-    // --- Group 4: Interior Detail (recover opaque source texture, not edge fixes) ---
-    define_group_param(param_set, "interior_detail_group", "Interior Detail", true);
-
+    // Group: interior_detail_group (hidden)
+    define_group_param(param_set, "interior_detail_group", "Interior Detail", false);
     define_bool_param(param_set, kParamSourcePassthrough, "Recover Original Details",
                       kDefaultSourcePassthroughEnabled,
                       "Blend original source pixels back into opaque interior regions for "
                       "sharper texture. This is not an edge-fix tool. Dedicated Blue keeps the "
                       "model foreground authoritative to avoid reintroducing blue-screen edge "
                       "color.",
-                      "interior_detail_group");
-    // --- Group 5: Matte (refine the AI-generated alpha) ---
-    define_group_param(param_set, "matte_group", "Matte", true);
+                      "interior_detail_group", /*secret=*/true);
 
+    // Group: matte_group (hidden)
+    define_group_param(param_set, "matte_group", "Matte", false);
     define_info_param(
         param_set, "alpha_hint_info", "Alpha Hint Input",
         "External Alpha Hint is preferred. If none is connected, CorridorKey uses a rough "
@@ -691,32 +734,31 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Fusion: Connect your matte to the secondary 'Alpha Hint' pin.\n"
         "Color Page: Right-click this node -> 'Add OFX Input', then route a Qualifier or 3D Keyer "
         "output into the new green input.",
-        "matte_group");
+        "matte_group", /*secret=*/true);
     define_double_param(param_set, kParamAlphaBlackPoint, "Matte Clip Black", 0.0, 0.0, 1.0,
                         "Remap matte: values at or below this become fully transparent.",
-                        "matte_group");
+                        "matte_group", /*secret=*/true);
     define_double_param(param_set, kParamAlphaWhitePoint, "Matte Clip White", 1.0, 0.0, 1.0,
-                        "Remap matte: values at or above this become fully opaque.", "matte_group");
+                        "Remap matte: values at or above this become fully opaque.", "matte_group", /*secret=*/true);
     define_double_param(param_set, kParamAlphaErode, "Matte Shrink/Grow", 0.0, -10.0, 10.0,
                         "Shrink (negative) or expand (positive) the matte edge. The effective "
                         "pixel radius scales with the source long edge using a 1920px baseline.",
-                        "matte_group");
+                        "matte_group", /*secret=*/true);
     define_double_param(param_set, kParamAlphaSoftness, "Matte Edge Blur", 0.0, 0.0, 5.0,
                         "Blur the matte edge to soften transitions. The effective pixel radius "
                         "scales with the source long edge using a 1920px baseline.",
-                        "matte_group");
-    // --- Group 6: Edge & Spill (despill and boundary cleanup only) ---
-    define_group_param(param_set, "edge_spill_group", "Edge & Spill", true);
+                        "matte_group", /*secret=*/true);
 
+    // Group: edge_spill_group (hidden)
+    define_group_param(param_set, "edge_spill_group", "Edge & Spill", false);
     define_double_param(param_set, kParamDespillStrength, "Despill Strength", 0.5, 0.0, 1.0,
                         "Strength of spill suppression for the selected screen color on "
                         "foreground edges. Dedicated Blue targets the blue channel directly; "
                         "Blue-Green Channel Swap uses the green-model path.",
-                        "edge_spill_group");
+                        "edge_spill_group", /*secret=*/true);
 
-    // --- Group 7: Output ---
-    define_group_param(param_set, "output_group", "Output", true);
-
+    // Group: output_group (hidden)
+    define_group_param(param_set, "output_group", "Output", false);
     define_choice_param(param_set, kParamOutputMode, "Output Mode", kOutputProcessed,
                         {"Processed", "Matte Only", "Foreground Only", "Source+Matte", "FG+Matte"},
                         "What to output.\n"
@@ -727,93 +769,77 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
                         "Source+Matte: original source premultiplied by AI matte.\n"
                         "FG+Matte: explicit linear foreground+matte alias of Processed for "
                         "manual compositing workflows and backward compatibility.",
-                        "output_group");
-
-    // BMT Build: one-click matte export. The button arms a one-shot capture
-    // (instance_changed, main thread); the PNG write happens inside the next
-    // host-driven Render of the current frame because OFX image getters are
-    // host-locked — see ofx_matte_export.cpp for the full rationale. The
-    // status row underneath mirrors the model-pack progress pattern.
+                        "output_group", /*secret=*/true);
     define_push_button_param(param_set, kParamBmtExportMatte, "Export Matte (PNG sequence)",
                              "Write the current frame's AI matte as a 16-bit grayscale PNG under "
                              "Documents\\CorridorKey2.0-BMT\\matte\\<clip-name>-frame<N>.png. "
                              "The result (including the output folder) appears in the row below "
                              "after the next render of this frame.",
-                             "output_group");
+                             "output_group", /*secret=*/true);
     define_runtime_status_param(param_set, kParamBmtMatteStatus, "Matte Export",
                                 "Idle — click Export Matte to write the current frame's matte.",
                                 "Status of the last Export Matte request; successful exports "
-                                "show the written file path.", "output_group");
+                                "show the written file path.", "output_group", /*secret=*/true);
 
-    // --- Group 8: Performance ---
+    // Group: performance_group (hidden)
     define_group_param(param_set, "performance_group", "Performance", false);
-
     define_bool_param(param_set, kParamEnableTiling, "Enable Tiling", 0,
                       "Process the full model output in overlapping tiles at source resolution. "
                       "Use this when lower quality modes lose too much detail and you accept a "
                       "slower, heavier full-model tiling path.",
-                      "performance_group");
-    // tile_overlap follows the kParamEnableTiling toggle (default 0). The
-    // initial enabled state must be set during describe_in_context — driving
-    // it from create_instance via paramSetValue / propSetInt is a side-effect
-    // that breaks strict OFX hosts (Foundry Nuke 17 crashes during
-    // OfxActionCreateInstance when plugins do that work).
+                      "performance_group", /*secret=*/true);
     define_int_param(param_set, kParamTileOverlap, "Tile Overlap", 64, 8, 128,
                      "Pixel overlap between tiles for seam-safe blending. Larger values reduce "
                      "tile boundary artifacts at the cost of more work.",
-                     "performance_group", /*enabled=*/false);
+                     "performance_group", /*enabled=*/false, /*secret=*/true);
 
-    // --- Group 9: Advanced (subdivided by intent for expert tuning) ---
+    // Group: advanced_group (hidden)
     define_group_param(param_set, "advanced_group", "Advanced", false);
-
     define_group_param(param_set, "advanced_interior_detail_group", "Advanced | Interior Detail",
-                       false, "advanced_group");
+                       false, "advanced_group", /*secret=*/true);
     define_group_param(param_set, "advanced_matte_group", "Advanced | Matte Cleanup", false,
-                       "advanced_group");
+                       "advanced_group", /*secret=*/true);
     define_group_param(param_set, "advanced_processing_group", "Advanced | Processing", false,
-                       "advanced_group");
+                       "advanced_group", /*secret=*/true);
     define_group_param(param_set, "advanced_runtime_group", "Advanced | Runtime", false,
-                       "advanced_group");
-
+                       "advanced_group", /*secret=*/true);
     define_int_param(param_set, kParamEdgeErode, "Details Edge Shrink", kDefaultEdgeErode, 0,
                      kMaxEdgeErode,
                      "Shrink the recovered-details mask before blending source detail. "
                      "Values scale with the source long edge using a 1920px baseline.",
-                     "advanced_interior_detail_group");
+                     "advanced_interior_detail_group", /*secret=*/true);
     define_int_param(param_set, kParamEdgeBlur, "Details Edge Feather", kDefaultEdgeBlur, 0,
                      kMaxEdgeBlur,
                      "Feather the recovered-details mask for a smoother handoff between source "
                      "detail and model foreground. Values scale with the source long edge using "
                      "a 1920px baseline.",
-                     "advanced_interior_detail_group");
+                     "advanced_interior_detail_group", /*secret=*/true);
     define_double_param(param_set, kParamAlphaGamma, "Matte Gamma", 1.0, 0.1, 10.0,
                         "Non-linear matte curve. Values above 1.0 brighten semi-transparent "
                         "areas. Values below 1.0 darken and tighten them. Default 1.0 is "
                         "neutral.",
-                        "advanced_matte_group");
+                        "advanced_matte_group", /*secret=*/true);
     define_bool_param(param_set, kParamAutoDespeckle, "Auto Despeckle", 0,
-                      "Clean small matte speckles automatically.", "advanced_matte_group");
-    // despeckle_size follows the kParamAutoDespeckle toggle (default 0).
+                      "Clean small matte speckles automatically.", "advanced_matte_group", /*secret=*/true);
     define_int_param(param_set, kParamDespeckleSize, "Min Region Size", 400, 50, 2000,
                      "Minimum connected component area in pixels to keep. "
                      "Regions smaller than this are removed.",
-                     "advanced_matte_group", /*enabled=*/false);
+                     "advanced_matte_group", /*enabled=*/false, /*secret=*/true);
     define_double_param(param_set, kParamTemporalSmoothing, "Temporal Smoothing",
                         kDefaultTemporalSmoothing, 0.0, 1.0,
                         "Blend current output with the previous frame for temporal stability.",
-                        "advanced_matte_group");
+                        "advanced_matte_group", /*secret=*/true);
     define_choice_param(param_set, kParamSpillMethod, "Spill Method", kDefaultSpillMethod,
                         {"Average", "Double Limit", "Neutral"},
                         "How removed spill color is replaced. Average redistributes across the "
                         "two non-screen channels. Double Limit uses the stronger non-screen "
                         "channel. Neutral replaces with gray.",
-                        "advanced_processing_group");
+                        "advanced_processing_group", /*secret=*/true);
     define_choice_param(param_set, kParamUpscaleMethod, "Upscale Method", kUpscaleBilinear,
                         {"Lanczos4", "Bilinear"},
                         "Method used to upscale model output to source resolution. "
                         "Lanczos4 is sharper; Bilinear is smoother.",
-                        "advanced_processing_group");
-
+                        "advanced_processing_group", /*secret=*/true);
     define_choice_param(
         param_set, kParamQualityFallbackMode, "Quality Fallback", kQualityFallbackAuto,
         {quality_fallback_mode_ui_label(kQualityFallbackAuto),
@@ -822,36 +848,34 @@ OfxStatus describe_in_context(OfxImageEffectHandle descriptor, const char* conte
         "Advanced diagnostics override. The 'Default' slot resolves deterministically to "
         "Direct (no coarse-to-fine). Direct disables coarse-to-fine. Coarse to Fine forces "
         "the fallback path.",
-        "advanced_processing_group");
-    define_choice_param(
-        param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
-        {refinement_mode_ui_label(kRefinementAuto), refinement_mode_ui_label(kRefinementFullFrame),
-         refinement_mode_ui_label(kRefinementTiled)},
-        "Advanced diagnostics override for validated refinement strategy "
-        "artifacts. Current packaged ONNX artifacts only support Packaged.",
-        "advanced_processing_group", false);
+        "advanced_processing_group", /*secret=*/true);
+    define_choice_param(param_set, kParamRefinementMode, "Refinement Mode", kRefinementAuto,
+                        {refinement_mode_ui_label(kRefinementAuto), refinement_mode_ui_label(kRefinementFullFrame),
+                         refinement_mode_ui_label(kRefinementTiled)},
+                        "Advanced diagnostics override for validated refinement strategy "
+                        "artifacts. Current packaged ONNX artifacts only support Packaged.",
+                        "advanced_processing_group", /*enabled=*/false, /*secret=*/true);
     define_choice_param(param_set, kParamCoarseResolutionOverride, "Coarse Resolution Override",
                         kCoarseResolutionAutomatic, {"Recommended", "512", "1024", "1536", "2048"},
                         "Advanced diagnostics override for the coarse artifact resolution.",
-                        "advanced_processing_group");
-
+                        "advanced_processing_group", /*secret=*/true);
     define_int_param(param_set, kParamRenderTimeout, "Render Timeout (s)",
                      common::kDefaultHostPluginRenderTimeoutSeconds, 10, 300,
                      "Maximum time in seconds to wait for a single frame render. "
                      "Increase for high-resolution modes on slower hardware.",
-                     "advanced_runtime_group");
+                     "advanced_runtime_group", /*secret=*/true);
     define_int_param(param_set, kParamPrepareTimeout, "Prepare Timeout (s)",
                      common::kDefaultHostPluginPrepareTimeoutSeconds, 30, 600,
                      "Maximum time in seconds to wait for model loading and bootstrap. "
                      "Increase if first-frame initialization times out.",
-                     "advanced_runtime_group");
+                     "advanced_runtime_group", /*secret=*/true);
     define_bool_param(
         param_set, kParamIncludePreReleases, "Include Pre-releases in Update Check", 0,
         "When enabled, the update banner surfaces pre-release builds in addition to stable "
         "releases. Re-evaluates against the cached release list on the next panel refresh.",
-        "advanced_runtime_group");
+        "advanced_runtime_group", /*secret=*/true);
 
-    // --- Group 10: BMT Build — About (footer, defined last so it renders at
+    // --- Group 4: BMT Build — About (footer, defined last so it renders at
     // the bottom of the host panel). Static credit lines + a Check for Update
     // button that reuses the standard update-check pipeline: on notification
     // (ofx_instance.cpp) it forces kickoff_global_update_check(true) against
