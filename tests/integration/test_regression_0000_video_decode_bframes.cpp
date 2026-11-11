@@ -24,6 +24,10 @@ TEST_CASE("VideoReader decodes all frames with B-frames", "[integration][video][
     auto sample_path =
         std::filesystem::path(PROJECT_ROOT) / "assets/video_samples/greenscreen_1769569320.mp4";
 
+    if (!std::filesystem::exists(sample_path)) {
+        SKIP("Test video asset not found at " + sample_path.string() + "; skipping VideoReader B-frame test");
+    }
+
     auto reader_res = VideoReader::open(sample_path);
     REQUIRE(reader_res.has_value());
     auto reader = std::move(*reader_res);
@@ -44,6 +48,10 @@ TEST_CASE("VideoReader decodes all frames with B-frames", "[integration][video][
 TEST_CASE("VideoReader reports stable fps for sample clip", "[integration][video][regression]") {
     auto sample_path =
         std::filesystem::path(PROJECT_ROOT) / "assets/video_samples/greenscreen_1769569320.mp4";
+
+    if (!std::filesystem::exists(sample_path)) {
+        SKIP("Test video asset not found at " + sample_path.string() + "; skipping VideoReader FPS test");
+    }
 
     auto reader_res = VideoReader::open(sample_path);
     REQUIRE(reader_res.has_value());

@@ -153,6 +153,12 @@ constexpr int kCk2HintModeNone = 0;
 constexpr int kCk2HintModeFirstFrame = 1;
 constexpr int kCk2HintModeFullVideo = 2;
 
+// BMT v0.4: CorridorKey 2.0 worker-stack locations (definitions in
+// ofx_instance.cpp; the render TU needs them for its readiness gate too).
+std::filesystem::path worker_root_dir();
+std::filesystem::path bundled_python_dir();
+bool bundle_has_worker_layout();
+
 // v0.4: Hint quality choices (indices match choice param options)
 constexpr float kCk2HintQualityHigh = 0.95f;
 constexpr float kCk2HintQualityMedium = 0.75f;

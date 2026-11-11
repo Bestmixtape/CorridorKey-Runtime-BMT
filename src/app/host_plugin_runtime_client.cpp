@@ -285,9 +285,26 @@ std::filesystem::path resolve_host_plugin_runtime_server_binary(
 #ifdef _WIN32
     if (auto shared_root = common::host_plugin_shared_runtime_root(plugin_module_path);
         shared_root.has_value()) {
-        return *shared_root / "Contents" / "Win64" / "corridorkey_host_plugin_runtime_server.exe";
+        // v0.4 production layout: Contents/Win64/runtime/python/python.exe +
+        // Contents/Win64/runtime/worker/bmt_worker.py. Prefer the Python
+        // worker whenever the bundle carries it (2.0 engine); fall back to
+        // the legacy C++ runtime server exe for v0.3-style bundles.
+        const auto win64 = *shared_root / "Contents" / "Win64";
+        std::error_code ec;
+        if (std::filesystem::exists(win64 / "runtime" / "python" / "python.exe", ec) && !ec &&
+            std::filesystem::exists(win64 / "runtime" / "worker" / "bmt_worker.py", ec) && !ec) {
+            return win64 / "runtime" / "python" / "python.exe";
+        }
+        return win64 / "corridorkey_host_plugin_runtime_server.exe";
     }
     auto win64_dir = plugin_module_path.parent_path();
+    {
+        std::error_code ec;
+        if (std::filesystem::exists(win64_dir / "runtime" / "python" / "python.exe", ec) && !ec &&
+            std::filesystem::exists(win64_dir / "runtime" / "worker" / "bmt_worker.py", ec) && !ec) {
+            return win64_dir / "runtime" / "python" / "python.exe";
+        }
+    }
     return win64_dir / "corridorkey_host_plugin_runtime_server.exe";
 #elif defined(__linux__) || defined(__APPLE__)
     // Linux/macOS (BMT) host plugin bundle layout places the plugin binary and
@@ -877,11 +894,13 @@ Result<void> HostPluginRuntimeClient::launch_server() {
     log_message("host_plugin_runtime_client",
                 "event=launch_server path=" + m_options.server_binary.string());
 
-    // v0.4: Detect Python worker launch via CORRIDORKEY_WORKER_PYTHON env var.
-    // When set, m_options.server_binary is the python.exe path. We compose the
-    // worker script path from CORRIDORKEY_WORKER_SCRIPT or default to
-    // <python_dir>/runtime/bmt_worker.py (production bundle layout).
+    // v0.4: A Python worker is launched when the resolved server binary IS an
+    // embedded python.exe (production layout or CORRIDORKEY_WORKER_PYTHON
+    // override). The script comes from CORRIDORKEY_WORKER_SCRIPT or the
+    // bundle layout next to the interpreter.
+    const auto server_name = m_options.server_binary.filename().string();
     const bool is_python_worker =
+        server_name == "python.exe" || server_name == "python" ||
         common::environment_variable_copy("CORRIDORKEY_WORKER_PYTHON").has_value();
 
     std::filesystem::path worker_script_path;
@@ -890,9 +909,14 @@ Result<void> HostPluginRuntimeClient::launch_server() {
             script_override.has_value()) {
             worker_script_path = std::filesystem::path(*script_override);
         } else {
-            // Default production layout: <plugin_bundle>/Contents/Win64/runtime/bmt_worker.py
-            // or <python_dir>/runtime/bmt_worker.py
-            worker_script_path = m_options.server_binary.parent_path() / "runtime" / "bmt_worker.py";
+            // Production layout: <win64>/runtime/python/python.exe with the
+            // script at <win64>/runtime/worker/bmt_worker.py; also accept
+            // <python_dir>/runtime/bmt_worker.py (dev layouts).
+            const auto py_dir = m_options.server_binary.parent_path();
+            worker_script_path = py_dir / "worker" / "bmt_worker.py";
+            if (!std::filesystem::exists(worker_script_path)) {
+                worker_script_path = py_dir / "runtime" / "bmt_worker.py";
+            }
         }
         if (!std::filesystem::exists(worker_script_path)) {
             return Unexpected<Error>(

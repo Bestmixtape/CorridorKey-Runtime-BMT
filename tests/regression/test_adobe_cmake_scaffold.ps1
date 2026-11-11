@@ -28,7 +28,13 @@ function Test-TextContainsPath {
 
     $forwardPath = $Path.Replace("\", "/")
     $backwardPath = $Path.Replace("/", "\")
-    return $Text.Contains($forwardPath) -or $Text.Contains($backwardPath)
+    # Windows path comparison must be case-insensitive: $env:TEMP can be drive-
+    # lower-case ("c:\temp") while CMake/Ninja normalize it to "C:\temp", and
+    # String.Contains is ordinal. Ninja additionally escapes ':' as '$:'.
+    $comparison = [StringComparison]::OrdinalIgnoreCase
+    return ($Text.IndexOf($forwardPath, $comparison) -ge 0) -or
+        ($Text.IndexOf($backwardPath, $comparison) -ge 0) -or
+        ($Text.Replace('$:', ':').IndexOf($forwardPath, $comparison) -ge 0)
 }
 
 try {

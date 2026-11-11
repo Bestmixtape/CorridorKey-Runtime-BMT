@@ -114,6 +114,65 @@ if(WIN32)
     file(GLOB _corridorkey_host_plugin_runtime_dlls
         "${CORRIDORKEY_ORT_RUNTIME_DIR}/*.dll")
 
+    # ------------------------------------------------------------------
+    # BMT v0.4: CorridorKey 2.0 Python worker stack, staged INTO the OFX
+    # bundle so the zip/Inno/WiX packagers inherit it with no extra steps
+    # (they already take Contents/** recursively) and the plugin launcher
+    # finds Contents/Win64/runtime/python/python.exe + runtime/worker/.
+    # Heavy material (torch cu128 env, ck2 weights/VFMs) deliberately
+    # stays out of the bundle/installer: it is fetched at install time by
+    # corridorkey_model_fetch --worker into %LOCALAPPDATA%\CorridorKey2.0-BMT\worker.
+    # ------------------------------------------------------------------
+    set(_pyembed_zip "${CMAKE_BINARY_DIR}/_pyembed/python-3.12.10-embed-amd64.zip")
+    if(NOT EXISTS "${_pyembed_zip}")
+        file(DOWNLOAD "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
+            "${_pyembed_zip}"
+            EXPECTED_HASH SHA256=4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3
+            INACTIVITY_TIMEOUT 30 SHOW_PROGRESS
+            STATUS _pyembed_status)
+        list(GET _pyembed_status 0 _pyembed_rc)
+        if(NOT _pyembed_rc EQUAL 0)
+            list(GET _pyembed_status 1 _pyembed_err)
+            file(REMOVE "${_pyembed_zip}")
+            message(WARNING
+                "BMT v0.4: CPython 3.12.10 embeddable download failed (${_pyembed_err}). "
+                "The bundle will ship WITHOUT the Python runtime bootstrap and the "
+                "install-time worker fetch will fail. Rebuild with network access.")
+        endif()
+    endif()
+    set(_ofx_runtime_dir "${_ofx_bundle_dir}/Contents/Win64/runtime")
+    if(EXISTS "${_pyembed_zip}")
+        # Extract CPython embeddable at configure time (cheap, cached by the
+        # zip hash above) so only file copies remain at post-build.
+        file(MAKE_DIRECTORY "${_ofx_runtime_dir}/python")
+        file(ARCHIVE_EXTRACT INPUT "${_pyembed_zip}"
+            DESTINATION "${_ofx_runtime_dir}/python")
+        # The embeddable's shipped python312._pth comments out `import site`,
+        # which strands pip installs. Write our own: site-packages on path,
+        # site enabled, so get-pip + the worker-env fetch land importably.
+        file(GENERATE OUTPUT "${_ofx_runtime_dir}/python/python312._pth"
+            CONTENT "python312.zip
+.
+Lib
+Lib/site-packages
+import site
+")
+        file(MAKE_DIRECTORY "${_ofx_runtime_dir}/python/Lib/site-packages")
+        set(_ofx_runtime_bootstrap_commands
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_runtime_dir}/worker"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/scripts/packaging/worker-src/bmt_worker.py"
+                "${_ofx_runtime_dir}/worker/bmt_worker.py"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/scripts/packaging/worker-src/requirements-win.txt"
+                "${_ofx_runtime_dir}/worker/requirements-win.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/scripts/packaging/worker-src/corridorkey"
+                "${_ofx_runtime_dir}/worker/corridorkey")
+    else()
+        set(_ofx_runtime_bootstrap_commands COMMAND ${CMAKE_COMMAND} -E true)
+    endif()
+
     # FindCUDAToolkit maps CUDA::nppc et al. to import libs, so
     # $<TARGET_RUNTIME_DLLS:corridorkey_ofx> cannot find them. We collect
     # them explicitly from the toolkit bin dir to prevent a Windows loader
@@ -194,6 +253,10 @@ if(WIN32)
             # Copy models (skipped when CORRIDORKEY_BUNDLE_MODELS=OFF)
             ${_corridorkey_bundle_models_command}
 
+            # v0.4: Python worker stack (embedded CPython extracted at
+            # configure time; worker sources copied here)
+            ${_ofx_runtime_bootstrap_commands}
+
             COMMAND_EXPAND_LISTS
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."
         )
@@ -230,6 +293,10 @@ if(WIN32)
 
             # Copy models (skipped when CORRIDORKEY_BUNDLE_MODELS=OFF)
             ${_corridorkey_bundle_models_command}
+
+            # v0.4: Python worker stack (embedded CPython extracted at
+            # configure time; worker sources copied here)
+            ${_ofx_runtime_bootstrap_commands}
 
             COMMAND_EXPAND_LISTS
             COMMENT "Packaging OFX bundle into ${_ofx_bundle_dir}..."

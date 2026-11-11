@@ -203,6 +203,8 @@ int main(int argc, char** argv) {
 
     std::string dest;
     std::vector<ModelTrack> tracks;  // v0.3: full-pack union
+    bool worker_mode = false;        // v0.4: CorridorKey 2.0 worker stack
+    std::string python_dir;          // v0.4: bundled Python dir for pip setup
     bool show_ui = false;
 #ifndef _WIN32
     (void)show_ui;  // native progress window is Windows-only; macOS uses the installer app's own bar
@@ -211,6 +213,12 @@ int main(int argc, char** argv) {
         const std::string arg = argv[i];
         if (arg == "--dest" && i + 1 < argc) {
             dest = argv[++i];
+        }
+        else if (arg == "--worker") {
+            worker_mode = true;  // v0.4: ck2-models + pip worker-env instead of v1 packs
+        }
+        else if (arg == "--python" && i + 1 < argc) {
+            python_dir = argv[++i];
         }
         else if (arg == "--track" && i + 1 < argc) {
             const std::string value = argv[++i];
@@ -227,12 +235,12 @@ int main(int argc, char** argv) {
             show_ui = true;
         }
         else if (arg == "--help" || arg == "-h") {
-            std::printf("usage: corridorkey_model_fetch --dest DIR [--track fp16|fp32|both]\n");
+            std::printf("usage: corridorkey_model_fetch --dest DIR [--track fp16|fp32|both] [--worker [--python DIR]]\n");
             return 2;
         }
     }
     if (dest.empty()) {
-        std::fprintf(stderr, "usage: corridorkey_model_fetch --dest DIR [--track fp16|fp32|both]\n");
+        std::fprintf(stderr, "usage: corridorkey_model_fetch --dest DIR [--track fp16|fp32|both] [--worker [--python DIR]]\n");
         std::printf("DONE ok=0 downloaded=0 error=missing_dest\n");
         return 2;
     }
@@ -240,6 +248,63 @@ int main(int argc, char** argv) {
     // Installers read stdout while the process runs: line-buffered would risk
     // a stuck progress bar because of full-buffering on redirected handles.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+
+    // v0.4: CorridorKey 2.0 worker stack — pinned 2.0 assets from official
+    // upstreams + pip setup into the bundled Python (--python DIR). Reuses
+    // the same PLAN/PROGRESS/DONE protocol and progress monitor as v0.3.
+    if (worker_mode) {
+        int worker_plan_files = 0;
+        std::uint64_t worker_plan_bytes = 0;
+        for (const auto& file : ck2_pack_files()) {
+            ++worker_plan_files;
+            worker_plan_bytes += file.size_bytes;
+        }
+        std::printf("PLAN files=%d bytes=%llu\n",
+                    worker_plan_files,
+                    static_cast<unsigned long long>(worker_plan_bytes));
+        std::atomic<bool> worker_stop{false};
+        std::thread worker_poller([&]() {
+            int last_file = -1;
+            while (!worker_stop.load()) {
+                const ModelPackProgress p = model_pack_progress();
+                if (p.phase == ModelPackPhase::Downloading &&
+                    (p.completed_files != last_file || !p.detail.empty())) {
+                    last_file = p.completed_files;
+                    if (!p.detail.empty()) {
+                        std::printf("PROGRESS %s\n", sanitize(p.detail).c_str());
+                    }
+                    else {
+                        std::printf("PROGRESS file %d/%d name=%s bytes %llu/%llu percent %d\n",
+                                    p.completed_files + 1,
+                                    p.total_files,
+                                    sanitize(p.current_file).c_str(),
+                                    static_cast<unsigned long long>(p.bytes_done),
+                                    static_cast<unsigned long long>(p.bytes_total),
+                                    p.percent / 10);
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        });
+        const auto worker_result = ensure_worker_stack(
+            std::filesystem::path(dest), std::filesystem::path(python_dir),
+            "installer-worker-stack-setup");
+        worker_stop.store(true);
+        worker_poller.join();
+        if (worker_result.ok) {
+            std::printf("DONE ok=1 downloaded=%d pip=%d\n",
+                        worker_result.downloaded_files,
+                        worker_result.pip_ok ? 1 : 0);
+            return 0;
+        }
+        const std::string worker_error =
+            worker_result.error.empty() ? worker_result.pip_error : worker_result.error;
+        std::printf("DONE ok=0 downloaded=%d error=%s url=%s\n",
+                    worker_result.downloaded_files,
+                    sanitize(worker_error).c_str(),
+                    sanitize(worker_result.failed_url).c_str());
+        return 2;
+    }
 
     // v0.3 default: fetch the COMPLETE pack (both precision tracks) so the
     // plugin never needs to download anything, whatever the user later picks

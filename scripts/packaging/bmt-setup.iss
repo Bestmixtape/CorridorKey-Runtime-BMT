@@ -3,7 +3,7 @@
 ; Uninstall entry appears in Settings > Apps > Add or remove programs.
 
 #define MyAppName      "CorridorKey 2.0 BMT Build"
-#define MyAppVersion   "0.1"
+#define MyAppVersion   "0.4.0"
 #define MyBundleName   "CorridorKey-BMT.ofx.bundle"
 
 [Setup]
@@ -18,8 +18,8 @@ DefaultGroupName=CorridorKey BMT
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 LicenseFile=.\LICENSE.txt
-OutputDir=..\..\..\dist-v0.1
-OutputBaseFilename=CorridorKey2.0-BMT-Win64-v0.1-Setup
+OutputDir=..\..\..\dist-v0.4
+OutputBaseFilename=CorridorKey2.0-BMT-Win64-v0.4.0-Setup
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -112,24 +112,30 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   FetchExe: String;
   ModelsDir: String;
+  PyDir: String;
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
     ExtractTemporaryFile('corridorkey_model_fetch.exe');
     FetchExe := ExpandConstant('{tmp}\corridorkey_model_fetch.exe');
-    ModelsDir := ExpandConstant('{localappdata}\CorridorKey2.0-BMT\models');
-    Log('BMT v0.3: starting model pack fetch into ' + ModelsDir);
+    // BMT v0.4: CorridorKey 2.0 worker stack — ck2 weights/VFMs plus the
+    // torch-cu128 env pip-installed into the embedded Python that ships in
+    // the bundle's Contents/Win64/runtime/python. Layout expected by the
+    // plugin launcher (bmt_worker.py self-locates this root).
+    ModelsDir := ExpandConstant('{localappdata}\CorridorKey2.0-BMT\worker');
+    PyDir := ExpandConstant('{app}\{#MyBundleName}\Contents\Win64\runtime\python');
+    Log('BMT v0.4: starting worker-stack fetch into ' + ModelsDir);
     ResultCode := -1;
-    if Exec(FetchExe, '--dest "' + ModelsDir + '" --install-ui', '',
+    if Exec(FetchExe, '--dest "' + ModelsDir + '" --worker --python "' + PyDir + '" --install-ui', '',
             SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      Log('BMT v0.3: model pack fetch finished rc=' + IntToStr(ResultCode))
+      Log('BMT v0.4: worker-stack fetch finished rc=' + IntToStr(ResultCode))
     else
-      Log('BMT v0.3: model pack fetch could not start');
+      Log('BMT v0.4: worker-stack fetch could not start');
     if ResultCode <> 0 then
-      MsgBox('The model pack download did not complete (code ' + IntToStr(ResultCode) + ').' + Chr(13) + Chr(10) + 
-             'The plugin files are installed, but the models are missing.' + Chr(13) + Chr(10) + 
-             'Re-run this Setup to retry the download, or use the manual link on the CorridorKey BMT page.',
+      MsgBox('The CorridorKey 2.0 model/worker download did not complete (code ' + IntToStr(ResultCode) + ').' + Chr(13) + Chr(10) + 
+             'The plugin files are installed, but the 2.0 stack is incomplete.' + Chr(13) + Chr(10) + 
+             'Re-run this Setup to resume the download (it picks up where it stopped).',
              mbInformation, MB_OK);
   end;
 end;

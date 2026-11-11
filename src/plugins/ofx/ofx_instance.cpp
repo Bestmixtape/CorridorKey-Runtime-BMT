@@ -1044,11 +1044,23 @@ void update_runtime_panel_values(InstanceData* data) {
     // deferred flush path (update_runtime_panel) is safe from the fetch
     // thread's side; the paramSetValue itself still happens on the host
     // thread like every other row here.
-    set_string_param_value(
-        data->bmt_model_status_param,
-        app::model_pack_status_label(
-            data->models_root,
-            get_model_precision_choice(data) == kBmtModelPrecisionFp16 ? "fp16" : "fp32"));
+#ifdef _WIN32
+    if (bundle_has_worker_layout()) {
+        // v0.4: 2.0 engine — status reflects the ck2-models worker root and
+        // the pip-installed runtime inside the bundled Python.
+        set_string_param_value(
+            data->bmt_model_status_param,
+            app::worker_stack_status_label(worker_root_dir(), bundled_python_dir()));
+    }
+    else
+#endif
+    {
+        set_string_param_value(
+            data->bmt_model_status_param,
+            app::model_pack_status_label(
+                data->models_root,
+                get_model_precision_choice(data) == kBmtModelPrecisionFp16 ? "fp16" : "fp32"));
+    }
     // BMT Build: surface the last Export Matte result (queued / written
     // path / failure) on the Output group's status row. matte_status_line is
     // written from the render thread under matte_export_mutex; the
@@ -1269,6 +1281,46 @@ DeviceInfo requested_device_for_quality_selection(const DeviceInfo& requested_de
 }
 
 }  // namespace
+
+// v0.4 (Windows): CorridorKey 2.0 worker-stack locations (declared in
+// ofx_shared.hpp so the render TU can gate on them too).
+//   worker root  %LOCALAPPDATA%\CorridorKey2.0-BMT\worker   (weights/, vfms/)
+//   bundled py   <install>/Contents/Win64/runtime/python
+std::filesystem::path worker_root_dir() {
+    if (auto override_path = common::environment_variable_copy("CORRIDORKEY_CK_ROOT");
+        override_path.has_value()) {
+        return {*override_path};
+    }
+    return common::user_models_root().parent_path() / "worker";
+}
+
+std::filesystem::path bundled_python_dir() {
+    auto module_path = plugin_module_path();
+    if (!module_path.has_value()) {
+        return {};
+    }
+    auto win64 = module_path->parent_path();
+    if (auto shared_root = common::host_plugin_shared_runtime_root(*module_path);
+        shared_root.has_value()) {
+        win64 = *shared_root / "Contents" / "Win64";
+    }
+    const auto bundle_py = win64 / "runtime" / "python";
+    // pip installs land in the relocated interpreter (Program Files is
+    // admin-owned); prefer it once one exists on disk.
+    if (const auto rel = app::relocated_worker_python_dir(); !rel.empty()) {
+        std::error_code ec;
+        if (std::filesystem::exists(rel / "python.exe", ec) && !ec) {
+            return rel;
+        }
+    }
+    return bundle_py;
+}
+
+bool bundle_has_worker_layout() {
+    std::error_code error;
+    const auto py = bundled_python_dir();
+    return !py.empty() && std::filesystem::exists(py / "python.exe", error) && !error;
+}
 
 void note_numerical_render_failure(InstanceData* data, const DeviceInfo& requested_device,
                                    std::string_view error_message) {
@@ -1648,7 +1700,17 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
     // BMT v0.2: seed the first-run gate so a fresh install starts locked;
     // render re-probes presence and clears model_pack_ready once the pack
     // lands. bundle_resources_fonts_dir feeds the status card its fonts.
-    data->model_pack_ready.store(app::model_pack_present(data->models_root));
+#ifdef _WIN32
+    if (bundle_has_worker_layout()) {
+        // v0.4: the 2.0 gate is the pinned ck2 asset tree under the worker
+        // root, not the v1 fp16/fp32 pack.
+        data->model_pack_ready.store(app::ck2_models_present(worker_root_dir()));
+    }
+    else
+#endif
+    {
+        data->model_pack_ready.store(app::model_pack_present(data->models_root));
+    }
     data->want_panel_lock.store(!data->model_pack_ready.load());
     if (const auto module = plugin_module_path(); module.has_value()) {
         data->bundle_resources_fonts_dir =

@@ -144,7 +144,9 @@ TEST_CASE("OFX bundle stages both Green ONNX and Blue Torch-TensorRT artifacts",
     REQUIRE(fs::exists(green_artifact));
     REQUIRE(fs::file_size(green_artifact) > 0);
 
-    const fs::path blue_artifact = models_dir / "corridorkey_dynamic_blue_fp16.ts";
+    // BMT Build: the Blue Torch-TensorRT artifact is named
+    // corridorkey_torchtrt_fp16_512.ts (not the legacy dynamic-blue name).
+    const fs::path blue_artifact = models_dir / "corridorkey_torchtrt_fp16_512.ts";
     INFO("Blue Torch-TensorRT artifact: " << blue_artifact.string());
     REQUIRE(fs::exists(blue_artifact));
     REQUIRE(fs::file_size(blue_artifact) > 0);
@@ -175,17 +177,16 @@ TEST_CASE("OFX bundle exposes Green and Blue descriptors over the C ABI",
     REQUIRE(p_OfxGetNumberOfPlugins != nullptr);
     REQUIRE(p_OfxGetPlugin != nullptr);
 
-    REQUIRE(p_OfxGetNumberOfPlugins() == 2);
+    // BMT Build: only the Green descriptor is exposed (com.corridorkey.resolve).
+    // The dedicated Blue descriptor (com.corridorkey.resolve.blue) was retired;
+    // green/blue weights are now chosen via the bmtKeyColourMode panel control.
+    REQUIRE(p_OfxGetNumberOfPlugins() == 1);
 
     OfxPlugin* green = p_OfxGetPlugin(0);
     REQUIRE(green != nullptr);
     REQUIRE(std::string(green->pluginIdentifier) == "com.corridorkey.resolve");
 
-    OfxPlugin* blue = p_OfxGetPlugin(1);
-    REQUIRE(blue != nullptr);
-    REQUIRE(std::string(blue->pluginIdentifier) == "com.corridorkey.resolve.blue");
-
-    REQUIRE(p_OfxGetPlugin(2) == nullptr);
+    REQUIRE(p_OfxGetPlugin(1) == nullptr);
     REQUIRE(p_OfxGetPlugin(-1) == nullptr);
 
 #if defined(_WIN32)

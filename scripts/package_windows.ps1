@@ -227,6 +227,13 @@ Write-Host "[2/6] Copying ck-engine.exe..."
 Assert-FileExists -Path $engineSource -Message "ck-engine source not found at $engineSource"
 $packagedEnginePath = Join-Path $distDir "ck-engine.exe"
 Copy-Item $engineSource $packagedEnginePath -Force
+# Validate engine identity BEFORE staging expensive third-party DLLs: a label /
+# source-revision mismatch must be reported even on machines without the CUDA
+# toolkit (the NPP copy below would otherwise abort first and mask the guard).
+Assert-CorridorKeyPackagedEngineIdentity `
+    -EnginePath $packagedEnginePath `
+    -ExpectedDisplayVersionLabel $ExpectedDisplayVersionLabel `
+    -ExpectedSourceRevision $ExpectedSourceRevision
 
 Write-Host "[3/6] Copying runtime DLLs..."
 $forbiddenRootDlls = @(Get-CorridorKeyPortableRuntimeForbiddenRootDlls)
@@ -234,10 +241,6 @@ Copy-DllsFromDir -SourceDir (Join-Path $BuildDir "src\cli") -DestinationDir $dis
 Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "lib") -DestinationDir $distDir
 Copy-DllsFromDir -SourceDir (Join-Path $OrtRoot "bin") -DestinationDir $distDir
 Copy-CudaNppRuntimeDlls -DestinationDir $distDir
-Assert-CorridorKeyPackagedEngineIdentity `
-    -EnginePath $packagedEnginePath `
-    -ExpectedDisplayVersionLabel $ExpectedDisplayVersionLabel `
-    -ExpectedSourceRevision $ExpectedSourceRevision
 
 Write-Host "[4/6] Copying GUI..."
 Assert-FileExists -Path $guiSource -Message "GUI binary not found at $guiSource"

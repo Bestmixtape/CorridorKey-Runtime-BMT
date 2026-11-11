@@ -771,8 +771,18 @@ OfxStatus render(OfxImageEffectHandle instance, OfxPropertySetHandle in_args,
         const app::ModelTrack gate_track = gate_precision == kBmtModelPrecisionFp16
                                                ? app::ModelTrack::Fp16
                                                : app::ModelTrack::Fp32;
-        data->model_pack_ready.store(
-            app::model_pack_present(data->models_root, gate_track));
+#ifdef _WIN32
+        if (bundle_has_worker_layout()) {
+            data->model_pack_ready.store(
+                app::ck2_models_present(worker_root_dir()));
+        }
+        else
+#endif
+        {
+            data->model_pack_ready.store(
+                app::model_pack_present(data->models_root, gate_track));
+        }
+        (void)gate_track;
     }
     if (!data->model_pack_ready.load(std::memory_order_relaxed)) {
         bypass_with_source(source_data, output_data, width, height, source_row_bytes,

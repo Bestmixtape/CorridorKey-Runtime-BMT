@@ -1,6 +1,8 @@
 
 #include "app/model_fetch.hpp"
 
+#include "app/ck2_files.gen.hpp"  // kCk2PackFiles / kCk2PackFileCount / kCk2PackTotalBytes
+
 #include <cpr/cpr.h>
 
 #include <atomic>
@@ -628,5 +630,572 @@ ModelPackEnsureResult ensure_model_pack_tracks(
     }
     return ensure_model_pack_impl(dir, {}, selected, "both", stage);
 }
+
+// ---------------------------------------------------------------------------
+// BMT v0.4: CorridorKey 2.0 worker stack (see model_fetch.hpp banner).
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,performance-unnecessary-value-param,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
+
+const std::vector<Ck2PackFile>& ck2_pack_files() {
+    // Generated from a validated local mirror of the official tree
+    // (scripts/packaging/generate_ck2_table.py): relpath, revision-pinned
+    // upstream URL, exact size. Do not edit by hand.
+    static const std::vector<Ck2PackFile> files = [] {
+        std::vector<Ck2PackFile> v;
+        v.reserve(kCk2PackFileCount);
+        for (const auto& f : kCk2PackFiles) {
+            v.push_back(f);
+        }
+        return v;
+    }();
+    return files;
+}
+
+namespace {
+
+bool ck2_file_present_at(const std::filesystem::path& root, const Ck2PackFile& file) {
+    std::error_code error;
+    // relpath uses forward slashes; filesystem::path accepts them on Windows.
+    const auto path = root / file.relpath;
+    if (!std::filesystem::exists(path, error) || error) {
+        return false;
+    }
+    return std::filesystem::file_size(path, error) == file.size_bytes && !error;
+}
+
+// Same streaming/Range-resume discipline as download_one_file, but the
+// destination may live in subdirectories (weights/, vfms/...).
+bool ck2_download_one_file(const std::filesystem::path& root,
+                           const Ck2PackFile& file,
+                           std::string& error) {
+    std::error_code ec;
+    const auto final_path = root / file.relpath;
+    std::filesystem::create_directories(final_path.parent_path(), ec);
+    if (ec) {
+        error = "Cannot create directory for " + std::string(file.relpath) + ": " + ec.message();
+        return false;
+    }
+    const auto part_path = final_path.string() + ".part";
+    const std::uint64_t resume_bytes =
+        std::filesystem::exists(part_path, ec) && !ec
+            ? static_cast<std::uint64_t>(std::filesystem::file_size(part_path, ec))
+            : 0ULL;
+
+    cpr::Session session;
+    session.SetUrl(cpr::Url{file.url});
+    session.SetHeader(cpr::Header{{"User-Agent", kUserAgent}});
+    session.SetVerifySsl(cpr::VerifySsl{false});
+    session.SetTimeout(std::chrono::milliseconds(30000));
+    if (resume_bytes > 0) {
+        session.SetHeader(cpr::Header{{"Range", "bytes=" + std::to_string(resume_bytes) + "-"}});
+    }
+
+    // Byte accounting for the shared progress monitor: other files already
+    // complete on disk count toward bytes_done, matching v0.3 multi-file
+    // resume semantics.
+    std::uint64_t pack_base_bytes = 0;
+    int total_files = 0;
+    for (const auto& other : ck2_pack_files()) {
+        ++total_files;
+        if (other.relpath == file.relpath) {
+            continue;
+        }
+        if (ck2_file_present_at(root, other)) {
+            pack_base_bytes += other.size_bytes;
+        }
+    }
+
+    DownloadContext ctx;
+    ctx.total_files = total_files;
+    ctx.pack_base_bytes = pack_base_bytes;
+    ctx.filename = file.relpath;
+    const std::string part_str = part_path;
+    ctx.out.open(part_str, std::ios::binary | (resume_bytes > 0 ? std::ios::app : std::ios::trunc));
+    if (!ctx.out.is_open()) {
+        error = "Cannot open " + part_str + " for writing";
+        return false;
+    }
+    ctx.resume_bytes = resume_bytes;
+    monitor_update([&](ModelPackProgress& progress) {
+        progress.current_file = file.relpath;
+        progress.percent = 0;
+    });
+    // Same cpr streaming shape as download_one_file: a WriteCallback feeding
+    // the .part file plus a ProgressCallback feeding the shared monitor
+    // (whole-pack bytes, v0.3 resume semantics).
+    session.SetWriteCallback(cpr::WriteCallback{
+        [](std::string_view data, intptr_t userdata) -> bool {
+            auto* dl = reinterpret_cast<DownloadContext*>(userdata);  // NOLINT
+            dl->out.write(data.data(), static_cast<std::streamsize>(data.size()));
+            if (!dl->out.good()) {
+                return false;
+            }
+            const std::uint64_t written =
+                dl->resume_bytes + static_cast<std::uint64_t>(dl->out.tellp());
+            monitor_update([&](ModelPackProgress& progress) {
+                const std::uint64_t done = dl->pack_base_bytes + written;
+                if (progress.bytes_total > 0 && done > progress.bytes_total) {
+                    progress.bytes_done = progress.bytes_total;
+                }
+                else {
+                    progress.bytes_done = done;
+                }
+                if (progress.bytes_total > 0) {
+                    progress.percent =
+                        static_cast<int>(done * kPercentScale / progress.bytes_total);
+                }
+            });
+            return true;
+        },
+        reinterpret_cast<intptr_t>(&ctx)});  // NOLINT
+    const auto response = session.Get();
+    ctx.out.close();
+
+    constexpr int kHttpOk = 200;
+    constexpr int kHttpPartialContent = 206;
+    if (response.status_code == kHttpOk && resume_bytes > 0) {
+        std::filesystem::remove(part_path, ec);
+        error = "Range resume rejected for " + std::string(file.relpath) +
+                "; deleted partial file, retry will start over.";
+        return false;
+    }
+    if (response.status_code != kHttpOk && response.status_code != kHttpPartialContent) {
+        error = "HTTP " + std::to_string(response.status_code) + " for " + file.url;
+        return false;
+    }
+    if (!std::filesystem::exists(part_path, ec) || ec) {
+        error = "Temp file missing after transfer: " + part_str;
+        return false;
+    }
+    const std::uint64_t downloaded = std::filesystem::file_size(part_path, ec);
+    if (downloaded != file.size_bytes) {
+        error = "Size mismatch for " + std::string(file.relpath) + ": got " +
+                std::to_string(downloaded) + " bytes, expected " +
+                std::to_string(file.size_bytes);
+        return false;
+    }
+    std::filesystem::remove(final_path, ec);
+    std::filesystem::rename(part_path, final_path, ec);
+    if (ec) {
+        error = "Failed to move " + part_str + " into place: " + ec.message();
+        return false;
+    }
+    return true;
+}
+
+#ifdef _WIN32
+std::filesystem::path worker_env_marker(const std::filesystem::path& python_dir) {
+    return python_dir / "Lib" / "site-packages" / "bmt_worker_env.json";
+}
+
+// Run one bundled-Python command to a log file; returns exit code, -1 on
+// spawn failure.
+int run_python_step(const std::filesystem::path& python_exe,
+                    const std::wstring& args,
+                    const std::filesystem::path& log_path,
+                    std::string& spawn_error,
+                    const std::filesystem::path& working_dir = {}) {
+    std::wstring cmd = L"\"" + python_exe.native() + L"\" " + args;
+    std::error_code ec;
+    const std::wstring log_str = log_path.native();
+    // Append: run_python_step is called for every pip step and each truncation
+    // previously hid the real pip failure behind the last step's output.
+    HANDLE log_handle = CreateFileW(log_str.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                    OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (log_handle == INVALID_HANDLE_VALUE) {
+        spawn_error = "Cannot open log file " + log_path.string();
+        return -1;
+    }
+    SetFilePointer(log_handle, 0, nullptr, FILE_END);
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    // Duplicate with inheritance for the child's std handles.
+    HANDLE inherit_handle = nullptr;
+    if (!DuplicateHandle(GetCurrentProcess(), log_handle, GetCurrentProcess(), &inherit_handle, 0,
+                         TRUE, DUPLICATE_SAME_ACCESS)) {
+        inherit_handle = log_handle;
+    }
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = inherit_handle;
+    si.hStdError = inherit_handle;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION pi{};
+    std::wstring cmd_mut = cmd;
+    const BOOL spawned = CreateProcessW(nullptr, cmd_mut.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW, nullptr,
+                                        working_dir.empty() ? nullptr : working_dir.native().c_str(),
+                                        &si, &pi);
+    CloseHandle(inherit_handle);
+    CloseHandle(log_handle);
+    if (!spawned) {
+        spawn_error = "CreateProcess failed spawning Python worker (see " +
+                      log_path.string() + ")";
+        return -1;
+    }
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return static_cast<int>(exit_code);
+}
+#endif  // _WIN32
+
+}  // namespace
+
+bool ck2_models_present(const std::filesystem::path& worker_root) {
+    for (const auto& file : ck2_pack_files()) {
+        if (!ck2_file_present_at(worker_root, file)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::filesystem::path relocated_worker_python_dir() {
+#ifdef _WIN32
+    wchar_t buf[4096];
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, 4095);
+    if (n == 0 || n > 4095) {
+        return {};
+    }
+    return std::filesystem::path(buf) / L"CorridorKey2.0-BMT" / L"python";
+#else
+    return {};
+#endif
+}
+
+bool worker_env_ready(const std::filesystem::path& python_dir) {
+#ifdef _WIN32
+    if (python_dir.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    return std::filesystem::exists(worker_env_marker(python_dir), ec) && !ec;
+#else
+    (void)python_dir;
+    return false;
+#endif
+}
+
+WorkerStackEnsureResult ensure_worker_stack(const std::filesystem::path& worker_root,
+                                            const std::filesystem::path& python_dir,
+                                            const char* stage) {
+    WorkerStackEnsureResult result;
+#ifdef _WIN32
+    std::error_code ec;
+    std::filesystem::create_directories(worker_root, ec);
+
+    const auto& selected = ck2_pack_files();
+    std::uint64_t present_bytes = 0;
+    for (const auto& file : selected) {
+        if (ck2_file_present_at(worker_root, file)) {
+            ++result.present_files;
+            present_bytes += file.size_bytes;
+        }
+    }
+    const bool models_complete = result.present_files == static_cast<int>(selected.size());
+
+    if (!models_complete) {
+        bool expected = false;
+        if (!fetch_busy().compare_exchange_strong(expected, true)) {
+            result.error = "A download is already running in this process.";
+            return result;
+        }
+        monitor_update([&](ModelPackProgress& progress) {
+            progress.phase = ModelPackPhase::Downloading;
+            progress.completed_files = result.present_files;
+            progress.total_files = static_cast<int>(selected.size());
+            progress.percent = 0;
+            progress.bytes_total = kCk2PackTotalBytes;
+            progress.bytes_done = present_bytes;
+            progress.detail.clear();
+            progress.retry_url.clear();
+        });
+        for (const auto& file : selected) {
+            if (ck2_file_present_at(worker_root, file)) {
+                continue;
+            }
+            std::string download_error;
+            if (ck2_download_one_file(worker_root, file, download_error)) {
+                ++result.downloaded_files;
+                monitor_update([&file](ModelPackProgress& progress) {
+                    ++progress.completed_files;
+                    progress.bytes_done += file.size_bytes;
+                    if (progress.bytes_done > progress.bytes_total) {
+                        progress.bytes_done = progress.bytes_total;
+                    }
+                });
+                continue;
+            }
+            ++result.failed_files;
+            if (result.error.empty()) {
+                result.error = std::move(download_error);
+                result.failed_url = file.url;
+            }
+        }
+        fetch_busy().store(false);
+        if (result.failed_files != 0 ||
+            !ck2_models_present(worker_root)) {
+            monitor_update([&](ModelPackProgress& progress) {
+                progress.phase = ModelPackPhase::Failed;
+                progress.detail = result.error;
+                progress.retry_url = result.failed_url;
+            });
+            return result;
+        }
+        // ck2_models_status.json: same shape discipline as the v0.3 status
+        // file — counts captured before any move.
+        nlohmann::json status;
+        status["stage"] = stage;
+        status["models_dir"] = worker_root.string();
+        nlohmann::json present_models = nlohmann::json::array();
+        for (const auto& file : selected) {
+            present_models.push_back(file.relpath);
+        }
+        status["expected_count"] = static_cast<int>(selected.size());
+        status["present_count"] = static_cast<int>(present_models.size());
+        status["missing_count"] = 0;
+        status["expected_models"] = present_models;
+        status["present_models"] = std::move(present_models);
+        std::ofstream status_stream(worker_root / "ck2_models_status.json",
+                                    std::ios::binary | std::ios::trunc);
+        if (status_stream.is_open()) {
+            status_stream << status.dump(4) << "\n";
+        }
+    }
+
+    if (python_dir.empty()) {
+        result.ok = true;
+        return result;
+    }
+    if (worker_env_ready(python_dir)) {
+        result.pip_ok = true;
+        result.ok = true;
+        return result;
+    }
+
+    std::filesystem::path py = python_dir;
+    auto python_exe = py / "python.exe";
+    if (!std::filesystem::exists(python_exe, ec) || ec) {
+        result.pip_error = "Bundled python missing: " + python_exe.string();
+        return result;
+    }
+    {
+        // The bundle lives in admin-owned Program Files, where pip cannot
+        // write without elevation. Probe the site-packages dir; if the
+        // interpreter is not writable, relocate it — plus the small
+        // worker-src payload — to %LOCALAPPDATA%\CorridorKey2.0-BMT\python,
+        // which keeps the runtime's <python_dir>/../worker/bmt_worker.py
+        // resolution intact and survives plugin re-installs.
+        std::error_code probe_ec;
+        const auto probe_dir = py / "Lib" / "site-packages";
+        std::filesystem::create_directories(probe_dir, probe_ec);
+        const auto probe_file = probe_dir / ".write-probe";
+        std::ofstream probe(probe_file, std::ios::binary);
+        if (!probe.is_open()) {
+            const auto target = relocated_worker_python_dir();
+            if (target.empty() || target == py) {
+                result.pip_error = "Bundled python not writable and no LOCALAPPDATA target: " +
+                                   py.string();
+                return result;
+            }
+            std::filesystem::copy(py, target, std::filesystem::copy_options::recursive |
+                                                 std::filesystem::copy_options::skip_existing,
+                                  probe_ec);
+            if (probe_ec) {
+                result.pip_error = "Failed to relocate python env to " + target.string() +
+                                   ": " + probe_ec.message();
+                return result;
+            }
+            std::error_code worker_ec;
+            std::filesystem::copy(py.parent_path() / "worker",
+                                  target.parent_path() / "worker",
+                                  std::filesystem::copy_options::recursive |
+                                      std::filesystem::copy_options::skip_existing,
+                                  worker_ec);
+            py = target;
+            python_exe = py / "python.exe";
+        } else {
+            probe.close();
+            std::filesystem::remove(probe_file, probe_ec);
+        }
+    }
+    if (worker_env_ready(py)) {
+        result.pip_ok = true;
+        result.ok = true;
+        return result;
+    }
+    const auto site_packages = py / "Lib" / "site-packages";
+    std::filesystem::create_directories(site_packages, ec);
+    const auto log_path = worker_root / "worker_env_pip.log";
+
+    monitor_update([&](ModelPackProgress& progress) {
+        progress.phase = ModelPackPhase::Downloading;
+        progress.current_file = "python-runtime-setup";
+        progress.detail = "installing Python runtime (torch cu128, one-time)";
+    });
+
+    // 1. get-pip bootstrap (embedded Python ships without pip).
+    if (!std::filesystem::exists(site_packages / "pip" / "__init__.py", ec) || ec) {
+        const auto get_pip = worker_root / "get-pip.py";
+        cpr::Session session;
+        session.SetUrl(cpr::Url{"https://bootstrap.pypa.io/get-pip.py"});
+        session.SetHeader(cpr::Header{{"User-Agent", kUserAgent}});
+        const auto get_pip_response = session.Get();
+        if (get_pip_response.error || get_pip_response.status_code != 200) {
+            result.pip_error = "HTTP " + std::to_string(get_pip_response.status_code) +
+                               " fetching get-pip.py";
+            return result;
+        }
+        std::ofstream pip_stream(get_pip, std::ios::binary);
+        pip_stream << get_pip_response.text;
+        if (!pip_stream.good()) {
+            result.pip_error = "Cannot write get-pip.py";
+            return result;
+        }
+        pip_stream.close();
+        std::string spawn_error;
+        const int rc = run_python_step(python_exe,
+                                       L"-s \"" + get_pip.native() + L"\" --no-warn-script-location",
+                                       log_path, spawn_error);
+        if (rc != 0) {
+            result.pip_error = spawn_error.empty()
+                                   ? "get-pip.py failed (see worker_env_pip.log)"
+                                   : std::move(spawn_error);
+            return result;
+        }
+    }
+
+    // 2a. Pre-install build tooling into the embedded interpreter. Embeddable
+    //     CPython's ._pth mechanism silently breaks pip's venv build isolation
+    //     (build deps "install" but cannot be imported), so source-built
+    //     requirements (utils3d @ git+...) need setuptools available directly
+    //     and a --no-build-isolation install below.
+    {
+        std::ofstream append_marker(log_path, std::ios::binary | std::ios::app);
+    }
+    std::string setup_spawn_error;
+    const int setup_rc = run_python_step(
+        python_exe,
+        L"-s -m pip install --disable-pip-version-check --no-input "
+        L"--no-warn-script-location --no-cache-dir setuptools wheel",
+        log_path, setup_spawn_error);
+    if (setup_rc != 0) {
+        result.pip_error = setup_spawn_error.empty()
+                               ? "setuptools bootstrap failed (see worker_env_pip.log)"
+                               : std::move(setup_spawn_error);
+        return result;
+    }
+
+    // 2b. Install the pinned requirements + the corridorkey wheel from the
+    //     bundle. torch cu128 comes from the PyTorch index; the rest resolves
+    //     through the PyPI extra index.
+    const auto worker_bundle = py.parent_path() / "worker";
+    const auto requirements = worker_bundle / "requirements-win.txt";
+    const auto wheel = worker_bundle / "corridorkey_bmt.whl";
+    if (!std::filesystem::exists(requirements, ec) || ec) {
+        result.pip_error = "Bundled requirements missing: " + requirements.string();
+        return result;
+    }
+    std::wstring args = L"-s -m pip install --disable-pip-version-check --no-input "
+                        L"--no-warn-script-location --no-build-isolation "
+                        L"--index-url https://download.pytorch.org/whl/cu128 "
+                        L"--extra-index-url https://pypi.org/simple -r \"" +
+                        requirements.native() + L"\"";
+    if (std::filesystem::exists(wheel, ec) && !ec) {
+        args += L" \"" + wheel.native() + L"\"";
+    }
+    std::string spawn_error;
+    {
+        // pip writes its own log line; append instead of truncate.
+        std::ofstream append_marker(log_path, std::ios::binary | std::ios::app);
+    }
+    const int pip_rc = run_python_step(python_exe, args, log_path, spawn_error);
+    if (pip_rc != 0) {
+        result.pip_error = spawn_error.empty()
+                               ? "pip install failed with exit " + std::to_string(pip_rc) +
+                                     " (see worker_env_pip.log)"
+                               : std::move(spawn_error);
+        return result;
+    }
+
+    // 3. Verification gate: the exact import surface bmt_worker.py needs.
+    //    The corridorkey package is not a wheel — it lives in the bundle's
+    //    worker/ directory next to bmt_worker.py, exactly how the OFX host
+    //    puts it on sys.path, so verify with that directory as the CWD.
+    {
+        std::ofstream append_marker(log_path, std::ios::binary | std::ios::app);
+    }
+    std::wstring verify_code = L"-s -c \"import sys; sys.path.insert(0, r'";
+    verify_code += worker_bundle.native();
+    verify_code += L"'); import torch, torchvision, corridorkey; "
+                   L"print(torch.__version__, torch.cuda.is_available())\"";
+    const int verify_rc = run_python_step(
+        python_exe,
+        verify_code,
+        log_path, spawn_error, worker_bundle);
+    if (verify_rc != 0) {
+        result.pip_error = "worker-env verification import failed (see worker_env_pip.log)";
+        return result;
+    }
+    {
+        nlohmann::json marker;
+        marker["ok"] = true;
+        marker["requirements"] = requirements.string();
+        std::ofstream marker_stream(worker_env_marker(py),
+                                    std::ios::binary | std::ios::trunc);
+        if (marker_stream.is_open()) {
+            marker_stream << marker.dump(2) << "\n";
+        }
+    }
+    result.pip_ok = true;
+    result.ok = true;
+    monitor_update([&](ModelPackProgress& progress) {
+        progress.phase = ModelPackPhase::Ready;
+        progress.percent = kPercentScale;
+        progress.current_file.clear();
+        progress.detail.clear();
+    });
+    return result;
+#else
+    result.error = "The CorridorKey 2.0 worker stack is Windows-only in v0.4.";
+    return result;
+#endif  // _WIN32
+}
+
+std::string worker_stack_status_label(const std::filesystem::path& worker_root,
+                                      const std::filesystem::path& python_dir) {
+    const bool models = ck2_models_present(worker_root);
+    const bool env = worker_env_ready(python_dir);
+    if (models && env) {
+        return "CorridorKey 2.0 runtime ready (" +
+               std::to_string(ck2_pack_files().size()) + " model files, 5.1 GB) — stored in " +
+               worker_root.string();
+    }
+    const auto progress = model_pack_progress();
+    if (progress.phase == ModelPackPhase::Downloading) {
+        if (!progress.detail.empty()) {
+            return "CorridorKey 2.0 runtime: " + progress.detail;
+        }
+        return "Downloading CorridorKey 2.0 models (" +
+               std::to_string(progress.completed_files) + "/" +
+               std::to_string(progress.total_files) + "): " + progress.current_file + " — " +
+               std::to_string(progress.percent) + "%";
+    }
+    if (progress.phase == ModelPackPhase::Failed) {
+        return "CorridorKey 2.0 runtime setup failed: " + progress.detail +
+               " — manual retry: " + progress.retry_url;
+    }
+    if (!models) {
+        return "CorridorKey 2.0 models not installed yet — download starting…";
+    }
+    return "CorridorKey 2.0 Python runtime not installed yet — setup starting…";
+}
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,readability-identifier-length,bugprone-easily-swappable-parameters,readability-function-cognitive-complexity,readability-function-size,cppcoreguidelines-avoid-magic-numbers,modernize-use-ranges,modernize-use-starts-ends-with,modernize-return-braced-init-list,performance-unnecessary-value-param,bugprone-unchecked-string-to-number-conversion,cppcoreguidelines-pro-type-cstyle-cast,modernize-use-using,modernize-use-integer-sign-comparison,cert-dcl50-cpp,cppcoreguidelines-pro-type-const-cast,readability-identifier-naming,modernize-raw-string-literal,readability-container-size-empty,bugprone-command-processor,readability-use-std-min-max,cppcoreguidelines-avoid-non-const-global-variables,bugprone-misplaced-widening-cast,readability-misleading-indentation,cert-env33-c,performance-unnecessary-copy-initialization,readability-named-parameter,readability-isolate-declaration,cert-err34-c,modernize-avoid-variadic-functions,cppcoreguidelines-pro-bounds-constant-array-index)
 
 }  // namespace corridorkey::app

@@ -737,18 +737,62 @@ function Initialize-CorridorKeyMsvcEnvironment {
         throw "Visual Studio is not installed. Cannot locate vswhere.exe at $vsWhere."
     }
 
-    $vsInstallDir = & $vsWhere -latest -property installationPath 2>$null
+    # vswhere's product filtering is unreliable for BuildTools SKUs (they are
+    # omitted from -all and multi-product -products lists on some installs), and
+    # a plain -latest query can return a SKU without the C++ toolset. Query
+    # vswhere, then scan well-known VS 2022 install roots as fallbacks, and pick
+    # the first candidate that actually ships vcvarsall.bat + an MSVC toolset.
+    $vsCandidates = @()
+    $vsWhereMatches = & $vsWhere -all -property installationPath 2>$null
+    if ($vsWhereMatches) { $vsCandidates += @($vsWhereMatches | ForEach-Object { $_.Trim() }) }
+    foreach ($sku in @("BuildTools", "Enterprise", "Professional", "Community")) {
+        foreach ($pf in @(${env:ProgramFiles}, ${env:ProgramFiles(x86)})) {
+            if ($pf) { $vsCandidates += (Join-Path $pf "Microsoft Visual Studio\2022\$sku") }
+        }
+    }
+    $vsInstallDir = $null
+    foreach ($candidate in $vsCandidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $candVcvars = Join-Path $candidate "VC\Auxiliary\Build\vcvarsall.bat"
+        if ((Test-Path -LiteralPath $candVcvars -PathType Leaf) -and
+            (Get-ChildItem -Path (Join-Path $candidate "VC\Tools\MSVC") -Filter "cl.exe" -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match "\\Hostx64\\x64\\" } | Select-Object -First 1)) {
+            $vsInstallDir = $candidate
+            break
+        }
+    }
     if ([string]::IsNullOrWhiteSpace($vsInstallDir)) {
         throw "No Visual Studio installation found by vswhere."
     }
 
-    $launchScript = Join-Path $vsInstallDir "Common7\Tools\Launch-VsDevShell.ps1"
-    if (-not (Test-Path $launchScript)) {
-        throw "Launch-VsDevShell.ps1 not found at: $launchScript"
+    $vcvarsPath = Join-Path $vsInstallDir "VC\Auxiliary\Build\vcvarsall.bat"
+    if (-not (Test-Path $vcvarsPath)) {
+        throw "vcvarsall.bat not found at $vcvarsPath"
     }
 
-    Write-Host "[msvc] Injecting MSVC environment from: $vsInstallDir" -ForegroundColor Yellow
-    & $launchScript -Arch amd64 -SkipAutomaticLocation | Out-Null
+    Write-Host "[msvc] Injecting MSVC environment via vcvarsall.bat from: $vsInstallDir" -ForegroundColor Yellow
+
+        # Capture environment from vcvarsall.bat amd64 && set
+        $envOutput = & cmd /c "`"$vcvarsPath`" amd64 && set"
+        if ($LASTEXITCODE -ne 0) {
+            throw "vcvarsall.bat failed with exit code $LASTEXITCODE"
+        }
+
+        foreach ($line in $envOutput) {
+            if ($line -match '^([^=]+)=(.*)$') {
+                $varName = $matches[1]
+                $varValue = $matches[2]
+                # Use Set-Item for Env: drive to handle names with special chars
+                Set-Item -Path "Env:$varName" -Value $varValue -Force
+            }
+        }
+
+        # Verify cl.exe is now resolvable
+    if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+        throw "Failed to initialize MSVC environment: cl.exe not found after vcvarsall"
+    }
+
+    Write-Host "[msvc] MSVC environment ready (cl.exe: $(Get-Command cl.exe).Source)" -ForegroundColor Green
 }
 
 function Get-CorridorKeyProjectVersion {

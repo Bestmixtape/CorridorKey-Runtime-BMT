@@ -138,6 +138,11 @@ TEST_CASE("doctor report exposes operational health sections", "[integration][do
 
 TEST_CASE("doctor report ignores macOS metadata sidecars in packaged models",
           "[integration][doctor]") {
+#if defined(_WIN32)
+    // Symlink creation on Windows requires admin privileges or Developer Mode.
+    // Skip this test on Windows to avoid "required privilege not held" failures.
+    SKIP("Symlink creation requires elevated privileges on Windows; test skipped.");
+#else
     auto source_models_dir = std::filesystem::path(PROJECT_ROOT) / "models";
     auto temp_dir = std::filesystem::temp_directory_path() / "corridorkey-doctor-sidecars";
     std::filesystem::remove_all(temp_dir);
@@ -169,6 +174,7 @@ TEST_CASE("doctor report ignores macOS metadata sidecars in packaged models",
     }
 
     std::filesystem::remove_all(temp_dir);
+#endif
 }
 
 TEST_CASE("doctor report filters models through suite inventory", "[integration][doctor]") {
