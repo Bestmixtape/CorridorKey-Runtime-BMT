@@ -273,6 +273,15 @@ std::filesystem::path resolve_host_plugin_runtime_server_binary(
         return std::filesystem::path(*override_path);
     }
 
+    // v0.4: Check for bundled Python worker via CORRIDORKEY_WORKER_PYTHON env var.
+    // If set, that Python executable will be launched with the worker script.
+    // The client only returns the python.exe path here; launch_server() handles
+    // the argument composition (--port, --parent-pid).
+    if (auto worker_python = common::environment_variable_copy("CORRIDORKEY_WORKER_PYTHON");
+        worker_python.has_value()) {
+        return std::filesystem::path(*worker_python);
+    }
+
 #ifdef _WIN32
     if (auto shared_root = common::host_plugin_shared_runtime_root(plugin_module_path);
         shared_root.has_value()) {
@@ -868,12 +877,44 @@ Result<void> HostPluginRuntimeClient::launch_server() {
     log_message("host_plugin_runtime_client",
                 "event=launch_server path=" + m_options.server_binary.string());
 
+    // v0.4: Detect Python worker launch via CORRIDORKEY_WORKER_PYTHON env var.
+    // When set, m_options.server_binary is the python.exe path. We compose the
+    // worker script path from CORRIDORKEY_WORKER_SCRIPT or default to
+    // <python_dir>/runtime/bmt_worker.py (production bundle layout).
+    const bool is_python_worker =
+        common::environment_variable_copy("CORRIDORKEY_WORKER_PYTHON").has_value();
+
+    std::filesystem::path worker_script_path;
+    if (is_python_worker) {
+        if (auto script_override = common::environment_variable_copy("CORRIDORKEY_WORKER_SCRIPT");
+            script_override.has_value()) {
+            worker_script_path = std::filesystem::path(*script_override);
+        } else {
+            // Default production layout: <plugin_bundle>/Contents/Win64/runtime/bmt_worker.py
+            // or <python_dir>/runtime/bmt_worker.py
+            worker_script_path = m_options.server_binary.parent_path() / "runtime" / "bmt_worker.py";
+        }
+        if (!std::filesystem::exists(worker_script_path)) {
+            return Unexpected<Error>(
+                Error{ErrorCode::IoError, "Python worker script not found: " + worker_script_path.string()});
+        }
+    }
+
 #ifdef _WIN32
-    std::wstring command_line = L"\"" + m_options.server_binary.wstring() +
-                                L"\" host-plugin-runtime-server --endpoint-port " +
-                                    std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
-                                    std::to_wstring(m_options.idle_timeout_ms) + L" --parent-pid " +
-                                    std::to_wstring(GetCurrentProcessId());
+    std::wstring command_line;
+    if (is_python_worker) {
+        // python.exe <worker_script> --port N --parent-pid PPID
+        command_line = L"\"" + m_options.server_binary.wstring() + L"\" \"" +
+                       worker_script_path.wstring() + L"\" --port " +
+                       std::to_wstring(m_options.endpoint.port) + L" --parent-pid " +
+                       std::to_wstring(GetCurrentProcessId());
+    } else {
+        command_line = L"\"" + m_options.server_binary.wstring() +
+                       L"\" host-plugin-runtime-server --endpoint-port " +
+                       std::to_wstring(m_options.endpoint.port) + L" --idle-timeout-ms " +
+                       std::to_wstring(m_options.idle_timeout_ms) + L" --parent-pid " +
+                       std::to_wstring(GetCurrentProcessId());
+    }
 
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
@@ -901,17 +942,28 @@ Result<void> HostPluginRuntimeClient::launch_server() {
     CloseHandle(process_info.hProcess);
 #else
     std::string port = std::to_string(m_options.endpoint.port);
-        std::string idle_timeout = std::to_string(m_options.idle_timeout_ms);
-        std::string parent_pid_str = std::to_string(static_cast<long>(::getpid()));
-        std::vector<char*> argv = {const_cast<char*>(m_options.server_binary.c_str()),
-                                   const_cast<char*>("host-plugin-runtime-server"),
-                                   const_cast<char*>("--endpoint-port"),
-                                   port.data(),
-                                   const_cast<char*>("--idle-timeout-ms"),
-                                   idle_timeout.data(),
-                                   const_cast<char*>("--parent-pid"),
-                                   parent_pid_str.data(),
-                                   nullptr};
+    std::string idle_timeout = std::to_string(m_options.idle_timeout_ms);
+    std::string parent_pid_str = std::to_string(static_cast<long>(::getpid()));
+    std::vector<char*> argv;
+    if (is_python_worker) {
+        argv = {const_cast<char*>(m_options.server_binary.c_str()),
+                const_cast<char*>(worker_script_path.c_str()),
+                const_cast<char*>("--port"),
+                const_cast<char*>(port.c_str()),
+                const_cast<char*>("--parent-pid"),
+                const_cast<char*>(parent_pid_str.c_str()),
+                nullptr};
+    } else {
+        argv = {const_cast<char*>(m_options.server_binary.c_str()),
+                const_cast<char*>("host-plugin-runtime-server"),
+                const_cast<char*>("--endpoint-port"),
+                port.data(),
+                const_cast<char*>("--idle-timeout-ms"),
+                idle_timeout.data(),
+                const_cast<char*>("--parent-pid"),
+                parent_pid_str.data(),
+                nullptr};
+    }
     pid_t pid = 0;
 #if defined(__APPLE__)
     // DaVinci Resolve invokes OFX render actions on UTILITY/BACKGROUND QoS

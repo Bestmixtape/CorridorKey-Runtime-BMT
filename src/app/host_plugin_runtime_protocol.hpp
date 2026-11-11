@@ -54,6 +54,11 @@ struct HostPluginRuntimePrepareSessionRequest {
     // for backward-compat with v0 clients; a missing identity matches the
     // legacy single-node behavior.
     std::string node_identity;
+    // v0.4: CorridorKey 2.0 settings passthrough. Arbitrary JSON object that
+    // is forwarded to the Python worker and mapped onto InferenceConfig.
+    // Keys: hint_quality, model_scale, carry_hint, despill_strength,
+    // auto_vram, hann_chunk, hann_stride, seed, fps, output_fg.
+    nlohmann::json ck2_settings = nlohmann::json::object();
 };
 
 struct HostPluginRuntimeSessionSnapshot {

@@ -1147,7 +1147,8 @@ std::filesystem::path resolve_models_root() {
 
 app::HostPluginRuntimePrepareSessionRequest build_prepare_request(
     const DeviceInfo& requested_device, const QualityArtifactSelection& selection,
-    int requested_quality_mode, const char* node_identity) {
+    int requested_quality_mode, const char* node_identity,
+    InstanceData* data = nullptr) {
     app::HostPluginRuntimePrepareSessionRequest request;
     request.client_instance_id = "quality_switch";
     request.model_path = selection.executable_model_path;
@@ -1159,6 +1160,96 @@ app::HostPluginRuntimePrepareSessionRequest build_prepare_request(
     request.effective_resolution = selection.effective_resolution;
     if (node_identity != nullptr) {
         request.node_identity = node_identity;
+    }
+    // v0.4: populate ck2_settings from OFX panel parameters if InstanceData is provided
+    if (data != nullptr && g_suites.parameter != nullptr) {
+        nlohmann::json ck2_settings = nlohmann::json::object();
+        
+        // Hint Mode: 0=None, 1=First-frame hint, 2=Full hint video
+        int hint_mode = kCk2HintModeNone;
+        if (data->ck2_hint_mode_param) {
+            g_suites.parameter->paramGetValue(data->ck2_hint_mode_param, &hint_mode);
+        }
+        ck2_settings["hint_mode"] = hint_mode;
+        
+        // Hint path (file path for hint video/image)
+        if (data->ck2_hint_path_param) {
+            char* hint_path = nullptr;
+            if (g_suites.parameter->paramGetValue(data->ck2_hint_path_param, &hint_path) == kOfxStatOK && hint_path) {
+                ck2_settings["hint_path"] = std::string(hint_path);
+            }
+        }
+        
+        // Hint Quality: 0.95 / 0.75 / 0.5
+        int hint_quality_idx = kCk2HintQualityDefaultIdx;
+        if (data->ck2_hint_quality_param) {
+            g_suites.parameter->paramGetValue(data->ck2_hint_quality_param, &hint_quality_idx);
+        }
+        const float hint_quality_values[] = {kCk2HintQualityHigh, kCk2HintQualityMedium, kCk2HintQualityLow};
+        ck2_settings["hint_quality"] = hint_quality_values[std::clamp(hint_quality_idx, 0, 2)];
+        
+        // Model Scale: 1.0 / 0.75 / 0.5
+        int model_scale_idx = kCk2ModelScaleDefaultIdx;
+        if (data->ck2_model_scale_param) {
+            g_suites.parameter->paramGetValue(data->ck2_model_scale_param, &model_scale_idx);
+        }
+        const float model_scale_values[] = {kCk2ModelScaleFull, kCk2ModelScaleMedium, kCk2ModelScaleHalf};
+        ck2_settings["model_scale"] = model_scale_values[std::clamp(model_scale_idx, 0, 2)];
+        
+        // Carry Hint: boolean default on
+        int carry_hint = 1;
+        if (data->ck2_carry_hint_param) {
+            g_suites.parameter->paramGetValue(data->ck2_carry_hint_param, &carry_hint);
+        }
+        ck2_settings["carry_hint"] = (carry_hint != 0);
+        
+        // Despill Strength: double 0-1 default 0.5
+        double despill_strength = 0.5;
+        if (data->ck2_despill_strength_param) {
+            g_suites.parameter->paramGetValue(data->ck2_despill_strength_param, &despill_strength);
+        }
+        ck2_settings["despill_strength"] = despill_strength;
+        
+        // Auto VRAM: boolean default on
+        int auto_vram = 1;
+        if (data->ck2_auto_vram_param) {
+            g_suites.parameter->paramGetValue(data->ck2_auto_vram_param, &auto_vram);
+        }
+        ck2_settings["auto_vram"] = (auto_vram != 0);
+        
+        // Hann Chunk/Stride: used when auto_vram is off
+        int hann_chunk = kCk2HannChunkDefault;
+        if (data->ck2_hann_chunk_param) {
+            g_suites.parameter->paramGetValue(data->ck2_hann_chunk_param, &hann_chunk);
+        }
+        ck2_settings["hann_chunk"] = hann_chunk;
+        
+        int hann_stride = kCk2HannStrideDefault;
+        if (data->ck2_hann_stride_param) {
+            g_suites.parameter->paramGetValue(data->ck2_hann_stride_param, &hann_stride);
+        }
+        ck2_settings["hann_stride"] = hann_stride;
+        
+        // Output Foreground: boolean default on
+        int output_fg = 1;
+        if (data->ck2_output_fg_param) {
+            g_suites.parameter->paramGetValue(data->ck2_output_fg_param, &output_fg);
+        }
+        ck2_settings["output_fg"] = (output_fg != 0);
+        
+        // Seed: int default -1 (random)
+        int seed = -1;
+        if (data->ck2_seed_param) {
+            g_suites.parameter->paramGetValue(data->ck2_seed_param, &seed);
+        }
+        ck2_settings["seed"] = seed;
+        
+        // fps: from host frame rate (will be filled in by caller)
+        // Note: fps is set in the render path where we have access to the host time
+        
+        if (!ck2_settings.empty()) {
+            request.ck2_settings = std::move(ck2_settings);
+        }
     }
     return request;
 }
@@ -1502,11 +1593,36 @@ OfxStatus create_instance(OfxImageEffectHandle instance, const char* plugin_iden
     g_suites.parameter->paramGetHandle(param_set, kParamOpenUpdatePage,
                                        &data->open_update_page_param, nullptr);
     g_suites.parameter->paramGetHandle(param_set, kParamBmtModelStatus,
-                                       &data->bmt_model_status_param, nullptr);
-    g_suites.parameter->paramGetHandle(param_set, kParamIncludePreReleases,
-                                       &data->include_pre_releases_param, nullptr);
+                                           &data->bmt_model_status_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamIncludePreReleases,
+                                           &data->include_pre_releases_param, nullptr);
+        // v0.4: CorridorKey 2.0 parameter handles
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2HintMode,
+                                           &data->ck2_hint_mode_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2HintPath,
+                                           &data->ck2_hint_path_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2HintQuality,
+                                           &data->ck2_hint_quality_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2ModelScale,
+                                           &data->ck2_model_scale_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2CarryHint,
+                                           &data->ck2_carry_hint_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2DespillStrength,
+                                           &data->ck2_despill_strength_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2AutoVram,
+                                           &data->ck2_auto_vram_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2HannChunk,
+                                           &data->ck2_hann_chunk_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2HannStride,
+                                           &data->ck2_hann_stride_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2OutputFg,
+                                           &data->ck2_output_fg_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2Seed,
+                                           &data->ck2_seed_param, nullptr);
+        g_suites.parameter->paramGetHandle(param_set, kParamCk2VersionLabel,
+                                           &data->ck2_version_label_param, nullptr);
 
-    kickoff_global_update_check();
+        kickoff_global_update_check();
 
     // sync_dependent_params and set_runtime_panel_status used to run here.
     // Both invoke the OFX parameter suite (set_param_enabled and
@@ -1865,8 +1981,8 @@ bool ensure_engine_for_quality(InstanceData* data, int quality_mode, int input_w
                                      "corridorkey_prepare_session");
         (void)progress_scope.update(kProgressInitialTick);
         auto prepare_result = data->runtime_client->prepare_session(
-            build_prepare_request(candidate_requested_device, selection, requested_quality_mode,
-                                  data->plugin_identifier),
+                    build_prepare_request(candidate_requested_device, selection, requested_quality_mode,
+                                          data->plugin_identifier, data),
             [&](const StageTiming& timing) {
                 log_stage_timing("ensure_engine_for_quality", kQualitySwitchPhase,
                                  candidate_requested_device, selection.executable_model_path,

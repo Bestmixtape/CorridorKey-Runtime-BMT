@@ -133,6 +133,42 @@ constexpr const char* kParamOpenLogFolder = "open_log_folder";
 constexpr const char* kRuntimeStatusStringMode = kOfxParamStringIsSingleLine;
 constexpr int kRuntimeStatusEnabled = 0;
 
+// v0.4: CorridorKey 2.0 parameter constants
+constexpr const char* kParamCk2Group = "ck2_group";
+constexpr const char* kParamCk2VersionLabel = "ck2_version_label";
+constexpr const char* kParamCk2HintMode = "ck2_hint_mode";
+constexpr const char* kParamCk2HintPath = "ck2_hint_path";
+constexpr const char* kParamCk2HintQuality = "ck2_hint_quality";
+constexpr const char* kParamCk2ModelScale = "ck2_model_scale";
+constexpr const char* kParamCk2CarryHint = "ck2_carry_hint";
+constexpr const char* kParamCk2DespillStrength = "ck2_despill_strength";
+constexpr const char* kParamCk2AutoVram = "ck2_auto_vram";
+constexpr const char* kParamCk2HannChunk = "ck2_hann_chunk";
+constexpr const char* kParamCk2HannStride = "ck2_hann_stride";
+constexpr const char* kParamCk2OutputFg = "ck2_output_fg";
+constexpr const char* kParamCk2Seed = "ck2_seed";
+
+// v0.4: Hint mode choices
+constexpr int kCk2HintModeNone = 0;
+constexpr int kCk2HintModeFirstFrame = 1;
+constexpr int kCk2HintModeFullVideo = 2;
+
+// v0.4: Hint quality choices (indices match choice param options)
+constexpr float kCk2HintQualityHigh = 0.95f;
+constexpr float kCk2HintQualityMedium = 0.75f;
+constexpr float kCk2HintQualityLow = 0.5f;
+constexpr int kCk2HintQualityDefaultIdx = 0;  // 0.95
+
+// v0.4: Model scale choices
+constexpr float kCk2ModelScaleFull = 1.0f;
+constexpr float kCk2ModelScaleMedium = 0.75f;
+constexpr float kCk2ModelScaleHalf = 0.5f;
+constexpr int kCk2ModelScaleDefaultIdx = 0;  // 1.0
+
+// v0.4: Hann defaults (used when auto_vram is off)
+constexpr int kCk2HannChunkDefault = 80;
+constexpr int kCk2HannStrideDefault = 40;
+
 struct OfxSuites {
     const OfxPropertySuiteV1* property = nullptr;
     const OfxImageEffectSuiteV1* image_effect = nullptr;
@@ -236,6 +272,19 @@ struct InstanceData {
     OfxParamHandle open_update_page_param = nullptr;
     OfxParamHandle bmt_model_status_param = nullptr;
     OfxParamHandle include_pre_releases_param = nullptr;
+    // v0.4: CorridorKey 2.0 parameter handles
+    OfxParamHandle ck2_hint_mode_param = nullptr;
+    OfxParamHandle ck2_hint_path_param = nullptr;
+    OfxParamHandle ck2_hint_quality_param = nullptr;
+    OfxParamHandle ck2_model_scale_param = nullptr;
+    OfxParamHandle ck2_carry_hint_param = nullptr;
+    OfxParamHandle ck2_despill_strength_param = nullptr;
+    OfxParamHandle ck2_auto_vram_param = nullptr;
+    OfxParamHandle ck2_hann_chunk_param = nullptr;
+    OfxParamHandle ck2_hann_stride_param = nullptr;
+    OfxParamHandle ck2_output_fg_param = nullptr;
+    OfxParamHandle ck2_seed_param = nullptr;
+    OfxParamHandle ck2_version_label_param = nullptr;
     // No in-class = nullptr initializer for the unique_ptr below: clang/libc++
     // instantiates ~unique_ptr<T>() at the NSDMI site, which then requires
     // complete HostPluginRuntimeClient and fails with "sizeof to an incomplete type"
@@ -291,28 +340,28 @@ struct InstanceData {
     bool runtime_panel_dirty = false;
 
     // BMT Build: one-shot matte export armed by the "Export Matte (PNG
-        // sequence)" push button. The button handler (main thread) only records
-        // the request; the actual alpha capture + PNG write happens inside the
-        // next host-driven Render action (see ofx_matte_export.cpp) because OFX
-        // clip/image getters are host-locked and must not be called from a
-        // plugin-spawned thread.
-        // State machine (all guarded by matte_export_mutex):
-        //   0 = idle
-        //   1 = legacy single-frame request queued (render will consume)
-        //   2 = completed (result in matte_status_line)
-        //   3 = streaming sequence armed (dialog accepted, dir/stem/frame-count set;
-        //       render writes frames until written == expected_frames, then -> 2)
-        std::atomic<int> matte_export_state{0};
-        // Guards matte_clip_name / matte_status_line / matte_export_dir / matte_export_stem /
-        // matte_expected_frames / matte_written_frames: written from the render
-        // thread, surfaced from the main-thread panel refresh.
-        std::mutex matte_export_mutex;
-        std::string matte_clip_name;         // sanitized source clip name (button press)
-        std::string matte_status_line;       // last export result for the panel row
-        std::filesystem::path matte_export_dir; // user-chosen directory for sequence export
-        std::string matte_export_stem;       // user-chosen base name (no extension)
-        long long matte_expected_frames = 0; // total frames in clip extent
-        std::set<long long> matte_written_frames; // clip-relative indices already written
+    // sequence)" push button. The button handler (main thread) only records
+    // the request; the actual alpha capture + PNG write happens inside the
+    // next host-driven Render action (see ofx_matte_export.cpp) because OFX
+    // clip/image getters are host-locked and must not be called from a
+    // plugin-spawned thread.
+    // State machine (all guarded by matte_export_mutex):
+    //   0 = idle
+    //   1 = legacy single-frame request queued (render will consume)
+    //   2 = completed (result in matte_status_line)
+    //   3 = streaming sequence armed (dialog accepted, dir/stem/frame-count set;
+    //       render writes frames until written == expected_frames, then -> 2)
+    std::atomic<int> matte_export_state{0};
+    // Guards matte_clip_name / matte_status_line / matte_export_dir / matte_export_stem /
+    // matte_expected_frames / matte_written_frames: written from the render
+    // thread, surfaced from the main-thread panel refresh.
+    std::mutex matte_export_mutex;
+    std::string matte_clip_name;         // sanitized source clip name (button press)
+    std::string matte_status_line;       // last export result for the panel row
+    std::filesystem::path matte_export_dir; // user-chosen directory for sequence export
+    std::string matte_export_stem;       // user-chosen base name (no extension)
+    long long matte_expected_frames = 0; // total frames in clip extent
+    std::set<long long> matte_written_frames; // clip-relative indices already written
 
     // Last (severity, body) pushed to the OFX message suite via
     // setPersistentMessage. setPersistentMessage replaces the alert bound to

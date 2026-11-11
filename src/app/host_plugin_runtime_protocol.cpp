@@ -498,16 +498,20 @@ Result<HostPluginRuntimeResponseEnvelope> host_plugin_runtime_response_from_json
 }
 
 nlohmann::json to_json(const HostPluginRuntimePrepareSessionRequest& request) {
-    return Json{{"client_instance_id", request.client_instance_id},
-                {"model_path", request.model_path.string()},
-                {"artifact_name", request.artifact_name},
-                {"requested_device", to_json(request.requested_device)},
-                {"engine_options", to_json(request.engine_options)},
-                {"requested_quality_mode", request.requested_quality_mode},
-                {"requested_resolution", request.requested_resolution},
-                {"effective_resolution", request.effective_resolution},
-                {"prepare_timeout_ms", request.prepare_timeout_ms},
-                {"node_identity", request.node_identity}};
+    Json json = {{"client_instance_id", request.client_instance_id},
+                 {"model_path", request.model_path.string()},
+                 {"artifact_name", request.artifact_name},
+                 {"requested_device", to_json(request.requested_device)},
+                 {"engine_options", to_json(request.engine_options)},
+                 {"requested_quality_mode", request.requested_quality_mode},
+                 {"requested_resolution", request.requested_resolution},
+                 {"effective_resolution", request.effective_resolution},
+                 {"prepare_timeout_ms", request.prepare_timeout_ms},
+                 {"node_identity", request.node_identity}};
+    if (!request.ck2_settings.is_null() && !request.ck2_settings.empty()) {
+        json["ck2_settings"] = request.ck2_settings;
+    }
+    return json;
 }
 
 Result<HostPluginRuntimePrepareSessionRequest> prepare_session_request_from_json(
@@ -545,6 +549,11 @@ Result<HostPluginRuntimePrepareSessionRequest> prepare_session_request_from_json
     if (json.contains("node_identity") && json.at("node_identity").is_string()) {
         node_identity = json.at("node_identity").get<std::string>();
     }
+    // v0.4: ck2_settings is optional; default to empty object.
+    nlohmann::json ck2_settings = nlohmann::json::object();
+    if (json.contains("ck2_settings") && json.at("ck2_settings").is_object()) {
+        ck2_settings = json.at("ck2_settings");
+    }
 
     HostPluginRuntimePrepareSessionRequest request;
     request.client_instance_id = *client_instance_id;
@@ -557,6 +566,7 @@ Result<HostPluginRuntimePrepareSessionRequest> prepare_session_request_from_json
     request.effective_resolution = *effective_resolution;
     request.prepare_timeout_ms = prepare_timeout_ms;
     request.node_identity = node_identity;
+    request.ck2_settings = std::move(ck2_settings);
     return request;
 }
 
