@@ -174,17 +174,17 @@ jobs:
           "$HOME/.dotnet/tools/wix.exe" build dist/bmt-package.wxs -ext WixToolset.UI.wixext -o "dist/CorridorKey2.0-BMT-Win64-v${BMT_VERSION}.msi"
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CorridorKey2.0-BMT-Win64-setup-exe
           path: dist/CorridorKey2.0-BMT-Win64-v${{ env.BMT_VERSION }}-Setup.exe
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CorridorKey2.0-BMT-Win64-msi
           path: dist/CorridorKey2.0-BMT-Win64-v${{ env.BMT_VERSION }}.msi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CorridorKey2.0-BMT-Win64-zip
           path: dist/CorridorKey2.0-BMT-Win64-v${{ env.BMT_VERSION }}.zip

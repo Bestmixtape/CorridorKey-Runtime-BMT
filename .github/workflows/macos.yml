@@ -337,12 +337,12 @@ jobs:
           codesign --force -s - "CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
           hdiutil verify "CorridorKey2.0-BMT-macOS-Silicon-v${BMT_VERSION}.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CorridorKey2.0-BMT-macOS-Silicon-zip
           path: CorridorKey2.0-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CorridorKey2.0-BMT-macOS-Silicon-dmg
           path: CorridorKey2.0-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.dmg
