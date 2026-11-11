@@ -61,6 +61,9 @@ if(APPLE)
     target_link_libraries(corridorkey_ofx PRIVATE "-framework Accelerate")
     # ofx_matte_save_panel.mm uses AppKit (NSSavePanel).
     target_link_libraries(corridorkey_ofx PRIVATE "-framework AppKit")
+    # ofx_matte_save_panel.mm references UTType (NSSavePanel.allowedContentTypes);
+    # AppKit alone does not provide it — the UT class lives in its own framework.
+    target_link_libraries(corridorkey_ofx PRIVATE "-framework UniformTypeIdentifiers")
 endif()
 if(WIN32)
     # ofx_matte_export.cpp uses IFileSaveDialog (CoCreateInstance, ole32)
