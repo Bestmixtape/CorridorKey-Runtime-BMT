@@ -26,7 +26,7 @@ jobs:
   macos-arm64:
     runs-on: macos-15  # macos-14 images retired by GitHub 2026-11-02 (actions/runner-images#15226); arm64 like its predecessor
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Vendor OpenFX SDK (not committed to this repo)
         run: git clone --depth=1 https://github.com/AcademySoftwareFoundation/OpenFX vendor/openfx

@@ -31,7 +31,7 @@ jobs:
     env:
       HF_REPO: alexandrealvaro/CorridorKey
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch current weights safetensors from HF (stays byte-identical)
         run: |
