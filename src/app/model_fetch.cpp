@@ -29,7 +29,10 @@
 #include <fcntl.h>    // O_WRONLY | O_CREAT | O_APPEND for the log fds
 #include <spawn.h>    // posix_spawn / posix_spawn_file_actions_*
 #include <sys/wait.h>  // waitpid / WIFEXITED / WEXITSTATUS
-#include <unistd.h>   // STDOUT_FILENO / STDERR_FILENO / environ
+#include <unistd.h>   // STDOUT_FILENO / STDERR_FILENO
+extern char **environ;  // CI-proven: macOS <unistd.h> does NOT declare this
+                        // for C++; mirror host_plugin_runtime_client.cpp's
+                        // explicit extern instead.
 #endif
 //
 // model_fetch.cpp tidy-suppression rationale.
