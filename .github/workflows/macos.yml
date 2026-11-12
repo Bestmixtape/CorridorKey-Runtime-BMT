@@ -1,22 +1,32 @@
 name: macOS BMT OFX (Apple Silicon)
 
-# BMT Build: builds + verifies the arm64 macOS OFX bundle. The vendored macOS
-# ONNX Runtime (official GH release, CoreML EP = Metal inference) is staged
-# into vendor/onnxruntime at job start because upstream only ships a stale
-# .dSYM there. The artifact is the same CorridorKey-BMT.ofx.bundle the
-# Windows build produces, Contents/MacOS layout.
+# BMT v0.4 Build: builds + verifies the arm64 macOS OFX bundle for the
+# CorridorKey 2.0 engine. The C++ core still honors the v0.3 ONNX Runtime
+# import contract (corridorkey_core links the vendored libonnxruntime dylib;
+# the .ofx itself never does), so the official osx-arm64 release is still
+# staged into vendor/onnxruntime at job start — the committed vendor tree
+# carries only a stale .dSYM and root CMakeLists.txt FATALs without a real
+# dylib. Inference for 2.0 runs in the out-of-process Python worker: the
+# bundle ships Contents/MacOS/runtime/{python,worker} staged by
+# src/plugins/ofx/CMakeLists.txt (python-build-standalone CPython, hash-
+# pinned). The heavy torch/MPS env + ck2 weights are fetched at INSTALL
+# time by corridorkey_model_fetch --worker — never in CI artifacts, same
+# policy as Windows. MLX (the v0.3 C++ inference backend) is gone.
 
 on:
   workflow_dispatch:
   push:
-    branches: [macos-bmt]
+    # macos-bmt kept for the v0.3 line; v0.4-dev is the branch this file
+    # lives on. GitHub evaluates push triggers from the workflow file on
+    # the pushed branch, so pushes to v0.4-dev need their own entry here.
+    branches: [macos-bmt, v0.4-dev]
 
 permissions:
   contents: read
 
 env:
   ONNXRUNTIME_MACOS_VERSION: "1.24.3"
-  BMT_VERSION: "0.3.2"
+  BMT_VERSION: "0.4.0"
 
 concurrency:
   group: macos-bmt-ci
@@ -110,43 +120,10 @@ jobs:
           fi
           echo "vcpkg root: $VCPKG_RESOLVED"
 
-      - name: Install MLX (Apple Silicon inference backend)
-        run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/mlxenv"
-          "$RUNNER_TEMP/mlxenv/bin/pip" install --upgrade pip > /dev/null
-          # Exact pin: the HF mlx/ bridges must have been exported with THIS
-          # mlx version (regenerated via the mlx-repack.yml workflow). MLX's
-          # export format has no real versioning; runtime/export generation
-          # drift throws "[import_function] Invalid string size"
-          # (see ml-explore/mlx#4637). 0.31.2 is gone from PyPI for cp313.
-          "$RUNNER_TEMP/mlxenv/bin/pip" install mlx==0.32.4
-          echo "MLX cmake-dir: $("$RUNNER_TEMP/mlxenv/bin/python" -m mlx --cmake-dir)"
-          SITE=$("$RUNNER_TEMP/mlxenv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-          MLX_LIB="$SITE/mlx/lib/libmlx.dylib"
-          if [ ! -f "$MLX_LIB" ]; then
-            MLX_LIB=$(find "$SITE" -name 'libmlx.dylib' | head -1)
-          fi
-          echo "MLX dylib: $MLX_LIB"
-          test -f "$MLX_LIB"
-          # Pin the mlx-metal backend to the macOS-14 build. The macos-15
-          # runner would otherwise pick the macosx_15_0 wheel whose LC_BUILD
-          # minos refuses to load on macOS 14; our deployment floor is 14.
-          METAL_VER=$("$RUNNER_TEMP/mlxenv/bin/python" -c "import importlib.metadata as m; print(m.version('mlx-metal'))")
-          METAL_URL=$(curl -s "https://pypi.org/pypi/mlx-metal/$METAL_VER/json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next(u['url'] for u in d['urls'] if 'macosx_14_0_arm64' in u['filename']))")
-          "$RUNNER_TEMP/mlxenv/bin/pip" install --force-reinstall --no-deps "$METAL_URL" > /dev/null
-          MLX_LIB=$(find "$("$RUNNER_TEMP/mlxenv/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")" -name 'libmlx.dylib' | head -1)
-          # Kernels are mlx.metallib colocated with libmlx (dladdr lookup);
-          # CMake stages it into the bundle beside libmlx.dylib.
-          METLLIB=$(dirname "$MLX_LIB")/mlx.metallib
-          test -f "$METLLIB" && echo "MLX metallib: $(du -h "$METLLIB" | cut -f1)"
-          otool -D "$MLX_LIB"
-          if [ "$(otool -D "$MLX_LIB" | sed -n 2p)" != "@rpath/libmlx.dylib" ]; then
-            install_name_tool -id @rpath/libmlx.dylib "$MLX_LIB"
-            codesign --force --sign - "$MLX_LIB"
-            echo "normalized libmlx.dylib install_name to @rpath"
-          fi
-
+      # v0.4: the "Install MLX" step is gone — torch/MPS in the out-of-process
+      # Python worker replaces the MLX C++ backend. root CMakeLists.txt keeps
+      # MLX optional (find_package(MLX CONFIG QUIET) + guarded staging), so
+      # configure succeeds without it and the bundle omits libmlx/metallib.
       - name: Configure
         run: |
           cmake -B build/macos -G Ninja \
@@ -155,7 +132,6 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=arm64-osx \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCORRIDORKEY_ENABLE_MLX=ON \
-            -DCORRIDORKEY_MLX_PYTHON="$RUNNER_TEMP/mlxenv/bin/python" \
             -DCORRIDORKEY_BUNDLE_MODELS=OFF \
             -DCORRIDORKEY_DISPLAY_VERSION_LABEL="${BMT_VERSION}"
 
@@ -171,6 +147,16 @@ jobs:
           test -f "$B/Contents/Info.plist"
           test -f "$B/Contents/MacOS/CorridorKey-BMT.ofx"
           test -f "$B/Contents/MacOS/corridorkey"
+          # v0.4: staged Python worker runtime (mirrors the Windows
+          # Contents/Win64/runtime layout): hash-pinned python-build-
+          # standalone CPython + worker sources. requirements-mac.txt is
+          # authored under scripts/packaging/worker-src/ (same dir the
+          # Windows bundle stages requirements-win.txt from).
+          test -x "$B/Contents/MacOS/runtime/python/bin/python3.12"
+          test -d "$B/Contents/MacOS/runtime/python/lib/python3.12"
+          test -f "$B/Contents/MacOS/runtime/worker/bmt_worker.py"
+          test -f "$B/Contents/MacOS/runtime/worker/requirements-mac.txt"
+          test -d "$B/Contents/MacOS/runtime/worker/corridorkey"
           # Diagnostics first: if any contract grep below dies, the actual
           # load commands are already in the log above it.
           echo "---- otool -L core ----"; otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib"
@@ -185,24 +171,20 @@ jobs:
           ORT_NAME="$(ls "$B/Contents/MacOS/"libonnxruntime*.dylib | head -1 | xargs basename)"
           test -n "$ORT_NAME"
           otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib" | grep -q "@rpath/$ORT_NAME"
-          # MLX backend must be compiled in and staged (root CMakeLists
-          # resolves the MLX package from the venv created in Install MLX).
-          test -f "$B/Contents/MacOS/libmlx.dylib"
-          # Metal kernels archive must ride beside libmlx in the bundle —
-          # libmlx resolves it via dladdr at its own dir; missing metallib
-          # only throws at first GPU op, so verify the file, not dyld.
-          test -f "$B/Contents/MacOS/mlx.metallib"
-          otool -L "$B/Contents/MacOS/libcorridorkey_core.dylib" | grep -q libmlx
+          # v0.4: no libmlx.dylib / mlx.metallib assertions — MLX was the
+          # v0.3 C++ backend and root CMakeLists resolves it with
+          # find_package(MLX CONFIG QUIET); 2.0 inference is the torch-MPS
+          # Python worker staged under runtime/.
           # The .ofx links only the static corridorkey_common (same ORT-free
           # import contract as Windows); the core dylib is loaded by the
           # bundle CLI, which doubles as the runtime server — prove the
           # dylib graph via the CLI, not the .ofx.
           otool -L "$B/Contents/MacOS/corridorkey" | grep -q libcorridorkey_core
-          # Staged binaries must not carry build-tree rpaths (venv MLX dir,
-          # runner workdir) — those pass on CI but do not exist on user
-          # machines. BUILD_WITH_INSTALL_RPATH pins them to @loader_path.
+          # Staged binaries must not carry build-tree rpaths — those pass on
+          # CI but do not exist on user machines. BUILD_WITH_INSTALL_RPATH
+          # pins them to @loader_path.
           for db in libcorridorkey_core.dylib corridorkey CorridorKey-BMT.ofx; do
-            if otool -l "$B/Contents/MacOS/$db" | grep -qE '_temp/mlxenv|/Users/runner/work'; then
+            if otool -l "$B/Contents/MacOS/$db" | grep -qE '/Users/runner/work'; then
               echo "LEAKED_BUILD_RPATH in $db"
               otool -l "$B/Contents/MacOS/$db" | grep -A2 LC_RPATH
               exit 1
@@ -220,70 +202,39 @@ jobs:
       - name: Ad-hoc sign bundle
         run: |
           set -euo pipefail
+          shopt -s nullglob
           B=build/macos/CorridorKey-BMT.ofx.bundle/Contents/MacOS
-          # mlx.metallib sits inside the flat-bundle dir the .ofx declares as its
-          # resource manifest, so codesign treats it as nested code — verify fails
-          # unless it carries its own (ad-hoc) signature. Sign it first.
-          for f in "$B"/*.metallib; do
-            codesign --force -s - "$f"
-          done
+          # v0.4: no *.metallib handling — MLX's mlx.metallib is gone with
+          # the v0.3 C++ backend; Metal compute now lives in the torch/MPS
+          # worker env installed at installer time.
           for f in "$B"/*.dylib "$B"/corridorkey "$B"/CorridorKey-BMT.ofx; do
             codesign --force -s - "$f"
+          done
+          # v0.4: the staged CPython binaries are Mach-O code the worker
+          # launcher execs on user machines — ad-hoc sign each so
+          # Gatekeeper has a seal to validate. Skip non-Mach-O entries
+          # (pip/idle shell shims).
+          for f in "$B"/runtime/python/bin/*; do
+            if file "$f" | grep -q 'Mach-O'; then
+              codesign --force -s - "$f"
+            fi
           done
           codesign --verify --verbose=2 "$B/CorridorKey-BMT.ofx"
           codesign --verify --verbose=2 "$B"/corridorkey
           # Do NOT verify "$B" itself: a bare Contents/MacOS dir with signed
           # nested code is 'bundle format unrecognized' to codesign. Verifying
-          # the .ofx covers its flat-bundle resource manifest (incl. the
-          # metallib); dylibs/metallib carry standalone seals, checked next.
-          for f in "$B"/*.dylib "$B"/*.metallib; do
+          # the .ofx covers its flat-bundle resource manifest; dylibs carry
+          # standalone seals, checked next.
+          for f in "$B"/*.dylib; do
             codesign --verify --verbose=2 "$f"
           done
 
-      - name: Smoke test (Metal MLX inference via bundle CLI)
-        run: |
-          set -uo pipefail
-          B="$PWD/build/macos/CorridorKey-BMT.ofx.bundle/Contents/MacOS"
-          "$B/corridorkey" doctor --json | tee doctor.json
-          grep -qi coreml doctor.json
-          grep -qi mlx doctor.json
-          "$B/corridorkey" fetch-models
-          "$B/corridorkey" matte-test --output /tmp/corridorkey-matte.png
-          python3 - <<'PY'
-          # Two synthetic 64x64 green-screen frames (stdlib-only PNG writer).
-          import zlib, struct, os
-          os.makedirs('/tmp/ck-frames', exist_ok=True)
-          def chunk(t, d):
-              return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
-          def write_png(path, w, h, px):
-              raw = b''.join(b'\x00' + b''.join(bytes(px(x, y)) for x in range(w)) for y in range(h))
-              data = (b'\x89PNG\r\n\x1a\n'
-                      + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
-                      + chunk(b'IDAT', zlib.compress(raw))
-                      + chunk(b'IEND', b''))
-              open(path, 'wb').write(data)
-          def px(x, y):
-              return (220, 120, 90) if 16 <= x < 48 and 16 <= y < 48 else (30, 200, 40)
-          for i in range(2):
-              write_png(f'/tmp/ck-frames/f{i:04d}.png', 64, 64, px)
-          PY
-          # The matte graph holds a single ~8 GiB intermediate buffer at any
-          # resolution; the 8 GB runner's Metal max buffer is 7.0 GiB, so MLX
-          # inference on CI is physically impossible (CorridorKey targets
-          # 16 GB+ Apple Silicon). Bridge import + graph load still run first,
-          # so a metal-max-buffer failure is tolerated as a runner limitation;
-          # any other failure (incl. import_function errors) stays fatal.
-          set +e
-          "$B/corridorkey" process -i /tmp/ck-frames -o /tmp/ck-keyed > /tmp/ck-proc.log 2>&1
-          rc=$?
-          set -e
-          cat /tmp/ck-proc.log
-          if [ $rc -ne 0 ]; then
-            grep -q 'maximum allowed buffer size' /tmp/ck-proc.log \
-              || exit 1
-            echo "::warning::MLX forward not runnable on 8GB CI runner (graph needs one 8GiB buffer; user Macs are 16GB+). Bridge import + load verified; inference verified at runtime on real Macs."
-          fi
-          ls -l /tmp/ck-keyed 2>/dev/null || true
+      # v0.4: the v0.3 "Smoke test (Metal MLX inference via bundle CLI)" step
+      # is gone — it ran doctor/matte-test against the C++ MLX backend and
+      # called fetch-models, pulling the multi-GB model set into CI. Model
+      # downloads are installer-time only (corridorkey_model_fetch --worker);
+      # the v0.4 equivalent coverage is the worker env smoke step at the end
+      # of this job.
 
       - name: Package zip artifact
         run: |
@@ -346,3 +297,35 @@ jobs:
         with:
           name: CorridorKey2.0-BMT-macOS-Silicon-dmg
           path: CorridorKey2.0-BMT-macOS-Silicon-v${{ env.BMT_VERSION }}.dmg
+
+      # v0.4 worker-env smoke: proves the staged CPython + requirements-mac.txt
+      # resolve torch/torchvision (arm64 MPS wheels) and that the vendored
+      # corridorkey package imports against the exact bundle layout the plugin
+      # worker launcher uses. Runs AFTER artifact upload so a PyPI hiccup
+      # never loses a good build, and against a throwaway COPY of the bundle
+      # so installed packages can never leak into the zip/DMG — the heavy
+      # torch env is installer-time only (corridorkey_model_fetch --worker)
+      # and the ~5 GB models are never downloaded in CI (same policy as
+      # Windows).
+      - name: Cache pip (worker-env smoke)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-macos-arm64-${{ hashFiles('scripts/packaging/worker-src/requirements-mac.txt') }}-v1
+          restore-keys: |
+            pip-macos-arm64-
+
+      - name: Worker env smoke (bundle CPython + torch MPS)
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          SMOKE=build/macos/worker-smoke
+          rm -rf "$SMOKE"; mkdir -p "$SMOKE"
+          cp -R build/macos/CorridorKey-BMT.ofx.bundle "$SMOKE/"
+          WB="$SMOKE/CorridorKey-BMT.ofx.bundle/Contents/MacOS/runtime/worker"
+          PY="$SMOKE/CorridorKey-BMT.ofx.bundle/Contents/MacOS/runtime/python/bin/python3.12"
+          test -x "$PY"
+          "$PY" --version
+          export PIP_CACHE_DIR="$HOME/.cache/pip"
+          "$PY" -m pip install -r "$WB/requirements-mac.txt"
+          "$PY" -c 'import sys; sys.path.insert(0, "'"$WB"'"); import torch, torchvision, corridorkey; print(torch.__version__, torch.backends.mps.is_available())'

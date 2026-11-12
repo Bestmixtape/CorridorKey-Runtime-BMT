@@ -329,6 +329,68 @@ elseif(APPLE)
     set(_ofx_bundle_dir "${CMAKE_BINARY_DIR}/CorridorKey-BMT.ofx.bundle")
     set(_ofx_bundle_contents_dir "${_ofx_bundle_dir}/Contents/MacOS")
 
+    # ------------------------------------------------------------------
+    # BMT v0.4: CorridorKey 2.0 Python worker stack, mirroring the
+    # Contents/Win64/runtime staging in the WIN32 branch above, into
+    # Contents/MacOS/runtime. CPython comes from python-build-standalone
+    # (astral-sh/python-build-standalone releases) instead of python.org's
+    # embed zip: the install_only archive for aarch64-apple-darwin ships
+    # bin/python3.12 + lib/python3.12 with pip preinstalled and no ._pth
+    # to fix, so `-m pip install -r worker/requirements-mac.txt` lands
+    # importably. Tag/asset/sha256 verified against the GitHub releases
+    # API (asset digest) and re-verified by file(DOWNLOAD EXPECTED_HASH);
+    # the archive's single top-level `python/` dir means we extract INTO
+    # runtime/ and get runtime/python/bin/python3.12 verbatim.
+    # Heavy material (torch MPS env, ck2 weights/VFMs) deliberately stays
+    # out of the bundle/installer: fetched at install time by
+    # corridorkey_model_fetch --worker into
+    # ~/Library/Application Support/CorridorKey2.0-BMT/worker.
+    # ------------------------------------------------------------------
+    set(_pbs_tag "20261110")
+    set(_pbs_asset "cpython-3.12.16+${_pbs_tag}-aarch64-apple-darwin-install_only.tar.gz")
+    set(_pbs_sha256 "e956e60bc9465d577ef8062059aa05cd3a2665b4b8678a2ed24e432368330b8f")
+    set(_pbs_url "https://github.com/astral-sh/python-build-standalone/releases/download/${_pbs_tag}/cpython-3.12.16%2B${_pbs_tag}-aarch64-apple-darwin-install_only.tar.gz")
+    set(_pbs_tar "${CMAKE_BINARY_DIR}/_pyruntime/${_pbs_asset}")
+    if(NOT EXISTS "${_pbs_tar}")
+        file(DOWNLOAD "${_pbs_url}" "${_pbs_tar}"
+            EXPECTED_HASH SHA256=${_pbs_sha256}
+            INACTIVITY_TIMEOUT 30 SHOW_PROGRESS
+            STATUS _pbs_status)
+        list(GET _pbs_status 0 _pbs_rc)
+        if(NOT _pbs_rc EQUAL 0)
+            list(GET _pbs_status 1 _pbs_err)
+            file(REMOVE "${_pbs_tar}")
+            message(WARNING
+                "BMT v0.4: CPython 3.12.16 python-build-standalone download failed "
+                "(${_pbs_err}). The bundle will ship WITHOUT the Python runtime "
+                "bootstrap and the install-time worker fetch will fail. Rebuild "
+                "with network access.")
+        endif()
+    endif()
+    set(_ofx_runtime_dir "${_ofx_bundle_dir}/Contents/MacOS/runtime")
+    if(EXISTS "${_pbs_tar}")
+        # Extract at configure time (cached by the hash above) so only file
+        # copies remain at post-build. install_only tarball layout:
+        #   python/bin/{python3.12,pip3.12,...}
+        #   python/lib/python3.12/... (pip preinstalled in site-packages)
+        file(MAKE_DIRECTORY "${_ofx_runtime_dir}")
+        file(ARCHIVE_EXTRACT INPUT "${_pbs_tar}"
+            DESTINATION "${_ofx_runtime_dir}")
+        set(_ofx_runtime_bootstrap_commands
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_runtime_dir}/worker"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/scripts/packaging/worker-src/bmt_worker.py"
+                "${_ofx_runtime_dir}/worker/bmt_worker.py"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/scripts/packaging/worker-src/requirements-mac.txt"
+                "${_ofx_runtime_dir}/worker/requirements-mac.txt"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/scripts/packaging/worker-src/corridorkey"
+                "${_ofx_runtime_dir}/worker/corridorkey")
+    else()
+        set(_ofx_runtime_bootstrap_commands COMMAND ${CMAKE_COMMAND} -E true)
+    endif()
+
     if(CORRIDORKEY_BUNDLE_MODELS)
         set(_corridorkey_bundle_models_command
             COMMAND ${CMAKE_COMMAND} -E make_directory "${_ofx_bundle_dir}/Contents/Resources/models"
@@ -358,6 +420,10 @@ elseif(APPLE)
         COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:corridorkey_cli>" "${_ofx_bundle_contents_dir}/"
         COMMAND ${CMAKE_COMMAND} -E copy "${ONNXRUNTIME_DYLIB}" "${_ofx_bundle_contents_dir}/"
         ${_corridorkey_bundle_models_command}
+        # v0.4: Python worker stack (python-build-standalone CPython
+        # extracted at configure time; worker sources copied here) —
+        # mirrors the Win64 runtime staging in the WIN32 branch.
+        ${_ofx_runtime_bootstrap_commands}
         COMMENT "Packaging macOS OFX bundle into ${_ofx_bundle_dir}..."
     )
 

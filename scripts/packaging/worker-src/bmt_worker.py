@@ -57,12 +57,90 @@ _OFFICIAL_DIR = Path(__file__).resolve().parent
 if ck_root := os.environ.get("CORRIDORKEY_CK_ROOT"):
     _OFFICIAL_DIR = Path(ck_root).resolve()
 else:
-    _local = Path(os.environ.get("LOCALAPPDATA", ".")).resolve() / "CorridorKey2.0-BMT" / "worker"
+    if sys.platform == "darwin":
+        # v0.4 mac port: relocated worker root (fetcher writes ~/Library/...).
+        _local = Path.home() / "Library" / "Application Support" / "CorridorKey2.0-BMT" / "worker"
+    else:
+        _local = Path(os.environ.get("LOCALAPPDATA", ".")).resolve() / "CorridorKey2.0-BMT" / "worker"
     if (_local / "weights").is_dir():
         _OFFICIAL_DIR = _local
 sys.path.insert(0, str(_OFFICIAL_DIR))
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+
+# ------------------------------------------------------------- device portability
+# v0.4 mac port: the official 2.0 engine is CUDA-shaped — runtime.py calls
+# module .cuda() (405/408/419/868/871), torch.autocast("cuda", bfloat16)
+# (337/386/515/531/886) and torch.cuda.{empty_cache,synchronize,mem_get_info,
+# memory_reserved} directly. Instead of patching vendored upstream code we
+# resolve cuda -> mps -> cpu and, ONLY when CUDA is absent, redirect those
+# exact entry points in-process before any corridorkey import. The Windows/
+# CUDA production path installs nothing and stays byte-identical.
+_DEVICE = "cuda"  # resolved by Worker.ensure_model() once torch is imported
+
+
+def _resolve_device(torch) -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _install_device_shims(torch, device: str) -> None:
+    """Make the vendored official engine run on mps/cpu. device != 'cuda'."""
+    # nn.Module.cuda() -> .to(<device>): runtime.py's foundations/stage moves.
+    torch.nn.Module.cuda = lambda self, _dev=None: self.to(device)
+    if device == "mps":
+        torch.cuda.synchronize = torch.mps.synchronize
+        torch.cuda.empty_cache = torch.mps.empty_cache
+        torch.cuda.memory_reserved = torch.mps.current_allocated_memory
+
+        def _mps_mem_get_info(_dev=None):
+            free = max(
+                0,
+                torch.mps.recommended_max_memory() - torch.mps.current_allocated_memory(),
+            )
+            return free, free
+
+        torch.cuda.mem_get_info = _mps_mem_get_info
+    else:  # cpu
+        torch.cuda.synchronize = lambda _dev=None: None
+        torch.cuda.empty_cache = lambda: None
+        torch.cuda.memory_reserved = lambda: 0
+
+        def _cpu_mem_get_info(_dev=None):
+            total = 16 * 2**30  # conservative 16 GiB floor
+            sysconf = getattr(os, "sysconf", None)  # POSIX only; absent on Windows
+            if sysconf is not None:
+                try:
+                    total = sysconf("SC_PAGE_SIZE") * sysconf("SC_PHYSICAL_MEMORY")
+                except (ValueError, OSError, KeyError):
+                    pass
+            return int(total * 0.75), total
+
+        torch.cuda.mem_get_info = _cpu_mem_get_info
+    # torch.autocast("cuda", ...) -> autocast(<device>, ...); MPS/CPU support
+    # bfloat16 autocast natively in torch 2.9.
+    _autocast_cls = torch.autocast
+
+    class _DeviceAutocast(_autocast_cls):
+        def __init__(self, device_type="cuda", *args, **kwargs):
+            if device_type == "cuda":
+                device_type = device
+            super().__init__(device_type, *args, **kwargs)
+
+    _DeviceAutocast.__name__ = "autocast"
+    torch.autocast = _DeviceAutocast
+
+
+def _gpu_mem_allocated_gib(torch) -> float:
+    if _DEVICE == "cuda":
+        return torch.cuda.memory_allocated() / 2**30
+    if _DEVICE == "mps":
+        return torch.mps.current_allocated_memory() / 2**30
+    return 0.0
 
 
 class ShmFrame:
@@ -140,13 +218,18 @@ class Worker:
             if self.model is not None:
                 return
             import torch
+            global _DEVICE
+            _DEVICE = _resolve_device(torch)
+            if _DEVICE != "cuda":
+                _install_device_shims(torch, _DEVICE)
             from corridorkey.runtime import RuntimePaths, load_model
             paths = RuntimePaths.from_package(str(_OFFICIAL_DIR))
             paths.validate()
             t0 = time.time()
-            self.model = load_model(paths, device="cuda")
+            self.model = load_model(paths, device=_DEVICE)
             print(f"[bmt-worker] model loaded in {time.time() - t0:.1f}s "
-                  f"({torch.cuda.memory_allocated() / 2**30:.2f} GiB)", flush=True)
+                  f"device={_DEVICE} "
+                  f"({_gpu_mem_allocated_gib(torch):.2f} GiB)", flush=True)
 
     # ------------------------------------------------------------- inference
     def process_clip(self, session: dict, settings: dict) -> float:

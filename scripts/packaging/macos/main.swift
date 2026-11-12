@@ -21,16 +21,17 @@ import Cocoa
 
 // MARK: - Fixed contract constants
 
-let kModelPackURL = "https://huggingface.co/alexandrealvaro/CorridorKey-2.0-BMT-Models"
+let kModelPackURL = "https://huggingface.co/nikopueringer/CorridorKey2.0"
 let kBundleName   = "CorridorKey-BMT.ofx.bundle"
 let kPluginDir    = "/Library/OFX/Plugins"
 let kFetchBinary  = "corridorkey_model_fetch"
-let kModelSubpath = "Library/Application Support/CorridorKey2.0-BMT/models"
-// v0.3: the installer fetches the COMPLETE pack. On macOS the CLI's "both"
-// union already swaps in the MLX set + hints and skips the fp16 ONNX mains
-// (platform rule inside model_pack_files_for_track), so one argument covers
-// every platform without special-casing here.
-let kFetchTrack   = "both"
+// v0.4: the fetcher stages the whole CorridorKey 2.0 stack (35 ck2 model/
+// weight files + worker sources; pip then fills the bundle's CPython) under
+// the user Library worker root — the same layout bmt_worker.py resolves
+// (~/Library/Application Support/CorridorKey2.0-BMT/worker).
+let kModelSubpath = "Library/Application Support/CorridorKey2.0-BMT/worker"
+// CPython the worker env installs into, shipped inside the OFX bundle.
+let kRuntimePython = kPluginDir + "/" + kBundleName + "/Contents/MacOS/runtime/python"
 
 // MARK: - Window controller: all UI plus the two install steps
 
@@ -304,7 +305,8 @@ final class InstallerWindowController: NSObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["--dest", dest, "--track", kFetchTrack]
+        process.arguments = ["--dest", dest, "--worker",
+                             "--python", kRuntimePython]
         let outPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = Pipe()   // helper's stderr goes to the NullDevice-ish Pipe and is dropped

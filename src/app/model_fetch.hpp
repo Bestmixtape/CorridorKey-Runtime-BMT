@@ -114,13 +114,15 @@ CORRIDORKEY_API std::string model_pack_status_label(const std::filesystem::path&
                                                     std::string_view track_name = {});
 
 // ---------------------------------------------------------------------------
-// BMT v0.4: CorridorKey 2.0 worker stack (Windows).
+// BMT v0.4: CorridorKey 2.0 worker stack (Windows; BMT v0.4 mac port adds
+// the macOS/POSIX path in ensure_worker_stack).
 //
 // The 2.0 engine runs as an out-of-process Python worker (bmt_worker.py) on a
 // self-contained embedded Python. Two pieces must exist before it can start:
 //   1. ck2-models: the pinned 2.0 asset tree (weights/ + vfms/) under a
-//      "worker root" (%LOCALAPPDATA%\CorridorKey2.0-BMT\worker, what
-//      CORRIDORKEY_CK_ROOT points at), downloaded from the official upstream
+//      "worker root" (%LOCALAPPDATA%\CorridorKey2.0-BMT\worker on Windows,
+//      what CORRIDORKEY_CK_ROOT points at; same root-relative layout on
+//      macOS), downloaded from the official upstream
 //      sources (HF nikopueringer/CorridorKey2.0, nvidia/C-RADIOv4, Ruicheng/
 //      moge-2, Google RVM bucket) — never mirrored on our own releases.
 //   2. worker-env: torch cu128 + deps + the corridorkey package pip-installed
