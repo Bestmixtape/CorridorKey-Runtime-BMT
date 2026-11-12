@@ -147,6 +147,14 @@ void pump_until_done(const std::atomic<bool>& fetch_done) {
     }
 }
 
+// BMT v0.4: the byte-note under the bar differs per fetch flavour
+// (v0.3 ONNX pack vs the v0.4 worker stack); default keeps v0.3 wording.
+std::wstring g_note = L"  -  approx 2.4 GB total, one-time download";
+
+void set_note(const std::wstring& note) {
+    g_note = note;
+}
+
 void update(const std::string& file, std::uint64_t done, std::uint64_t total, int percent) {
     if (g_bar == nullptr) {
         return;
@@ -155,20 +163,44 @@ void update(const std::string& file, std::uint64_t done, std::uint64_t total, in
     std::wstring label = L"Downloading " + wf + L"  (" + std::to_wstring(percent) + L"%)";
     std::wstring mb_done = std::to_wstring(done >> 20);
     std::wstring mb_total = std::to_wstring(total >> 20);
-    std::wstring bytes = L"Model pack: " + mb_done + L" MB of " + mb_total + L" MB  -  approx 2.4 GB total, one-time download";
+    std::wstring bytes = L"Downloaded: " + mb_done + L" MB of " + mb_total + L" MB" + g_note;
+    // Determinate mode: leave any marquee from a status() phase first.
+    SendMessageW(g_bar, PBM_SETMARQUEE, FALSE, 0);
     SendMessageW(g_bar, PBM_SETPOS, percent * 10, 0);
     SetWindowTextW(g_file_label, label.c_str());
     SetWindowTextW(g_bytes_label, bytes.c_str());
 }
 
-void finish(bool ok, const std::string& detail) {
+// BMT v0.4: phases without byte progress (Python runtime pip install, torch
+// verify) previously left the bar frozen at 0%, which read as a hung Setup.
+// status() shows the phase text and animates the bar as indeterminate.
+void status(const std::string& text) {
     if (g_file_label == nullptr) {
         return;
     }
-    std::string text = ok ? "Model pack ready - finishing installation"
-                          : "Download failed: " + detail;
     std::wstring wt(text.begin(), text.end());
     SetWindowTextW(g_file_label, wt.c_str());
+    if (g_bar != nullptr) {
+        SendMessageW(g_bar, PBM_SETMARQUEE, TRUE, 40);
+    }
+}
+
+void finish(bool ok, const std::string& detail,
+            const wchar_t* ok_text = L"Model pack ready - finishing installation") {
+    if (g_file_label == nullptr) {
+        return;
+    }
+    if (g_bar != nullptr) {
+        SendMessageW(g_bar, PBM_SETMARQUEE, FALSE, 0);
+    }
+    if (ok) {
+        SetWindowTextW(g_file_label, ok_text);
+    }
+    else {
+        std::string text = "Download failed: " + detail;
+        std::wstring wt(text.begin(), text.end());
+        SetWindowTextW(g_file_label, wt.c_str());
+    }
 }
 
 }  // namespace ui
@@ -265,15 +297,32 @@ int main(int argc, char** argv) {
         std::atomic<bool> worker_stop{false};
         std::thread worker_poller([&]() {
             int last_file = -1;
+            std::string last_detail;
             while (!worker_stop.load()) {
                 const ModelPackProgress p = model_pack_progress();
-                if (p.phase == ModelPackPhase::Downloading &&
-                    (p.completed_files != last_file || !p.detail.empty())) {
+                const bool changed =
+                    p.completed_files != last_file || p.detail != last_detail;
+                if (p.phase == ModelPackPhase::Downloading && changed) {
                     last_file = p.completed_files;
+                    last_detail = p.detail;
                     if (!p.detail.empty()) {
+#ifdef _WIN32
+                        if (show_ui) {
+                            ui::status(p.detail);
+                        }
+#endif
                         std::printf("PROGRESS %s\n", sanitize(p.detail).c_str());
                     }
                     else {
+#ifdef _WIN32
+                        if (show_ui) {
+                            const int overall = p.bytes_total
+                                ? static_cast<int>(p.bytes_done * 100 / p.bytes_total)
+                                : 0;
+                            ui::update(p.current_file, p.bytes_done, p.bytes_total,
+                                       overall);
+                        }
+#endif
                         std::printf("PROGRESS file %d/%d name=%s bytes %llu/%llu percent %d\n",
                                     p.completed_files + 1,
                                     p.total_files,
@@ -286,10 +335,41 @@ int main(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
         });
-        const auto worker_result = ensure_worker_stack(
-            std::filesystem::path(dest), std::filesystem::path(python_dir),
-            "installer-worker-stack-setup");
-        worker_stop.store(true);
+        WorkerStackEnsureResult worker_result;
+#ifdef _WIN32
+        if (show_ui) {
+            // BMT v0.4 regression: --install-ui was only wired to the v0.3
+            // track fetch, so the worker path ran with NO visible window
+            // (Setup's Exec is SW_HIDE) and the wizard looked frozen through
+            // the whole multi-GB download plus the silent torch pip step.
+            // Mirror the v0.3 shape: fetch on a worker thread, native
+            // progress window pumped on the main thread.
+            FreeConsole();
+            std::atomic<bool> fetch_done{false};
+            std::thread fetch([&]() {
+                worker_result = ensure_worker_stack(
+                    std::filesystem::path(dest), std::filesystem::path(python_dir),
+                    "installer-worker-stack-setup");
+                worker_stop.store(true);
+                ui::finish(worker_result.ok,
+                           worker_result.error.empty() ? worker_result.pip_error
+                                                       : worker_result.error,
+                           L"CorridorKey 2.0 stack ready - finishing installation");
+                fetch_done.store(true);
+            });
+            ui::set_note(L"  -  models ~4.8 GB + Python runtime ~3 GB, one-time download");
+            ui::show(L"CorridorKey 2.0 - Downloading models and Python runtime");
+            ui::pump_until_done(fetch_done);
+            fetch.join();
+        }
+        else
+#endif
+        {
+            worker_result = ensure_worker_stack(
+                std::filesystem::path(dest), std::filesystem::path(python_dir),
+                "stdout-worker-stack-setup");
+            worker_stop.store(true);
+        }
         worker_poller.join();
         if (worker_result.ok) {
             std::printf("DONE ok=1 downloaded=%d pip=%d\n",

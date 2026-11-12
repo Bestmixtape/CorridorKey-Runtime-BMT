@@ -46,6 +46,19 @@ Name: "{app}"
 [Run]
 Filename: "https://github.com/Bestmixtape/CorridorKey2.0-OFX-BMT"; Description: "Open the CorridorKey BMT page"; Flags: shellexec postinstall skipifsilent nowait
 
+[InstallDelete]
+; BMT v0.4 (Roger, 2026-11-11): every install is a CLEAN install. Wipe ALL
+; previous local state — worker stack, ~5 GB models, embedded Python env,
+; logs, and any legacy v0.3.x layouts — before anything is placed, so old
+; files can never linger in the CorridorKey2.0-BMT folder. The download
+; progress window is shown for the full fetch on every install.
+Type: filesandordirs; Name: "{localappdata}\CorridorKey2.0-BMT"
+
+[UninstallDelete]
+; BMT v0.4: uninstalling wipes ALL local state — the ~5 GB model/worker
+; stack, the embedded Python environment, and logs. No leftovers.
+Type: filesandordirs; Name: "{localappdata}\CorridorKey2.0-BMT"
+
 [Code]
 // BMT v0.3.1: if the plug-in is already installed, the wizard opens with an
 // Install-or-Uninstall choice, so the installer doubles as the uninstall

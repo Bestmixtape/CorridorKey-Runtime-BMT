@@ -19,6 +19,18 @@
 #include <system_error>
 #include <vector>
 
+#ifdef __APPLE__
+// BMT v0.4 mac port: POSIX process spawning for the worker-env pip steps
+// (run_python_step below). macOS <unistd.h> declares `environ` under
+// _DARWIN_C_SOURCE (default), matching host_plugin_runtime_client.cpp's
+// posix_spawn(..., environ) usage.
+#include <cerrno>
+#include <cstdlib>  // std::getenv for relocated_worker_python_dir
+#include <fcntl.h>    // O_WRONLY | O_CREAT | O_APPEND for the log fds
+#include <spawn.h>    // posix_spawn / posix_spawn_file_actions_*
+#include <sys/wait.h>  // waitpid / WIFEXITED / WEXITSTATUS
+#include <unistd.h>   // STDOUT_FILENO / STDERR_FILENO / environ
+#endif
 //
 // model_fetch.cpp tidy-suppression rationale.
 //
@@ -844,6 +856,81 @@ int run_python_step(const std::filesystem::path& python_exe,
 }
 #endif  // _WIN32
 
+#ifdef __APPLE__
+// BMT v0.4 mac port: marker lives in the POSIX multiarch site-packages of
+// the standalone CPython bundle (the 3.12 pin matches the python-builds.org
+// artifact staged by scripts/packaging; Windows' embedded layout has no
+// version component under Lib\site-packages).
+std::filesystem::path worker_env_marker(const std::filesystem::path& python_dir) {
+    return python_dir / "lib" / "python3.12" / "site-packages" / "bmt_worker_env.json";
+}
+
+// BMT v0.4 mac port: POSIX twin of run_python_step above — argv array goes
+// straight into posix_spawn (no CreateProcessW command-line quoting), and
+// stdout+stderr are O_APPEND-opened onto the same worker_env_pip.log via
+// spawn file actions, so the append-across-steps discipline (each truncation
+// would hide the real pip failure behind the last step's output) holds.
+// working_dir uses posix_spawn_file_actions_addchdir_np (macOS 10.15+;
+// deployment target is 14.0). Returns exit code, -1 on spawn failure.
+int run_python_step(const std::filesystem::path& python_exe,
+                    const std::vector<std::string>& args,
+                    const std::filesystem::path& log_path,
+                    std::string& spawn_error,
+                    const std::filesystem::path& working_dir = {}) {
+    std::vector<std::string> arg_storage;
+    arg_storage.reserve(args.size() + 2);
+    arg_storage.push_back(python_exe.string());
+    for (const auto& arg : args) {
+        arg_storage.push_back(arg);
+    }
+    std::vector<char*> argv;
+    argv.reserve(arg_storage.size() + 1);
+    for (auto& value : arg_storage) {
+        argv.push_back(value.data());
+    }
+    argv.push_back(nullptr);
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0) {
+        spawn_error = "Cannot init spawn file actions for " + log_path.string();
+        return -1;
+    }
+    bool actions_ok = true;
+    actions_ok = actions_ok && posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO,
+                                                                log_path.c_str(),
+                                                                O_WRONLY | O_CREAT | O_APPEND,
+                                                                0644) == 0;
+    actions_ok = actions_ok && posix_spawn_file_actions_addopen(&actions, STDERR_FILENO,
+                                                                log_path.c_str(),
+                                                                O_WRONLY | O_CREAT | O_APPEND,
+                                                                0644) == 0;
+    if (!working_dir.empty()) {
+        actions_ok = actions_ok &&
+                     posix_spawn_file_actions_addchdir_np(&actions, working_dir.c_str()) == 0;
+    }
+    int exit_code = -1;
+    if (!actions_ok) {
+        spawn_error = "Cannot configure spawn file actions for " + log_path.string();
+    } else {
+        pid_t pid = -1;
+        const int spawn_rc =
+            posix_spawn(&pid, python_exe.c_str(), &actions, nullptr, argv.data(), environ);
+        if (spawn_rc == 0) {
+            // status sentinel -1: WIFEXITED(-1) is false, so a waitpid error
+            // (non-EINTR) surfaces as -1 instead of a bogus exit 0.
+            int status = -1;
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+            }
+            exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        } else {
+            spawn_error = "posix_spawn failed spawning Python worker (see " +
+                          log_path.string() + ")";
+        }
+    }
+    posix_spawn_file_actions_destroy(&actions);
+    return exit_code;
+}
+#endif  // __APPLE__
 }  // namespace
 
 bool ck2_models_present(const std::filesystem::path& worker_root) {
@@ -863,6 +950,16 @@ std::filesystem::path relocated_worker_python_dir() {
         return {};
     }
     return std::filesystem::path(buf) / L"CorridorKey2.0-BMT" / L"python";
+#elif defined(__APPLE__)
+    // BMT v0.4 mac port: the .bundle under /Library/OFX-Plugins is
+    // root-owned, so the relocated interpreter lives under the user's
+    // Application Support (POSIX twin of %LOCALAPPDATA%\CorridorKey2.0-BMT).
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || home[0] == '\0') {
+        return {};
+    }
+    return std::filesystem::path(home) / "Library" / "Application Support" /
+           "CorridorKey2.0-BMT" / "python";
 #else
     return {};
 #endif
@@ -870,6 +967,14 @@ std::filesystem::path relocated_worker_python_dir() {
 
 bool worker_env_ready(const std::filesystem::path& python_dir) {
 #ifdef _WIN32
+    if (python_dir.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    return std::filesystem::exists(worker_env_marker(python_dir), ec) && !ec;
+#elif defined(__APPLE__)
+    // BMT v0.4 mac port: same marker check as Windows; the APPLE
+    // worker_env_marker above resolves the POSIX site-packages path.
     if (python_dir.empty()) {
         return false;
     }
@@ -983,6 +1088,22 @@ WorkerStackEnsureResult ensure_worker_stack(const std::filesystem::path& worker_
     if (!std::filesystem::exists(python_exe, ec) || ec) {
         result.pip_error = "Bundled python missing: " + python_exe.string();
         return result;
+    }
+    // BMT v0.4: a complete relocated %LOCALAPPDATA% env outranks a writable
+    // but empty bundle env — the OFX runtime client prefers the relocated
+    // dir, and re-pipping ~3 GB of torch into Program Files while the
+    // relocated env is already ready is pure waste (observed on a dev
+    // machine during an elevated Setup run: minutes of silent pip that
+    // looked exactly like a hung installer).
+    if (!result.pip_ok) {
+        const auto rel = relocated_worker_python_dir();
+        if (!rel.empty() && worker_env_ready(rel)) {
+            py = rel;
+            std::ofstream append_skip_log(worker_root / "worker_env_pip.log",
+                                          std::ios::binary | std::ios::app);
+            append_skip_log << "relocated worker env already ready; skipping pip setup\n";
+            result.pip_ok = true;
+        }
     }
     {
         // The bundle lives in admin-owned Program Files, where pip cannot
@@ -1138,6 +1259,240 @@ WorkerStackEnsureResult ensure_worker_stack(const std::filesystem::path& worker_
         python_exe,
         verify_code,
         log_path, spawn_error, worker_bundle);
+    if (verify_rc != 0) {
+        result.pip_error = "worker-env verification import failed (see worker_env_pip.log)";
+        return result;
+    }
+    {
+        nlohmann::json marker;
+        marker["ok"] = true;
+        marker["requirements"] = requirements.string();
+        std::ofstream marker_stream(worker_env_marker(py),
+                                    std::ios::binary | std::ios::trunc);
+        if (marker_stream.is_open()) {
+            marker_stream << marker.dump(2) << "\n";
+        }
+    }
+    result.pip_ok = true;
+    result.ok = true;
+    monitor_update([&](ModelPackProgress& progress) {
+        progress.phase = ModelPackPhase::Ready;
+        progress.percent = kPercentScale;
+        progress.current_file.clear();
+        progress.detail.clear();
+    });
+    return result;
+#elif defined(__APPLE__)
+    // BMT v0.4 mac port: same shape as the Windows path above — fetch the
+    // ck2 model pack, then pip-install the worker env into the bundled
+    // Python when the marker is absent. Deliberate differences: the
+    // standalone CPython bundle ships WITH pip and a regular sys.path (no
+    // embedded-Python ._pth quirks), so the get-pip and setuptools/wheel
+    // bootstrap steps are skipped; requirements-mac.txt replaces
+    // requirements-win.txt; torch resolves from the default PyPI index (the
+    // PyPI wheel is the MPS build — no download.pytorch.org cu128 index-url
+    // on macOS); and the verification gate checks torch.backends.mps.
+    std::error_code ec;
+    std::filesystem::create_directories(worker_root, ec);
+
+    const auto& selected = ck2_pack_files();
+    std::uint64_t present_bytes = 0;
+    for (const auto& file : selected) {
+        if (ck2_file_present_at(worker_root, file)) {
+            ++result.present_files;
+            present_bytes += file.size_bytes;
+        }
+    }
+    const bool models_complete = result.present_files == static_cast<int>(selected.size());
+
+    if (!models_complete) {
+        bool expected = false;
+        if (!fetch_busy().compare_exchange_strong(expected, true)) {
+            result.error = "A download is already running in this process.";
+            return result;
+        }
+        monitor_update([&](ModelPackProgress& progress) {
+            progress.phase = ModelPackPhase::Downloading;
+            progress.completed_files = result.present_files;
+            progress.total_files = static_cast<int>(selected.size());
+            progress.percent = 0;
+            progress.bytes_total = kCk2PackTotalBytes;
+            progress.bytes_done = present_bytes;
+            progress.detail.clear();
+            progress.retry_url.clear();
+        });
+        for (const auto& file : selected) {
+            if (ck2_file_present_at(worker_root, file)) {
+                continue;
+            }
+            std::string download_error;
+            if (ck2_download_one_file(worker_root, file, download_error)) {
+                ++result.downloaded_files;
+                monitor_update([&file](ModelPackProgress& progress) {
+                    ++progress.completed_files;
+                    progress.bytes_done += file.size_bytes;
+                    if (progress.bytes_done > progress.bytes_total) {
+                        progress.bytes_done = progress.bytes_total;
+                    }
+                });
+                continue;
+            }
+            ++result.failed_files;
+            if (result.error.empty()) {
+                result.error = std::move(download_error);
+                result.failed_url = file.url;
+            }
+        }
+        fetch_busy().store(false);
+        if (result.failed_files != 0 ||
+            !ck2_models_present(worker_root)) {
+            monitor_update([&](ModelPackProgress& progress) {
+                progress.phase = ModelPackPhase::Failed;
+                progress.detail = result.error;
+                progress.retry_url = result.failed_url;
+            });
+            return result;
+        }
+        // ck2_models_status.json: same shape discipline as the Windows path
+        // — counts captured before any move.
+        nlohmann::json status;
+        status["stage"] = stage;
+        status["models_dir"] = worker_root.string();
+        nlohmann::json present_models = nlohmann::json::array();
+        for (const auto& file : selected) {
+            present_models.push_back(file.relpath);
+        }
+        status["expected_count"] = static_cast<int>(selected.size());
+        status["present_count"] = static_cast<int>(present_models.size());
+        status["missing_count"] = 0;
+        status["expected_models"] = present_models;
+        status["present_models"] = std::move(present_models);
+        std::ofstream status_stream(worker_root / "ck2_models_status.json",
+                                    std::ios::binary | std::ios::trunc);
+        if (status_stream.is_open()) {
+            status_stream << status.dump(4) << "\n";
+        }
+    }
+
+    if (python_dir.empty()) {
+        result.ok = true;
+        return result;
+    }
+    if (worker_env_ready(python_dir)) {
+        result.pip_ok = true;
+        result.ok = true;
+        return result;
+    }
+
+    std::filesystem::path py = python_dir;
+    auto python_exe = py / "bin" / "python3";
+    if (!std::filesystem::exists(python_exe, ec) || ec) {
+        result.pip_error = "Bundled python missing: " + python_exe.string();
+        return result;
+    }
+    {
+        // BMT v0.4 mac port: the bundle lives under the root-owned
+        // /Library/OFX-Plugins tree, where pip cannot write without
+        // elevation. Probe the POSIX site-packages dir; if the interpreter
+        // is not writable, relocate it — plus the small worker-src payload
+        // — to ~/Library/Application Support/CorridorKey2.0-BMT/python,
+        // which keeps the runtime's <python_dir>/../worker/bmt_worker.py
+        // resolution intact and survives plugin re-installs.
+        std::error_code probe_ec;
+        const auto probe_dir = py / "lib" / "python3.12" / "site-packages";
+        std::filesystem::create_directories(probe_dir, probe_ec);
+        const auto probe_file = probe_dir / ".write-probe";
+        std::ofstream probe(probe_file, std::ios::binary);
+        if (!probe.is_open()) {
+            const auto target = relocated_worker_python_dir();
+            if (target.empty() || target == py) {
+                result.pip_error = "Bundled python not writable and no HOME target: " +
+                                   py.string();
+                return result;
+            }
+            std::filesystem::copy(py, target, std::filesystem::copy_options::recursive |
+                                                 std::filesystem::copy_options::skip_existing,
+                                  probe_ec);
+            if (probe_ec) {
+                result.pip_error = "Failed to relocate python env to " + target.string() +
+                                   ": " + probe_ec.message();
+                return result;
+            }
+            std::error_code worker_ec;
+            std::filesystem::copy(py.parent_path() / "worker",
+                                  target.parent_path() / "worker",
+                                  std::filesystem::copy_options::recursive |
+                                      std::filesystem::copy_options::skip_existing,
+                                  worker_ec);
+            py = target;
+            python_exe = py / "bin" / "python3";
+        } else {
+            probe.close();
+            std::filesystem::remove(probe_file, probe_ec);
+        }
+    }
+    if (worker_env_ready(py)) {
+        result.pip_ok = true;
+        result.ok = true;
+        return result;
+    }
+    const auto site_packages = py / "lib" / "python3.12" / "site-packages";
+    std::filesystem::create_directories(site_packages, ec);
+    const auto log_path = worker_root / "worker_env_pip.log";
+
+    monitor_update([&](ModelPackProgress& progress) {
+        progress.phase = ModelPackPhase::Downloading;
+        progress.current_file = "python-runtime-setup";
+        progress.detail = "installing Python runtime (torch MPS, one-time)";
+    });
+
+    // 1. No get-pip / setuptools bootstrap on macOS: the standalone CPython
+    //    bundle already ships a working pip, pip's venv build isolation
+    //    works normally without the embedded ._pth mechanism, and PyPI
+    //    wheels cover any source-build needs (requirements-mac.txt pins).
+
+    // 2. Install the pinned requirements + the corridorkey wheel from the
+    //    bundle through the default PyPI index — on macOS the PyPI torch
+    //    wheel is the MPS build, so no PyTorch cu128 index-url.
+    const auto worker_bundle = py.parent_path() / "worker";
+    const auto requirements = worker_bundle / "requirements-mac.txt";
+    const auto wheel = worker_bundle / "corridorkey_bmt.whl";
+    if (!std::filesystem::exists(requirements, ec) || ec) {
+        result.pip_error = "Bundled requirements missing: " + requirements.string();
+        return result;
+    }
+    std::vector<std::string> pip_args = {
+        "-s",
+        "-m", "pip", "install",
+        "--disable-pip-version-check", "--no-input",
+        "--no-warn-script-location", "--no-cache-dir",
+        "-r", requirements.string(),
+    };
+    if (std::filesystem::exists(wheel, ec) && !ec) {
+        pip_args.push_back(wheel.string());
+    }
+    std::string spawn_error;
+    const int pip_rc = run_python_step(python_exe, pip_args, log_path, spawn_error);
+    if (pip_rc != 0) {
+        result.pip_error = spawn_error.empty()
+                               ? "pip install failed with exit " + std::to_string(pip_rc) +
+                                     " (see worker_env_pip.log)"
+                               : std::move(spawn_error);
+        return result;
+    }
+
+    // 3. Verification gate: the exact import surface bmt_worker.py needs.
+    //    The corridorkey package is not a wheel — it lives in the bundle's
+    //    worker/ directory next to bmt_worker.py, exactly how the OFX host
+    //    puts it on sys.path, so verify with that directory prepended to
+    //    sys.path and as the CWD (mirrors the Windows gate).
+    //    torch.cuda.is_available() is not valid on macOS: probe MPS.
+    const std::string verify_code =
+        "import sys; sys.path.insert(0, r'" + worker_bundle.string() +
+        "'); import torch, torchvision, corridorkey; "
+        "print(torch.__version__, torch.backends.mps.is_available())";
+    const int verify_rc = run_python_step(python_exe, {"-s", "-c", verify_code},
+                                          log_path, spawn_error, worker_bundle);
     if (verify_rc != 0) {
         result.pip_error = "worker-env verification import failed (see worker_env_pip.log)";
         return result;
